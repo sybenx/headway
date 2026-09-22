@@ -22,8 +22,21 @@ face ranks its information by edge:
 | **03 Minute** | | The time sits flush to the outer edge, so the minute digits survive a cuff that hides the hour. |
 | **04 Hour & date** | wrist side | First to disappear. |
 
-Optional extras (heart rate, steps, weather) sit on the wrist side too, below
-the date — so a sleeve covers them before anything that matters.
+## Modules
+
+Up to three, in the band the design leaves open, drawn as a caption over a
+value — `BPM 72`, `STEPS 4.8K`, `BATT 64%`. Each slot takes heart rate, steps,
+battery, weather or nothing, and the captions can be swapped for icons.
+
+![modules with icons](screenshots/modules-icons.png)
+
+They sit on the wrist side, below the date, so a sleeve covers them before the
+countdown or the rail — the design's zone ranking is preserved.
+
+Weather always shows its sky condition as an icon rather than a caption: sun,
+partly cloudy, cloud, fog, rain, snow or thunder, drawn from the WMO code. A
+module whose sensor is unavailable — heart rate on a watch without the sensor,
+weather before the first fetch — simply does not appear.
 
 ## States
 
@@ -42,7 +55,9 @@ Reachable from the Pebble app.
 - **Accent** — any colour; drives the rail, the colon and the boarding block
 - **Wrist** — mirrors the whole layout so the sleeve comes from the other side
 - **Time format** — system, 12h or 24h
-- **Extras** — heart rate, steps, weather, in °C or °F
+- **Modules** — three slots: heart rate, steps, battery, weather or nothing
+- **Icons instead of captions** — weather always uses its condition icon
+- **Units** — °C or °F
 
 Weather comes from [Open-Meteo](https://open-meteo.com), which needs no API key
 and no account.
@@ -68,7 +83,11 @@ Numerals are [Barlow Condensed](https://github.com/jpt/barlow) SemiBold, bundled
 as a resource at 60px (144-wide) and 83px (emery) so they scale with the
 display — Pebble's system fonts are a fixed pixel size and its largest numeric
 face, `LECO_42`, renders at half the scale the design calls for. Labels use the
-system Gothic Bold the design specifies.
+system Gothic Bold the design specifies, and module captions use Gothic 09,
+where a hand-tuned bitmap face beats anything a TTF rasterises at 7px.
+
+Module icons are drawn as vectors rather than bundled bitmaps, so they invert
+with the theme and scale with the display at no resource cost.
 
 ## Licence
 

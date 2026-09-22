@@ -1,5 +1,8 @@
 [
-  { "type": "heading", "defaultValue": "Headway" },
+  {
+    "type": "heading",
+    "defaultValue": "Headway"
+  },
   {
     "type": "text",
     "defaultValue": "Read it from the cuff in. The rail and the countdown sit on the far edge; the hour, date and extras sit on the wrist side, where a sleeve covers them first."
@@ -7,7 +10,10 @@
   {
     "type": "section",
     "items": [
-      { "type": "heading", "defaultValue": "Schedule" },
+      {
+        "type": "heading",
+        "defaultValue": "Schedule"
+      },
       {
         "type": "select",
         "messageKey": "HEADWAY",
@@ -15,9 +21,18 @@
         "description": "Minutes between runs.",
         "defaultValue": "30",
         "options": [
-          { "label": "Every 30 minutes", "value": "30" },
-          { "label": "Every 20 minutes", "value": "20" },
-          { "label": "Every 15 minutes", "value": "15" }
+          {
+            "label": "Every 30 minutes",
+            "value": "30"
+          },
+          {
+            "label": "Every 20 minutes",
+            "value": "20"
+          },
+          {
+            "label": "Every 15 minutes",
+            "value": "15"
+          }
         ]
       },
       {
@@ -25,7 +40,10 @@
         "messageKey": "OFFSET",
         "label": "Departure offset",
         "description": "Minutes past the hour of the first run. Later runs repeat every headway.",
-        "defaultValue": 0, "min": 0, "max": 29, "step": 1
+        "defaultValue": 0,
+        "min": 0,
+        "max": 29,
+        "step": 1
       },
       {
         "type": "toggle",
@@ -39,16 +57,28 @@
   {
     "type": "section",
     "items": [
-      { "type": "heading", "defaultValue": "Appearance" },
+      {
+        "type": "heading",
+        "defaultValue": "Appearance"
+      },
       {
         "type": "select",
         "messageKey": "THEME",
         "label": "Theme",
         "defaultValue": "0",
         "options": [
-          { "label": "Dark", "value": "0" },
-          { "label": "Light", "value": "1" },
-          { "label": "Dark at night only", "value": "2" }
+          {
+            "label": "Dark",
+            "value": "0"
+          },
+          {
+            "label": "Light",
+            "value": "1"
+          },
+          {
+            "label": "Dark at night only",
+            "value": "2"
+          }
         ]
       },
       {
@@ -56,13 +86,19 @@
         "messageKey": "NIGHT_START",
         "label": "Night starts",
         "description": "Used only by \"Dark at night only\".",
-        "defaultValue": 19, "min": 0, "max": 23, "step": 1
+        "defaultValue": 19,
+        "min": 0,
+        "max": 23,
+        "step": 1
       },
       {
         "type": "slider",
         "messageKey": "NIGHT_END",
         "label": "Night ends",
-        "defaultValue": 7, "min": 0, "max": 23, "step": 1
+        "defaultValue": 7,
+        "min": 0,
+        "max": 23,
+        "step": 1
       },
       {
         "type": "color",
@@ -79,8 +115,14 @@
         "description": "Mirrors the layout so the sleeve comes from the other side.",
         "defaultValue": "left",
         "options": [
-          { "label": "Left", "value": "left" },
-          { "label": "Right", "value": "right" }
+          {
+            "label": "Left",
+            "value": "left"
+          },
+          {
+            "label": "Right",
+            "value": "right"
+          }
         ]
       },
       {
@@ -89,9 +131,18 @@
         "label": "Time format",
         "defaultValue": "0",
         "options": [
-          { "label": "Match the system", "value": "0" },
-          { "label": "12 hour", "value": "1" },
-          { "label": "24 hour", "value": "2" }
+          {
+            "label": "Match the system",
+            "value": "0"
+          },
+          {
+            "label": "12 hour",
+            "value": "1"
+          },
+          {
+            "label": "24 hour",
+            "value": "2"
+          }
         ]
       }
     ]
@@ -99,25 +150,125 @@
   {
     "type": "section",
     "items": [
-      { "type": "heading", "defaultValue": "Extras" },
+      {
+        "type": "heading",
+        "defaultValue": "Modules"
+      },
       {
         "type": "text",
-        "defaultValue": "These sit on the wrist side, so a sleeve covers them before the countdown or the rail."
+        "defaultValue": "Up to three, in the band the design leaves open. They sit on the wrist side, so a sleeve covers them before the countdown or the rail."
       },
-      { "type": "toggle", "messageKey": "SHOW_HR", "label": "Heart rate", "defaultValue": true },
-      { "type": "toggle", "messageKey": "SHOW_STEPS", "label": "Steps", "defaultValue": false },
-      { "type": "toggle", "messageKey": "SHOW_WEATHER", "label": "Weather", "defaultValue": true },
+      {
+        "type": "select",
+        "messageKey": "MOD1",
+        "label": "First",
+        "defaultValue": "1",
+        "options": [
+          {
+            "label": "Nothing",
+            "value": "0"
+          },
+          {
+            "label": "Heart rate",
+            "value": "1"
+          },
+          {
+            "label": "Steps",
+            "value": "2"
+          },
+          {
+            "label": "Battery",
+            "value": "3"
+          },
+          {
+            "label": "Weather",
+            "value": "4"
+          }
+        ]
+      },
+      {
+        "type": "select",
+        "messageKey": "MOD2",
+        "label": "Second",
+        "defaultValue": "2",
+        "options": [
+          {
+            "label": "Nothing",
+            "value": "0"
+          },
+          {
+            "label": "Heart rate",
+            "value": "1"
+          },
+          {
+            "label": "Steps",
+            "value": "2"
+          },
+          {
+            "label": "Battery",
+            "value": "3"
+          },
+          {
+            "label": "Weather",
+            "value": "4"
+          }
+        ]
+      },
+      {
+        "type": "select",
+        "messageKey": "MOD3",
+        "label": "Third",
+        "defaultValue": "3",
+        "options": [
+          {
+            "label": "Nothing",
+            "value": "0"
+          },
+          {
+            "label": "Heart rate",
+            "value": "1"
+          },
+          {
+            "label": "Steps",
+            "value": "2"
+          },
+          {
+            "label": "Battery",
+            "value": "3"
+          },
+          {
+            "label": "Weather",
+            "value": "4"
+          }
+        ]
+      },
+      {
+        "type": "toggle",
+        "messageKey": "MOD_ICONS",
+        "label": "Icons instead of captions",
+        "description": "Weather always shows its sky condition as an icon.",
+        "defaultValue": false
+      },
       {
         "type": "select",
         "messageKey": "UNITS",
         "label": "Units",
         "defaultValue": "metric",
         "options": [
-          { "label": "Celsius", "value": "metric" },
-          { "label": "Fahrenheit", "value": "imperial" }
+          {
+            "label": "Celsius",
+            "value": "metric"
+          },
+          {
+            "label": "Fahrenheit",
+            "value": "imperial"
+          }
         ]
       }
     ]
   },
-  { "type": "submit", "defaultValue": "Save" }
+  {
+    "type": "submit",
+    "defaultValue": "Save"
+  }
 ]

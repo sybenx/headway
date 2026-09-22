@@ -21,7 +21,9 @@ function send(temp, code) {
 
 function fetchWeather(force) {
   var s = settings();
-  if (!s.SHOW_WEATHER && s.SHOW_WEATHER !== undefined) return;
+  // Only fetch when a slot is actually showing weather.
+  var wanted = [s.MOD1, s.MOD2, s.MOD3].some(function (m) { return String(m) === '4'; });
+  if (!wanted && s.MOD1 !== undefined) return;
   var now = Date.now();
   if (!force && now - lastFetch < WEATHER_TTL) return;
 

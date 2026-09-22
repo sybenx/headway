@@ -22,6 +22,13 @@
 #define THEME_LIGHT 1
 #define THEME_AUTO  2   // dark through the night window
 
+#define MODULE_NONE    0
+#define MODULE_HR      1
+#define MODULE_STEPS   2
+#define MODULE_BATTERY 3
+#define MODULE_WEATHER 4
+#define MODULE_COUNT   3
+
 typedef struct {
   bool wrist_right;    // true: rail on the left, sleeve from the right
   uint8_t offset;      // departure, minutes past the hour (0..headway-1)
@@ -32,9 +39,8 @@ typedef struct {
   uint8_t night_start; // hour the night window opens
   uint8_t night_end;   // hour it closes
   uint32_t accent;     // 0xRRGGBB, snapped to the Pebble 64 at use
-  bool show_hr;
-  bool show_steps;
-  bool show_weather;
+  uint8_t mod[3];      // MODULE_*, left to right from the wrist edge
+  bool mod_icons;      // icons in place of the captions
   bool imperial;
 } Settings;
 
@@ -62,9 +68,10 @@ static void settings_defaults(void) {
   s_set.night_start = 19;
   s_set.night_end = 7;
   s_set.accent = 0x0055AA;   // Cobalt Blue, the design's one accent
-  s_set.show_hr = true;
-  s_set.show_steps = false;
-  s_set.show_weather = true;
+  s_set.mod[0] = MODULE_HR;
+  s_set.mod[1] = MODULE_STEPS;
+  s_set.mod[2] = MODULE_BATTERY;
+  s_set.mod_icons = false;
   s_set.imperial = false;
 }
 
@@ -78,6 +85,9 @@ static void settings_clamp(void) {
   if (s_set.night_start > 23) s_set.night_start = 19;
   if (s_set.night_end > 23) s_set.night_end = 7;
   s_set.accent &= 0xFFFFFF;
+  for (int i = 0; i < MODULE_COUNT; i++) {
+    if (s_set.mod[i] > MODULE_WEATHER) s_set.mod[i] = MODULE_NONE;
+  }
 }
 
 static void settings_load(void) {
@@ -119,6 +129,8 @@ static void weather_load(void) {
 #define LABEL_GAP     3
 #define DOW_GAP       3
 #define ROW_GAP       2
+#define MOD_GAP       9
+#define MOD_LABEL_GAP 1
 #define BLOCK_PAD_MIN 3
 #define TIME_MARGIN_TOP 3
 #define COLON_GAP     1
@@ -129,12 +141,14 @@ static void weather_load(void) {
 #ifdef PBL_PLATFORM_EMERY
   #define RES_TIME  RESOURCE_ID_FONT_TIME_83
   #define RES_COUNT RESOURCE_ID_FONT_COUNT_61
+  #define RES_MOD   RESOURCE_ID_FONT_MOD_21
 #else
   #define RES_TIME  RESOURCE_ID_FONT_TIME_60
   #define RES_COUNT RESOURCE_ID_FONT_COUNT_44
+  #define RES_MOD   RESOURCE_ID_FONT_MOD_15
 #endif
 
-static GFont s_f_time, s_f_count;
+static GFont s_f_time, s_f_count, s_f_mod;
 static Window *s_window;
 static Layer *s_face;
 static int s_last_remaining = -1;
@@ -172,6 +186,100 @@ static Metrics gothic_metrics(int boxh) {
 static void draw_at(GContext *ctx, const char *t, GFont f, int lx, int y, GSize sz) {
   graphics_draw_text(ctx, t, f, GRect(mapx(lx, sz.w), y, sz.w, sz.h),
                      GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+}
+
+
+// ---------------------------------------------------------------- icons
+// Drawn rather than bundled: they invert with the theme, scale with the
+// display, and cost no resource budget.
+
+static void icon_heart(GContext *ctx, GRect r) {
+  const int16_t w = r.size.w, h = r.size.h;
+  const int16_t rad = w / 4;
+  graphics_fill_circle(ctx, GPoint(r.origin.x + rad, r.origin.y + rad + 1), rad);
+  graphics_fill_circle(ctx, GPoint(r.origin.x + w - rad - 1, r.origin.y + rad + 1), rad);
+  // The point: a triangle tapering to the bottom centre.
+  for (int16_t i = 0; i < h - rad - 1; i++) {
+    const int16_t half = (w / 2) * (h - rad - 1 - i) / (h - rad - 1);
+    graphics_draw_line(ctx, GPoint(r.origin.x + w / 2 - half, r.origin.y + rad + 1 + i),
+                            GPoint(r.origin.x + w / 2 + half, r.origin.y + rad + 1 + i));
+  }
+}
+
+static void icon_steps(GContext *ctx, GRect r) {
+  const int16_t fw = r.size.w * 2 / 5, fh = r.size.h * 3 / 5;
+  graphics_fill_rect(ctx, GRect(r.origin.x, r.origin.y, fw, fh), fw / 2, GCornersAll);
+  graphics_fill_rect(ctx, GRect(r.origin.x + r.size.w - fw, r.origin.y + r.size.h - fh, fw, fh),
+                     fw / 2, GCornersAll);
+}
+
+static void icon_battery(GContext *ctx, GRect r, int pct) {
+  const int16_t h = r.size.h * 3 / 4;
+  const int16_t y = r.origin.y + (r.size.h - h) / 2;
+  const int16_t bw = r.size.w - 2;
+  graphics_draw_rect(ctx, GRect(r.origin.x, y, bw, h));
+  graphics_fill_rect(ctx, GRect(r.origin.x + bw, y + h / 3, 2, h / 3), 0, GCornerNone);
+  const int16_t inner = bw - 2;
+  const int16_t fill = (inner * pct + 50) / 100;
+  if (fill > 0) graphics_fill_rect(ctx, GRect(r.origin.x + 1, y + 1, fill, h - 2), 0, GCornerNone);
+}
+
+static void icon_cloud(GContext *ctx, GRect r, int16_t drop) {
+  const int16_t w = r.size.w, y = r.origin.y + drop;
+  const int16_t rad = w / 4;
+  graphics_fill_circle(ctx, GPoint(r.origin.x + rad + 1, y + rad + 1), rad);
+  graphics_fill_circle(ctx, GPoint(r.origin.x + w - rad - 1, y + rad + 1), rad - 1);
+  graphics_fill_circle(ctx, GPoint(r.origin.x + w / 2, y + rad), rad);
+  graphics_fill_rect(ctx, GRect(r.origin.x + 1, y + rad, w - 2, rad + 1), 0, GCornerNone);
+}
+
+static void icon_sun(GContext *ctx, GRect r, bool rays) {
+  const int16_t cx = r.origin.x + r.size.w / 2, cy = r.origin.y + r.size.h / 2;
+  const int16_t rad = r.size.w / 4;
+  graphics_fill_circle(ctx, GPoint(cx, cy), rad);
+  if (!rays) return;
+  const int16_t a = rad + 1, b = rad + r.size.w / 5;
+  graphics_draw_line(ctx, GPoint(cx, cy - a), GPoint(cx, cy - b));
+  graphics_draw_line(ctx, GPoint(cx, cy + a), GPoint(cx, cy + b));
+  graphics_draw_line(ctx, GPoint(cx - a, cy), GPoint(cx - b, cy));
+  graphics_draw_line(ctx, GPoint(cx + a, cy), GPoint(cx + b, cy));
+}
+
+// WMO codes, as Open-Meteo reports them.
+static void icon_weather(GContext *ctx, GRect r, int code) {
+  const int16_t w = r.size.w, h = r.size.h;
+  if (code == 0 || code == 1) { icon_sun(ctx, r, true); return; }
+  if (code == 2) {                                   // partly cloudy
+    GRect sr = GRect(r.origin.x, r.origin.y, w * 3 / 5, h * 3 / 5);
+    icon_sun(ctx, sr, true);
+    icon_cloud(ctx, GRect(r.origin.x + w / 4, r.origin.y, w * 3 / 4, h), h / 3);
+    return;
+  }
+  if (code == 45 || code == 48) {                    // fog
+    for (int16_t i = 0; i < 3; i++) {
+      const int16_t y = r.origin.y + h / 4 + i * (h / 4);
+      graphics_draw_line(ctx, GPoint(r.origin.x + (i & 1 ? 2 : 0), y),
+                              GPoint(r.origin.x + w - (i & 1 ? 0 : 2), y));
+    }
+    return;
+  }
+  icon_cloud(ctx, r, 0);
+  const int16_t base = r.origin.y + h * 3 / 5;
+  if (code == 95 || code == 96 || code == 99) {      // thunder
+    graphics_draw_line(ctx, GPoint(r.origin.x + w / 2 + 1, base),
+                            GPoint(r.origin.x + w / 2 - 2, base + h / 4));
+    graphics_draw_line(ctx, GPoint(r.origin.x + w / 2 - 2, base + h / 4),
+                            GPoint(r.origin.x + w / 2 + 2, base + h / 4));
+    graphics_draw_line(ctx, GPoint(r.origin.x + w / 2 + 2, base + h / 4),
+                            GPoint(r.origin.x + w / 2 - 1, base + h / 2));
+    return;
+  }
+  const bool snow = (code >= 71 && code <= 77) || code == 85 || code == 86;
+  for (int16_t i = 0; i < 3; i++) {
+    const int16_t x = r.origin.x + 2 + i * ((w - 4) / 2);
+    if (snow) graphics_fill_rect(ctx, GRect(x, base + h / 5, 2, 2), 0, GCornerNone);
+    else graphics_draw_line(ctx, GPoint(x, base), GPoint(x - 1, base + h / 3));
+  }
 }
 
 // --------------------------------------------------------------- schedule
@@ -293,67 +401,148 @@ static void draw_rail(GContext *ctx, const Schedule *sch, int16_t h) {
   draw_soft_tick(ctx, x0, x1, (h * 3) / 4);
 }
 
-// The design keeps the middle band empty on purpose. These extras are opt-in
-// and sit on the wrist side, so a sleeve covers them before anything that
-// matters — the zone ranking the design asks for is preserved.
-static int extras_collect(char out[3][12]) {
-  int n = 0;
+// A module is a caption over a value, as the design draws them — BPM 72,
+// STEPS 4.8K, BATT 64%. The caption can be swapped for an icon, and weather
+// always uses one, since the sky condition says more than the word "TEMP".
+typedef struct {
+  bool present;
+  char value[8];
+  const char *caption;
+  uint8_t kind;
+  int extra;            // battery percent / weather code
+} Module;
+
+static bool module_read(uint8_t kind, Module *m) {
+  m->kind = kind;
+  m->extra = 0;
+  switch (kind) {
+    case MODULE_HR: {
 #ifdef PBL_HEALTH
-  if (s_set.show_hr) {
-    const HealthServiceAccessibilityMask ok =
-        health_service_metric_accessible(HealthMetricHeartRateBPM,
-                                         time(NULL) - 60 * 60, time(NULL));
-    if (ok & HealthServiceAccessibilityMaskAvailable) {
-      const int bpm = (int)health_service_peek_current_value(HealthMetricHeartRateBPM);
-      if (bpm > 0) snprintf(out[n++], 12, "%d BPM", bpm);
-    }
-  }
-  if (s_set.show_steps) {
-    const HealthServiceAccessibilityMask ok =
-        health_service_metric_accessible(HealthMetricStepCount,
-                                         time_start_of_today(), time(NULL));
-    if (ok & HealthServiceAccessibilityMaskAvailable) {
-      const int steps = (int)health_service_sum_today(HealthMetricStepCount);
-      if (steps >= 10000) snprintf(out[n++], 12, "%d.%dK", steps / 1000, (steps % 1000) / 100);
-      else snprintf(out[n++], 12, "%d", steps);
-    }
-  }
+      const HealthServiceAccessibilityMask ok =
+          health_service_metric_accessible(HealthMetricHeartRateBPM,
+                                           time(NULL) - 60 * 60, time(NULL));
+      if (ok & HealthServiceAccessibilityMaskAvailable) {
+        const int bpm = (int)health_service_peek_current_value(HealthMetricHeartRateBPM);
+        if (bpm > 0) {
+          snprintf(m->value, sizeof(m->value), "%d", bpm);
+          m->caption = "BPM";
+          return true;
+        }
+      }
 #endif
-  if (s_set.show_weather && s_wx.valid) {
-    snprintf(out[n++], 12, "%d\u00B0%c", s_wx.temp, s_set.imperial ? 'F' : 'C');
+      return false;
+    }
+    case MODULE_STEPS: {
+#ifdef PBL_HEALTH
+      const HealthServiceAccessibilityMask ok =
+          health_service_metric_accessible(HealthMetricStepCount,
+                                           time_start_of_today(), time(NULL));
+      if (ok & HealthServiceAccessibilityMaskAvailable) {
+        const int st = (int)health_service_sum_today(HealthMetricStepCount);
+        if (st >= 1000) snprintf(m->value, sizeof(m->value), "%d.%dK", st / 1000, (st % 1000) / 100);
+        else snprintf(m->value, sizeof(m->value), "%d", st);
+        m->caption = "STEPS";
+        return true;
+      }
+#endif
+      return false;
+    }
+    case MODULE_BATTERY: {
+      const BatteryChargeState b = battery_state_service_peek();
+      snprintf(m->value, sizeof(m->value), "%d%%", b.charge_percent);
+      m->caption = "BATT";
+      m->extra = b.charge_percent;
+      return true;
+    }
+    case MODULE_WEATHER: {
+      if (!s_wx.valid) return false;
+      snprintf(m->value, sizeof(m->value), "%d\u00B0", s_wx.temp);
+      m->caption = s_set.imperial ? "\u00B0F" : "\u00B0C";
+      m->extra = s_wx.code;
+      return true;
+    }
+    default: return false;
   }
-  return n;
 }
 
-// Laid out on one line when it fits the band, stacked when it does not.
-static void draw_extras(GContext *ctx, GFont f, int c_start, int avail_w,
-                        int band_top, int band_bot) {
-  char items[3][12];
-  const int n = extras_collect(items);
+// Weather is icon-only by request; everything else follows the toggle.
+static bool module_uses_icon(const Module *m) {
+  return s_set.mod_icons || m->kind == MODULE_WEATHER;
+}
+
+static int module_icon_w(const Module *m, int icon) {
+  return m->kind == MODULE_BATTERY ? icon * 8 / 5 : icon;
+}
+
+static void module_draw_icon(GContext *ctx, const Module *m, GRect box) {
+  switch (m->kind) {
+    case MODULE_HR:      icon_heart(ctx, box); break;
+    case MODULE_STEPS:   icon_steps(ctx, box); break;
+    case MODULE_BATTERY: icon_battery(ctx, box, m->extra); break;
+    case MODULE_WEATHER: icon_weather(ctx, box, m->extra); break;
+    default: break;
+  }
+}
+
+// The row sits on the wrist side of the band the design leaves open, so a
+// sleeve covers it before the countdown or the rail.
+static void draw_modules(GContext *ctx, GFont f_val, GFont f_cap,
+                         int c_start, int avail_w, int band_top, int band_bot) {
+  Module mods[MODULE_COUNT];
+  int n = 0;
+  for (int i = 0; i < MODULE_COUNT; i++) {
+    if (s_set.mod[i] == MODULE_NONE) continue;
+    if (module_read(s_set.mod[i], &mods[n])) n++;
+  }
   if (n == 0) return;
 
-  char line[40];
-  line[0] = '\0';
-  for (int i = 0; i < n; i++) {
-    if (i) strncat(line, "  ", sizeof(line) - strlen(line) - 1);
-    strncat(line, items[i], sizeof(line) - strlen(line) - 1);
-  }
+  const GSize z_cap = measure("BPM", f_cap);
+  const GSize z_val = measure("88", f_val);
+  const Metrics m_val = barlow_metrics(z_val.h);
+  const int icon = m_val.cap;                 // an icon reads as one cap tall
+  // Captions are laid out from the measured box, not an estimated cap: the
+  // box bounds the glyph whatever the font's metrics turn out to be, so the
+  // value underneath can never ride up into it.
+  const int label_h = module_uses_icon(&mods[0]) ? icon : z_cap.h;
+  const int gap = sc(MOD_GAP);
 
-  graphics_context_set_text_color(ctx, s_dim);
-  const GSize one = measure(line, f);
-  const Metrics m = gothic_metrics(one.h);
-
-  if (one.w <= avail_w) {
-    const int y = (band_top + band_bot) / 2 - m.cap / 2;
-    draw_at(ctx, line, f, c_start, y - m.bearing, one);
-    return;
-  }
-  const int step = m.cap + sc(3);
-  int y = (band_top + band_bot) / 2 - (n * step - sc(3)) / 2;
+  // Widths first: the row is dropped whole if it cannot fit the band.
+  int widths[MODULE_COUNT], total = 0;
   for (int i = 0; i < n; i++) {
-    const GSize z = measure(items[i], f);
-    draw_at(ctx, items[i], f, c_start, y - m.bearing, z);
-    y += step;
+    const GSize zv = measure(mods[i].value, f_val);
+    int w = zv.w;
+    if (module_uses_icon(&mods[i])) {
+      const int iw = module_icon_w(&mods[i], icon);
+      if (iw > w) w = iw;
+    }
+    else { const GSize zc = measure(mods[i].caption, f_cap); if (zc.w > w) w = zc.w; }
+    widths[i] = w;
+    total += w + (i ? gap : 0);
+  }
+  while (n > 1 && total > avail_w) { n--; total -= widths[n] + gap; }
+  if (total > avail_w) return;
+
+  const int row_h = label_h + sc(MOD_LABEL_GAP) + m_val.cap;
+  int y = (band_top + band_bot) / 2 - row_h / 2;
+  if (y < band_top) y = band_top;
+
+  int x = c_start;
+  for (int i = 0; i < n; i++) {
+    if (module_uses_icon(&mods[i])) {
+      graphics_context_set_fill_color(ctx, s_dim);
+      graphics_context_set_stroke_color(ctx, s_dim);
+      const int iw = module_icon_w(&mods[i], icon);
+      module_draw_icon(ctx, &mods[i], GRect(mapx(x, iw), y, iw, icon));
+    } else {
+      graphics_context_set_text_color(ctx, s_dim);
+      const GSize zc = measure(mods[i].caption, f_cap);
+      draw_at(ctx, mods[i].caption, f_cap, x, y, zc);
+    }
+    graphics_context_set_text_color(ctx, s_ink);
+    const GSize zv = measure(mods[i].value, f_val);
+    draw_at(ctx, mods[i].value, f_val, x,
+            y + label_h + sc(MOD_LABEL_GAP) - m_val.bearing, zv);
+    x += widths[i] + gap;
   }
 }
 
@@ -386,8 +575,12 @@ static void face_update(Layer *layer, GContext *ctx) {
   // numerals, which do scale.
 #ifdef PBL_PLATFORM_EMERY
   GFont f_label = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+  GFont f_caption = fonts_get_system_font(FONT_KEY_GOTHIC_14);
 #else
   GFont f_label = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
+  // The module caption is 7px at design scale, where a hand-tuned bitmap
+  // face beats anything a TTF rasterises.
+  GFont f_caption = fonts_get_system_font(FONT_KEY_GOTHIC_09);
 #endif
 
   // ---- zone 03/04: the time, flush to the outer edge so the minute
@@ -513,7 +706,7 @@ static void face_update(Layer *layer, GContext *ctx) {
   graphics_context_set_text_color(ctx, s_dim);
   draw_at(ctx, date, f_label, c_start, date_y - m_date.bearing, z_date);
 
-  draw_extras(ctx, f_label, c_start, c_end - c_start, band_top, dow_y - sc(4));
+  draw_modules(ctx, s_f_mod, f_caption, c_start, c_end - c_start, band_top, dow_y - sc(4));
 
   // ---- boarding buzz, once on the transition into the solid block.
   if (s_set.buzz && sch.remaining == THRESHOLD && s_last_remaining != THRESHOLD) {
@@ -557,14 +750,17 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
   if ((tp = dict_find(iter, MESSAGE_KEY_ACCENT))) {
     s_set.accent = (uint32_t)tp->value->int32 & 0xFFFFFF;
   }
-  if ((tp = dict_find(iter, MESSAGE_KEY_SHOW_HR))) {
-    s_set.show_hr = tp->value->int32 != 0;
+  if ((tp = dict_find(iter, MESSAGE_KEY_MOD1))) {
+    s_set.mod[0] = (uint8_t)atoi(tp->value->cstring);
   }
-  if ((tp = dict_find(iter, MESSAGE_KEY_SHOW_STEPS))) {
-    s_set.show_steps = tp->value->int32 != 0;
+  if ((tp = dict_find(iter, MESSAGE_KEY_MOD2))) {
+    s_set.mod[1] = (uint8_t)atoi(tp->value->cstring);
   }
-  if ((tp = dict_find(iter, MESSAGE_KEY_SHOW_WEATHER))) {
-    s_set.show_weather = tp->value->int32 != 0;
+  if ((tp = dict_find(iter, MESSAGE_KEY_MOD3))) {
+    s_set.mod[2] = (uint8_t)atoi(tp->value->cstring);
+  }
+  if ((tp = dict_find(iter, MESSAGE_KEY_MOD_ICONS))) {
+    s_set.mod_icons = tp->value->int32 != 0;
   }
   if ((tp = dict_find(iter, MESSAGE_KEY_UNITS))) {
     s_set.imperial = (strcmp(tp->value->cstring, "imperial") == 0);
@@ -604,6 +800,7 @@ static void init(void) {
   weather_load();
   s_f_time = fonts_load_custom_font(resource_get_handle(RES_TIME));
   s_f_count = fonts_load_custom_font(resource_get_handle(RES_COUNT));
+  s_f_mod = fonts_load_custom_font(resource_get_handle(RES_MOD));
 
   s_window = window_create();
   window_set_window_handlers(s_window, (WindowHandlers){
@@ -621,6 +818,7 @@ static void init(void) {
 static void deinit(void) {
   fonts_unload_custom_font(s_f_time);
   fonts_unload_custom_font(s_f_count);
+  fonts_unload_custom_font(s_f_mod);
   tick_timer_service_unsubscribe();
   window_destroy(s_window);
 }
