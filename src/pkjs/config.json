@@ -1,0 +1,123 @@
+[
+  { "type": "heading", "defaultValue": "Headway" },
+  {
+    "type": "text",
+    "defaultValue": "Read it from the cuff in. The rail and the countdown sit on the far edge; the hour, date and extras sit on the wrist side, where a sleeve covers them first."
+  },
+  {
+    "type": "section",
+    "items": [
+      { "type": "heading", "defaultValue": "Schedule" },
+      {
+        "type": "select",
+        "messageKey": "HEADWAY",
+        "label": "Headway",
+        "description": "Minutes between runs.",
+        "defaultValue": "30",
+        "options": [
+          { "label": "Every 30 minutes", "value": "30" },
+          { "label": "Every 20 minutes", "value": "20" },
+          { "label": "Every 15 minutes", "value": "15" }
+        ]
+      },
+      {
+        "type": "slider",
+        "messageKey": "OFFSET",
+        "label": "Departure offset",
+        "description": "Minutes past the hour of the first run. Later runs repeat every headway.",
+        "defaultValue": 0, "min": 0, "max": 29, "step": 1
+      },
+      {
+        "type": "toggle",
+        "messageKey": "BUZZ",
+        "label": "Boarding buzz",
+        "description": "A single pulse when the block goes solid, five minutes out.",
+        "defaultValue": false
+      }
+    ]
+  },
+  {
+    "type": "section",
+    "items": [
+      { "type": "heading", "defaultValue": "Appearance" },
+      {
+        "type": "select",
+        "messageKey": "THEME",
+        "label": "Theme",
+        "defaultValue": "0",
+        "options": [
+          { "label": "Dark", "value": "0" },
+          { "label": "Light", "value": "1" },
+          { "label": "Dark at night only", "value": "2" }
+        ]
+      },
+      {
+        "type": "slider",
+        "messageKey": "NIGHT_START",
+        "label": "Night starts",
+        "description": "Used only by \"Dark at night only\".",
+        "defaultValue": 19, "min": 0, "max": 23, "step": 1
+      },
+      {
+        "type": "slider",
+        "messageKey": "NIGHT_END",
+        "label": "Night ends",
+        "defaultValue": 7, "min": 0, "max": 23, "step": 1
+      },
+      {
+        "type": "color",
+        "messageKey": "ACCENT",
+        "label": "Accent",
+        "description": "The rail, the colon and the boarding block. Ignored on black-and-white watches.",
+        "defaultValue": "0055aa",
+        "sunlight": true
+      },
+      {
+        "type": "select",
+        "messageKey": "WRIST",
+        "label": "Wrist",
+        "description": "Mirrors the layout so the sleeve comes from the other side.",
+        "defaultValue": "left",
+        "options": [
+          { "label": "Left", "value": "left" },
+          { "label": "Right", "value": "right" }
+        ]
+      },
+      {
+        "type": "select",
+        "messageKey": "H24",
+        "label": "Time format",
+        "defaultValue": "0",
+        "options": [
+          { "label": "Match the system", "value": "0" },
+          { "label": "12 hour", "value": "1" },
+          { "label": "24 hour", "value": "2" }
+        ]
+      }
+    ]
+  },
+  {
+    "type": "section",
+    "items": [
+      { "type": "heading", "defaultValue": "Extras" },
+      {
+        "type": "text",
+        "defaultValue": "These sit on the wrist side, so a sleeve covers them before the countdown or the rail."
+      },
+      { "type": "toggle", "messageKey": "SHOW_HR", "label": "Heart rate", "defaultValue": true },
+      { "type": "toggle", "messageKey": "SHOW_STEPS", "label": "Steps", "defaultValue": false },
+      { "type": "toggle", "messageKey": "SHOW_WEATHER", "label": "Weather", "defaultValue": true },
+      {
+        "type": "select",
+        "messageKey": "UNITS",
+        "label": "Units",
+        "defaultValue": "metric",
+        "options": [
+          { "label": "Celsius", "value": "metric" },
+          { "label": "Fahrenheit", "value": "imperial" }
+        ]
+      }
+    ]
+  },
+  { "type": "submit", "defaultValue": "Save" }
+]

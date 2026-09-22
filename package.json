@@ -1,0 +1,98 @@
+{
+  "name": "headway",
+  "author": "Aaron Herbst",
+  "version": "1.0.0",
+  "keywords": [
+    "pebble-app",
+    "watchface",
+    "transit",
+    "commute"
+  ],
+  "private": true,
+  "pebble": {
+    "displayName": "Headway",
+    "uuid": "ba5e9177-212c-46e7-a064-7f07fda1983e",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "targetPlatforms": [
+      "aplite",
+      "basalt",
+      "diorite",
+      "flint",
+      "emery"
+    ],
+    "watchapp": {
+      "watchface": true
+    },
+    "messageKeys": [
+      "WRIST",
+      "OFFSET",
+      "HEADWAY",
+      "BUZZ",
+      "H24",
+      "THEME",
+      "NIGHT_START",
+      "NIGHT_END",
+      "ACCENT",
+      "SHOW_HR",
+      "SHOW_STEPS",
+      "SHOW_WEATHER",
+      "UNITS",
+      "TEMP",
+      "WCODE",
+      "WOK"
+    ],
+    "resources": {
+      "media": [
+        {
+          "type": "font",
+          "name": "FONT_TIME_60",
+          "file": "fonts/BarlowCondensed-SemiBold.ttf",
+          "characterRegex": "[0-9:]",
+          "targetPlatforms": [
+            "aplite",
+            "basalt",
+            "diorite",
+            "flint"
+          ]
+        },
+        {
+          "type": "font",
+          "name": "FONT_COUNT_44",
+          "file": "fonts/BarlowCondensed-SemiBold.ttf",
+          "characterRegex": "[0-9]",
+          "targetPlatforms": [
+            "aplite",
+            "basalt",
+            "diorite",
+            "flint"
+          ]
+        },
+        {
+          "type": "font",
+          "name": "FONT_TIME_83",
+          "file": "fonts/BarlowCondensed-SemiBold.ttf",
+          "characterRegex": "[0-9:]",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "font",
+          "name": "FONT_COUNT_61",
+          "file": "fonts/BarlowCondensed-SemiBold.ttf",
+          "characterRegex": "[0-9]",
+          "targetPlatforms": [
+            "emery"
+          ]
+        }
+      ]
+    },
+    "capabilities": [
+      "configurable"
+    ]
+  },
+  "devDependencies": {
+    "pebble-clay": "^1.0.4"
+  }
+}
