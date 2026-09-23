@@ -78,6 +78,18 @@
         },
         {
           "type": "font",
+          "name": "FONT_MOD_15",
+          "file": "fonts/BarlowCondensed-SemiBold.ttf",
+          "characterRegex": "[0-9.%\u00b0K]",
+          "targetPlatforms": [
+            "aplite",
+            "basalt",
+            "diorite",
+            "flint"
+          ]
+        },
+        {
+          "type": "font",
           "name": "FONT_TIME_83",
           "file": "fonts/BarlowCondensed-SemiBold.ttf",
           "characterRegex": "[0-9:]",
@@ -90,6 +102,15 @@
           "name": "FONT_COUNT_61",
           "file": "fonts/BarlowCondensed-SemiBold.ttf",
           "characterRegex": "[0-9]",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "font",
+          "name": "FONT_MOD_21",
+          "file": "fonts/BarlowCondensed-SemiBold.ttf",
+          "characterRegex": "[0-9.%\u00b0K]",
           "targetPlatforms": [
             "emery"
           ]
