@@ -37,10 +37,11 @@ or nothing, and the captions can be swapped for icons.
 They sit on the wrist side, below the date, so a sleeve covers them before the
 countdown or the rail — the design's zone ranking is preserved.
 
-Weather always shows its sky condition as an icon rather than a caption: sun,
-partly cloudy, cloud, fog, rain, snow or thunder, drawn from the WMO code. A
-module whose sensor is unavailable — heart rate on a watch without the sensor,
-weather before the first fetch — simply does not appear.
+Weather captions with the sky itself — `CLOUDY 12°` — rather than the unit,
+and as an icon draws it: sun, partly cloudy, cloud, fog, rain, snow or
+thunder, from the WMO code. A module whose sensor is unavailable — heart rate
+on a watch without the sensor, weather before the first fetch — simply does
+not appear.
 
 ## States
 
@@ -60,7 +61,7 @@ Reachable from the Pebble app.
 - **Wrist** — mirrors the whole layout so the sleeve comes from the other side
 - **Time format** — system, 12h or 24h
 - **Modules** — three slots: heart rate, steps, battery, weather or nothing
-- **Icons instead of captions** — weather always uses its condition icon
+- **Icons instead of captions**
 - **Units** — °C or °F
 
 Weather comes from [Open-Meteo](https://open-meteo.com), which needs no API key

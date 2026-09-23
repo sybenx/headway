@@ -144,7 +144,8 @@ static void weather_load(void) {
 #define BLOCK_PAD_IN  6   // toward the wrist
 #define BLOCK_PAD_OUT 5   // toward the rail
 #define BLOCK_MIN_W  65
-#define LABEL_GAP     3
+#define LABEL_GAP     3   // number to its MIN, on the baseline
+#define BLOCK_ROW_GAP 6   // label cap bottom to number cap top
 #define DOW_GAP       3
 #define ROW_GAP       2
 #define MOD_GAP       9
@@ -212,32 +213,21 @@ static void draw_at(GContext *ctx, const char *t, GFont f, int lx, int y, GSize 
 // Drawn rather than bundled: they invert with the theme, scale with the
 // display, and cost no resource budget.
 
-static void icon_heart(GContext *ctx, GRect r) {
-  const int16_t w = r.size.w, h = r.size.h;
-  const int16_t rad = w / 4;
-  graphics_fill_circle(ctx, GPoint(r.origin.x + rad, r.origin.y + rad + 1), rad);
-  graphics_fill_circle(ctx, GPoint(r.origin.x + w - rad - 1, r.origin.y + rad + 1), rad);
-  // The point: a triangle tapering to the bottom centre.
-  for (int16_t i = 0; i < h - rad - 1; i++) {
-    const int16_t half = (w / 2) * (h - rad - 1 - i) / (h - rad - 1);
-    graphics_draw_line(ctx, GPoint(r.origin.x + w / 2 - half, r.origin.y + rad + 1 + i),
-                            GPoint(r.origin.x + w / 2 + half, r.origin.y + rad + 1 + i));
-  }
-}
-
-// Paint a hand-placed pattern into a box, nearest-neighbour. Composed
-// circles and rounded rects cannot hold a recognisable shape at ten pixels;
-// placing the pixels by hand can, and the pattern still scales up for emery
-// and inverts with the theme.
+// Every icon is a hand-placed ten-by-ten pattern, painted nearest-neighbour
+// into its box. Composed circles and rounded rects cannot hold a recognisable
+// shape at ten pixels; placing the pixels by hand can, and a pattern still
+// scales up for emery and inverts with the theme.
 static void draw_bits(GContext *ctx, GRect r, const char *const *rows,
                       int rw, int rh) {
   for (int y = 0; y < rh; y++) {
     for (int x = 0; x < rw; x++) {
       if (rows[y][x] != '#') continue;
-      const int16_t x0 = r.origin.x + x * r.size.w / rw;
-      const int16_t x1 = r.origin.x + (x + 1) * r.size.w / rw;
-      const int16_t y0 = r.origin.y + y * r.size.h / rh;
-      const int16_t y1 = r.origin.y + (y + 1) * r.size.h / rh;
+      // Rounded, not floored: rounding keeps the stretched columns
+      // symmetric, so a symmetric glyph stays symmetric at emery's size.
+      const int16_t x0 = r.origin.x + (2 * x * r.size.w + rw) / (2 * rw);
+      const int16_t x1 = r.origin.x + (2 * (x + 1) * r.size.w + rw) / (2 * rw);
+      const int16_t y0 = r.origin.y + (2 * y * r.size.h + rh) / (2 * rh);
+      const int16_t y1 = r.origin.y + (2 * (y + 1) * r.size.h + rh) / (2 * rh);
       graphics_fill_rect(ctx, GRect(x0, y0, x1 > x0 ? x1 - x0 : 1,
                                     y1 > y0 ? y1 - y0 : 1), 0, GCornerNone);
     }
@@ -279,32 +269,21 @@ static void icon_battery(GContext *ctx, GRect r, int pct) {
   if (fill > 0) graphics_fill_rect(ctx, GRect(r.origin.x + 2, y + 2, fill, h - 4), 0, GCornerNone);
 }
 
-// A cloud is a raised centre lump between two lower shoulders, on a flat
-// base. Equal lumps at equal heights just merge into a dome, which reads as
-// a hill rather than a cloud.
-static void cloud_body(GContext *ctx, GRect r) {
-  const int16_t w = r.size.w, h = r.size.h;
-  const int16_t base = r.origin.y + h;
-  const int16_t big = h / 2 > 2 ? h / 2 : 2;
-  const int16_t small = h / 3 > 1 ? h / 3 : 1;
-  graphics_fill_circle(ctx, GPoint(r.origin.x + small, base - small), small);
-  graphics_fill_circle(ctx, GPoint(r.origin.x + w - small - 1, base - small), small);
-  graphics_fill_circle(ctx, GPoint(r.origin.x + w / 2, base - big - 1), big);
-  graphics_fill_rect(ctx, GRect(r.origin.x, base - small - 1, w, small + 1), 0, GCornerNone);
-}
+static const char *const HEART[10] = {
+  "..........",
+  ".##....##.",
+  "####..####",
+  "##########",
+  "##########",
+  ".########.",
+  "..######..",
+  "...####...",
+  "....##....",
+  "..........",
+};
 
-static void icon_sun(GContext *ctx, GRect r, bool rays) {
-  const int16_t cx = r.origin.x + r.size.w / 2, cy = r.origin.y + r.size.h / 2;
-  // At module size the rays have nowhere to go; a solid disc is unmistakable
-  // next to the cloud shapes, so they only appear once there is room.
-  const int16_t rad = r.size.w / 3;
-  graphics_fill_circle(ctx, GPoint(cx, cy), rad);
-  if (!rays || r.size.w < 16) return;
-  const int16_t a = rad + 2, b2 = rad + r.size.w / 5 + 1;
-  graphics_draw_line(ctx, GPoint(cx, cy - a), GPoint(cx, cy - b2));
-  graphics_draw_line(ctx, GPoint(cx, cy + a), GPoint(cx, cy + b2));
-  graphics_draw_line(ctx, GPoint(cx - a, cy), GPoint(cx - b2, cy));
-  graphics_draw_line(ctx, GPoint(cx + a, cy), GPoint(cx + b2, cy));
+static void icon_heart(GContext *ctx, GRect r) {
+  draw_bits(ctx, r, HEART, 10, 10);
 }
 
 #define WX_SUN    0
@@ -328,56 +307,105 @@ static int wx_kind(int code) {
   return WX_CLOUD;
 }
 
-static void icon_weather(GContext *ctx, GRect r, int code, GColor ink, GColor ground) {
-  const int16_t w = r.size.w, h = r.size.h;
-  const int kind = wx_kind(code);
+// The sky, one pattern per kind. Every cloud is the same silhouette — a
+// raised lump beside a lower shoulder on a flat base — so the family reads
+// as one; what falls from it is what changes.
+static const char *const SKY[7][10] = {
+  { // sun
+    "....##....",
+    ".#......#.",
+    "...####...",
+    "..######..",
+    "#.######.#",
+    "#.######.#",
+    "..######..",
+    "...####...",
+    ".#......#.",
+    "....##....",
+  },
+  { // partly: a small sun high on the wrist side, the cloud in front
+    "#..#..#...",
+    "..........",
+    "..###.....",
+    "#.###.#...",
+    "..###.....",
+    ".....###..",
+    "#...#####.",
+    "...#######",
+    "...#######",
+    "....#####.",
+  },
+  { // cloud
+    "..........",
+    "..........",
+    ".....###..",
+    "....#####.",
+    ".##.#####.",
+    ".#########",
+    "##########",
+    "##########",
+    ".########.",
+    "..........",
+  },
+  { // fog
+    "..........",
+    "..........",
+    "..########",
+    "..........",
+    "..........",
+    "########..",
+    "..........",
+    "..........",
+    "..########",
+    "..........",
+  },
+  { // rain: slanted streaks
+    ".....###..",
+    "....#####.",
+    ".##.#####.",
+    ".#########",
+    "##########",
+    ".########.",
+    "..........",
+    "..#..#..#.",
+    ".#..#..#..",
+    "..........",
+  },
+  { // snow: a scatter
+    ".....###..",
+    "....#####.",
+    ".##.#####.",
+    ".#########",
+    "##########",
+    ".########.",
+    "..........",
+    ".#...#...#",
+    "...#...#..",
+    "..........",
+  },
+  { // storm: a shorter cloud, and the bolt gets the room
+    ".....###..",
+    ".##.#####.",
+    ".#########",
+    "##########",
+    ".########.",
+    ".....##...",
+    "....##....",
+    "...####...",
+    "....##....",
+    "...##.....",
+  },
+};
 
-  if (kind == WX_SUN) { icon_sun(ctx, r, true); return; }
+static void icon_weather(GContext *ctx, GRect r, int code) {
+  draw_bits(ctx, r, SKY[wx_kind(code)], 10, 10);
+}
 
-  if (kind == WX_FOG) {
-    for (int16_t i = 0; i < 3; i++) {
-      const int16_t y = r.origin.y + h / 4 + i * (h / 4);
-      graphics_draw_line(ctx, GPoint(r.origin.x + (i & 1 ? 2 : 0), y),
-                              GPoint(r.origin.x + w - 1 - (i & 1 ? 0 : 2), y));
-    }
-    return;
-  }
-
-  if (kind == WX_PARTLY) {
-    // Sun behind, then the cloud punched out of it so the two stay legible
-    // instead of merging into one blob.
-    icon_sun(ctx, GRect(r.origin.x, r.origin.y, w * 2 / 3, h * 2 / 3), true);
-    const GRect cloud = GRect(r.origin.x + w / 4, r.origin.y + h / 3,
-                              w - w / 4, h - h / 3);
-    graphics_context_set_fill_color(ctx, ground);
-    cloud_body(ctx, GRect(cloud.origin.x - 1, cloud.origin.y - 1,
-                          cloud.size.w + 2, cloud.size.h + 1));
-    graphics_context_set_fill_color(ctx, ink);
-    cloud_body(ctx, cloud);
-    return;
-  }
-
-  const bool precip = (kind == WX_RAIN || kind == WX_SNOW || kind == WX_STORM);
-  const int16_t body_h = precip ? h * 3 / 5 : h * 4 / 5;
-  const GRect body = GRect(r.origin.x, r.origin.y + (precip ? 0 : h / 8), w, body_h);
-  cloud_body(ctx, body);
-  if (!precip) return;
-
-  const int16_t base = body.origin.y + body_h + 1;
-  if (kind == WX_STORM) {
-    // A drawn zigzag disappears at this size; two offset blocks keep the
-    // diagonal of a bolt and stay distinct from rain's streaks.
-    const int16_t cx = r.origin.x + w / 2;
-    const int16_t t = (h - body_h) / 2 > 1 ? (h - body_h) / 2 : 2;
-    graphics_fill_rect(ctx, GRect(cx, base, t, t), 0, GCornerNone);
-    graphics_fill_rect(ctx, GRect(cx - t, base + t, t, t), 0, GCornerNone);
-    return;
-  }
-  for (int16_t i = 0; i < 3; i++) {
-    const int16_t x = r.origin.x + 1 + i * ((w - 2) / 2);
-    if (kind == WX_SNOW) graphics_fill_rect(ctx, GRect(x, base + 1, 2, 2), 0, GCornerNone);
-    else graphics_draw_line(ctx, GPoint(x + 1, base), GPoint(x, base + (h - body_h) - 1));
-  }
+// The caption for the same sky, when the modules are captioned.
+static const char *wx_caption(int code) {
+  static const char *const words[7] = {
+    "SUNNY", "PARTLY", "CLOUDY", "FOG", "RAIN", "SNOW", "STORM" };
+  return words[wx_kind(code)];
 }
 
 // --------------------------------------------------------------- schedule
@@ -504,8 +532,9 @@ static void draw_rail(GContext *ctx, const Schedule *sch, int16_t h) {
 }
 
 // A module is a caption over a value, as the design draws them — BPM 72,
-// STEPS 4.8K, BATT 64%. The caption can be swapped for an icon, and weather
-// always uses one, since the sky condition says more than the word "TEMP".
+// STEPS 4.8K, BATT 64%. Weather captions with the sky itself — CLOUDY 12° —
+// since the condition says more than the unit. The captions can be swapped
+// for icons.
 typedef struct {
   bool present;
   char value[8];
@@ -559,7 +588,7 @@ static bool module_read(uint8_t kind, Module *m) {
     case MODULE_WEATHER: {
       if (!s_wx.valid) return false;
       snprintf(m->value, sizeof(m->value), "%d\u00B0", s_wx.temp);
-      m->caption = s_set.imperial ? "\u00B0F" : "\u00B0C";
+      m->caption = wx_caption(s_wx.code);
       m->extra = s_wx.code;
       return true;
     }
@@ -567,9 +596,9 @@ static bool module_read(uint8_t kind, Module *m) {
   }
 }
 
-// Weather is icon-only by request; everything else follows the toggle.
 static bool module_uses_icon(const Module *m) {
-  return s_set.mod_icons || m->kind == MODULE_WEATHER;
+  (void)m;
+  return s_set.mod_icons;
 }
 
 static int module_icon_w(const Module *m, int icon) {
@@ -585,7 +614,7 @@ static void module_draw_icon(GContext *ctx, const Module *m, GRect box) {
     case MODULE_HR:      icon_heart(ctx, box); break;
     case MODULE_STEPS:   icon_steps(ctx, box); break;
     case MODULE_BATTERY: icon_battery(ctx, box, m->extra); break;
-    case MODULE_WEATHER: icon_weather(ctx, box, m->extra, s_dim, s_ground); break;
+    case MODULE_WEATHER: icon_weather(ctx, box, m->extra); break;
     default: break;
   }
 }
@@ -607,19 +636,12 @@ static void draw_modules(GContext *ctx, GFont f_val, GFont f_cap,
   const Metrics m_val = barlow_metrics(z_val.h);
   const int icon = m_val.cap;                 // an icon reads as one cap tall
   // Captions are laid out from the measured box, not an estimated cap: the
-  // box bounds the glyph whatever the font's metrics turn out to be. The row
-  // takes one label height and one baseline across every module, so a mixed
-  // row — caption mode with a weather module, which always draws an icon —
-  // still lines its values up.
-  int label_h = 0;
-  bool any_icon = false;
-  for (int i = 0; i < n; i++) {
-    const bool ic = module_uses_icon(&mods[i]);
-    any_icon |= ic;
-    const int h = ic ? icon : z_cap.h;
-    if (h > label_h) label_h = h;
-  }
-  const int lgap = any_icon ? sc(MOD_ICON_GAP) : sc(MOD_LABEL_GAP);
+  // box bounds the glyph whatever the font's metrics turn out to be. An icon
+  // fills its box where a caption's box carries slack, so it gets a wider
+  // gap to the value.
+  const bool icons = s_set.mod_icons;
+  const int label_h = icons ? icon : z_cap.h;
+  const int lgap = icons ? sc(MOD_ICON_GAP) : sc(MOD_LABEL_GAP);
   const int gap = sc(MOD_GAP);
 
   // Widths first: the row is dropped whole if it cannot fit the band.
@@ -789,7 +811,7 @@ static void face_update(Layer *layer, GContext *ctx) {
   }
   if (over > 0) inner_w -= over;   // last resort: the label ellipsizes
 
-  const int inner_h = m_lab.cap + sc(LABEL_GAP) + m_num.cap;
+  const int inner_h = m_lab.cap + sc(BLOCK_ROW_GAP) + m_num.cap;
   const int block_w = inner_w + pad_in + pad_out;
   const int block_h = inner_h + sc(BLOCK_PAD_T) + sc(BLOCK_PAD_B);
   const int block_x = c_end - block_w;
@@ -812,7 +834,10 @@ static void face_update(Layer *layer, GContext *ctx) {
                      GTextOverflowModeTrailingEllipsis,
                      s_set.wrist_right ? GTextAlignmentLeft : GTextAlignmentRight, NULL);
 
-  const int num_y = label_y + m_lab.cap + sc(LABEL_GAP);
+  // The design puts a full line of air between the label and the number:
+  // its 4px margin plus the slack of both line boxes, six pixels at this
+  // scale. Any less and the digits' shoulders touch the label.
+  const int num_y = label_y + m_lab.cap + sc(BLOCK_ROW_GAP);
   const int num_x = inner_x + inner_w - num_row_w;
   draw_at(ctx, num, f_num, num_x, num_y - m_num.bearing, z_num);
   if (!sch.is_now) {

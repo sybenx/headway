@@ -253,7 +253,7 @@
         "type": "toggle",
         "messageKey": "MOD_ICONS",
         "label": "Icons instead of captions",
-        "description": "Weather always shows its sky condition as an icon.",
+        "description": "Captions name the sky for weather: SUNNY, CLOUDY, RAIN. Icons draw it.",
         "defaultValue": false
       },
       {
