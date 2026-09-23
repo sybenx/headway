@@ -6,9 +6,9 @@ is left*.
 
 Built from a [Claude Design](https://claude.ai/design) spec.
 
-![waiting](screenshots/waiting.png)
-![boarding](screenshots/boarding.png)
-![departing](screenshots/departing.png)
+| Waiting | Boarding | Departing |
+|---|---|---|
+| ![waiting](screenshots/waiting.png) | ![boarding](screenshots/boarding.png) | ![departing](screenshots/departing.png) |
 
 ## Read it from the cuff in
 
@@ -68,6 +68,18 @@ Rectangular displays only: `aplite`, `basalt`, `diorite`, `flint` (144×168) and
 `emery` (200×228). The layout is an edge-flush rail on a rectangle, which a
 round screen cannot carry without a different design, so `chalk` and `gabbro`
 are not targeted.
+
+| aplite | diorite | flint | emery |
+|---|---|---|---|
+| ![aplite](screenshots/aplite.png) | ![diorite](screenshots/diorite.png) | ![flint](screenshots/flint.png) | ![emery](screenshots/emery.png) |
+
+On one-bit watches the accent becomes ink and the quarter-hour ticks dither,
+as the design's mono note asks. Modules whose sensor the watch lacks remove
+themselves — which is why aplite shows only battery and weather.
+
+Light mode, with the accent set to red:
+
+![light](screenshots/light.png)
 
 ## Building
 
