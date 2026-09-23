@@ -275,6 +275,35 @@
     ]
   },
   {
+    "type": "section",
+    "items": [
+      {
+        "type": "heading",
+        "defaultValue": "Transit"
+      },
+      {
+        "type": "text",
+        "defaultValue": "For riders of a system whose hub the face knows. Within the radius of the hub and inside its hours, the countdown runs and the routes on their own timetable get a second one. Elsewhere the face goes quiet: no countdown, a larger date. Off, and the countdown runs everywhere, as it always has. Knows CVTD (Logan, Utah) for now."
+      },
+      {
+        "type": "toggle",
+        "messageKey": "TRANSIT",
+        "label": "Only near the hub",
+        "defaultValue": false
+      },
+      {
+        "type": "slider",
+        "messageKey": "TR_RADIUS",
+        "label": "Radius around the hub",
+        "defaultValue": 300,
+        "min": 100,
+        "max": 1000,
+        "step": 50,
+        "description": "Metres."
+      }
+    ]
+  },
+  {
     "type": "submit",
     "defaultValue": "Save"
   }

@@ -63,9 +63,38 @@ Reachable from the Pebble app.
 - **Modules** — three slots: heart rate, steps, battery, weather or nothing
 - **Icons instead of captions**
 - **Units** — °C or °F
+- **Only near the hub** — see below; off by default, with the radius
 
 Weather comes from [Open-Meteo](https://open-meteo.com), which needs no API key
 and no account.
+
+## Near the hub
+
+For riders of a system whose hub the face knows. With it on, the phone asks
+where it is every few minutes, coarsely, and the face changes by the answer:
+
+- **At the hub, in its hours** — the countdown runs as ever, and the routes
+  that leave the hub together on their own timetable get a second one, in the
+  module band, at the end furthest from the cuff: a chip per route and the
+  minutes to the next departure. If the two have parted, the later one's chip
+  goes dim.
+- **Anywhere else, or after hours** — there is nothing to count down to, so
+  the block and the rail's fill go, and the date grows into the room they
+  leave.
+
+| at the hub | away |
+|---|---|
+| ![at the hub](screenshots/hub.png) | ![away](screenshots/away.png) |
+
+The phone's word holds for three hours; if it goes quiet longer than that, the
+face falls back to the plain countdown rather than stay quiet on a stale fix.
+Off, and the countdown runs everywhere, as it always has.
+
+The face knows one hub so far: the Cache Valley Transit District's transit
+center in Logan, Utah, where most routes leave on the half hour and routes
+G and B keep their own timetable. `tools/transit.py` reduces an agency's GTFS
+to what the phone needs — the hub, its hours, those departures — and writes
+`src/pkjs/transit.json`; the watch never reads the feed.
 
 ## Platforms
 

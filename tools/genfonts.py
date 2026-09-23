@@ -26,10 +26,11 @@ FONTS = [
     ('mod_15', 15, '[0-9.%°K]'), ('mod_21', 21, '[0-9.%°K]'),
     ('label_11', 11, '[A-Z0-9: ]'), ('label_15', 15, '[A-Z0-9: ]'),
     ('date_12', 12, '[A-Z0-9 ]'), ('date_17', 17, '[A-Z0-9 ]'),
+    ('date_18', 18, '[A-Z0-9 ]'), ('date_25', 25, '[A-Z0-9 ]'),   # the idle face's larger date
     ('cap_9', 9, '[A-Z%°]'), ('cap_12', 12, '[A-Z%°]'),
 ]
 for name, height, regex in FONTS:
-    f = Font(TTF, height, MAX_GLYPHS, 512 if name.endswith(('_83', '_61', '_21', '_15', '_17', '_12')) and name not in ('mod_15',) else 256, False)
+    f = Font(TTF, height, MAX_GLYPHS, 512 if name.endswith(('_83', '_61', '_21', '_15', '_17', '_12', '_25')) and name not in ('mod_15',) else 256, False)
     f.set_regex_filter(regex)
     f.build_tables()
     data = f.bitstring()

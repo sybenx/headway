@@ -11,6 +11,7 @@
 
 #include <pebble.h>
 #include <ctype.h>
+#include <stddef.h>
 
 // ---------------------------------------------------------------- settings
 
@@ -44,11 +45,14 @@ typedef struct {
   bool mod_icons;      // icons in place of the captions
   bool final_seconds;  // count the last minute down in seconds
   bool imperial;
+  bool transit;        // the countdown only near the hub, in its hours
+  uint16_t radius;     // metres around the hub that count as near
 } Settings;
 
 #define SETTINGS_KEY 1
-#define SETTINGS_VERSION 1
+#define SETTINGS_VERSION 2
 #define WEATHER_KEY  2
+#define TRANSIT_KEY  3
 #define THRESHOLD 5   // minutes; block goes solid at or under this
 
 typedef struct {
@@ -58,8 +62,22 @@ typedef struct {
   time_t at;
 } Weather;
 
+// What the phone last said about the hub: whether the wearer is there in
+// its hours, and the next departures of the routes on their own timetable,
+// as minutes past midnight, 0xFFFF for none. The face counts down from
+// these on its own; the phone refreshes them every few minutes.
+#define TR_MAX 4
+#define TR_NONE 0xFFFF
+#define TR_STALE (3 * 60 * 60)   // seconds before the phone's word lapses
+typedef struct {
+  uint8_t state;           // 0 away or out of hours, 1 at the hub
+  uint16_t g[TR_MAX], b[TR_MAX];
+  time_t at;
+} Transit;
+
 static Settings s_set;
 static Weather s_wx;
+static Transit s_tr;
 
 static void settings_defaults(void) {
   s_set.version = SETTINGS_VERSION;
@@ -80,6 +98,8 @@ static void settings_defaults(void) {
   s_set.mod_icons = false;
   s_set.final_seconds = true;
   s_set.imperial = false;
+  s_set.transit = false;
+  s_set.radius = 300;
 }
 
 static void settings_clamp(void) {
@@ -95,6 +115,8 @@ static void settings_clamp(void) {
   for (int i = 0; i < MODULE_COUNT; i++) {
     if (s_set.mod[i] > MODULE_WEATHER) s_set.mod[i] = MODULE_NONE;
   }
+  if (s_set.radius < 50) s_set.radius = 50;
+  if (s_set.radius > 2000) s_set.radius = 2000;
 }
 
 static void settings_load(void) {
@@ -103,11 +125,18 @@ static void settings_load(void) {
   // it: a new bool lands in the struct's existing padding, so the size is
   // unchanged while the byte it reads is whatever the old build left there —
   // which reads back as a setting silently stuck off.
-  if (persist_exists(SETTINGS_KEY)
-      && persist_get_size(SETTINGS_KEY) == (int)sizeof(s_set)) {
-    Settings stored;
-    persist_read_data(SETTINGS_KEY, &stored, sizeof(stored));
-    if (stored.version == SETTINGS_VERSION) s_set = stored;
+  if (persist_exists(SETTINGS_KEY)) {
+    const int n = persist_get_size(SETTINGS_KEY);
+    Settings stored = s_set;   // the defaults, for whatever the blob lacks
+    if (n == (int)sizeof(s_set)) {
+      persist_read_data(SETTINGS_KEY, &stored, sizeof(stored));
+      if (stored.version == SETTINGS_VERSION) s_set = stored;
+    } else if (n >= (int)offsetof(Settings, transit) && n < (int)sizeof(s_set)) {
+      // Layout 1: the same fields up to the hub settings, which are appended.
+      // Carry it over rather than hand the wearer the defaults again.
+      persist_read_data(SETTINGS_KEY, &stored, n);
+      if (stored.version == 1) s_set = stored;
+    }
   }
   s_set.version = SETTINGS_VERSION;
   settings_clamp();
@@ -125,6 +154,29 @@ static void weather_load(void) {
   }
   // A reading more than three hours old is worse than no reading.
   if (s_wx.valid && time(NULL) - s_wx.at > 3 * 60 * 60) s_wx.valid = false;
+}
+
+static void transit_load(void) {
+  memset(&s_tr, 0, sizeof(s_tr));
+  if (persist_exists(TRANSIT_KEY)
+      && persist_get_size(TRANSIT_KEY) == (int)sizeof(s_tr)) {
+    persist_read_data(TRANSIT_KEY, &s_tr, sizeof(s_tr));
+  }
+}
+static void transit_save(void) {
+  persist_write_data(TRANSIT_KEY, &s_tr, sizeof(s_tr));
+}
+// The phone's word holds for a few hours, then the face falls back to the
+// plain countdown rather than stay quiet on a stale fix.
+static bool transit_fresh(time_t now) {
+  return s_set.transit && s_tr.at != 0 && now - s_tr.at < TR_STALE;
+}
+// Minutes until the first of a route's departures still ahead, or -1.
+static int transit_next(const uint16_t *list, int now_min) {
+  for (int i = 0; i < TR_MAX; i++) {
+    if (list[i] != TR_NONE && (int)list[i] >= now_min) return (int)list[i] - now_min;
+  }
+  return -1;
 }
 
 // ------------------------------------------------------------------ layout
@@ -171,6 +223,7 @@ static void weather_load(void) {
   #define RES_LABEL RESOURCE_ID_FONT_LABEL_15
   #define RES_DATE  RESOURCE_ID_FONT_DATE_17
   #define RES_CAP   RESOURCE_ID_FONT_CAP_12
+  #define RES_BIGDATE RESOURCE_ID_FONT_DATE_25
 #else
   #define RES_TIME  RESOURCE_ID_FONT_TIME_60
   #define RES_COUNT RESOURCE_ID_FONT_COUNT_44
@@ -178,9 +231,10 @@ static void weather_load(void) {
   #define RES_LABEL RESOURCE_ID_FONT_LABEL_11
   #define RES_DATE  RESOURCE_ID_FONT_DATE_12
   #define RES_CAP   RESOURCE_ID_FONT_CAP_9
+  #define RES_BIGDATE RESOURCE_ID_FONT_DATE_18
 #endif
 
-static GFont s_f_time, s_f_count, s_f_mod, s_f_label, s_f_date, s_f_cap;
+static GFont s_f_time, s_f_count, s_f_mod, s_f_label, s_f_date, s_f_cap, s_f_bigdate;
 static Window *s_window;
 static Layer *s_face;
 static int s_last_remaining = -1;
@@ -614,6 +668,13 @@ static void draw_rail(GContext *ctx, const Schedule *sch, int16_t h) {
   draw_soft_tick(ctx, x0, x1, (h * 3) / 4);
 }
 
+// Away from the hub the rail keeps only its hairline: nothing to drain.
+static void draw_hairline(GContext *ctx, int16_t h) {
+  const int rail_w = sc(RAIL_W), border = sc(RAIL_BORDER);
+  graphics_context_set_fill_color(ctx, s_ink);
+  graphics_fill_rect(ctx, GRect(mapx(s_w - rail_w - border, border), 0, border, h), 0, GCornerNone);
+}
+
 // A module is a caption over a value, as the design draws them — BPM 72,
 // STEPS 4.8K, BATT 64%. Weather captions with the sky itself — CLOUDY 12° —
 // since the condition says more than the unit. The captions can be swapped
@@ -783,8 +844,113 @@ static void paint_modules(void) {
   }
 }
 
+typedef struct { int start, end, top, bot; } Frame;   // the content box, in logical x
+
+// ---- the second countdown: routes that leave the hub together on their own
+// timetable. It sits at the outer end of the band the modules share, in the
+// module grammar: two colour chips on the caption line, the minutes and a
+// small MIN beneath. The chips are the most time-critical thing in the row,
+// so they take the end furthest from the cuff.
+#define CHIP 10
+static struct {
+  bool show; int w, gap;
+  char min[6]; int later;                  // later: 0 both, 1 G leaves later, 2 B leaves later
+  int cx, cy, sq, gx, bx, ty, vx, vy, mx, my;
+  bool now;
+} s_gb;
+
+static void layout_gb(int c_start, int avail_w, int band_top, int band_bot, int now_min) __attribute__((noinline));
+static void layout_gb(int c_start, int avail_w, int band_top, int band_bot, int now_min) {
+  s_gb.show = false;
+  const int g = transit_next(s_tr.g, now_min), b = transit_next(s_tr.b, now_min);
+  if (g < 0 && b < 0) return;
+  const int next = g < 0 ? b : b < 0 ? g : g < b ? g : b;
+  s_gb.later = (g < 0 || g > next + 1) ? 1 : (b < 0 || b > next + 1) ? 2 : 0;
+  s_gb.now = next == 0;
+  if (s_gb.now) strcpy(s_gb.min, "NOW");
+  else snprintf(s_gb.min, sizeof(s_gb.min), "%d", next);
+
+  const Metrics m_val = barlow_metrics(measure("88", s_f_mod).h);
+  const Metrics m_cap = barlow_metrics(measure("BPM", s_f_cap).h);
+  const Metrics m_chip = barlow_metrics(measure("B", s_f_label).h);
+  const int label_h = m_cap.cap, lgap = sc(MOD_LABEL_GAP);
+  const int row_h = label_h + lgap + m_val.cap;
+  if (band_bot - band_top < row_h) return;
+  const int y = (band_top + band_bot) / 2 - row_h / 2 + sc(1);
+  const int sq = sc(CHIP), sqg = sc(1), chips = 2 * sq + sqg;
+  const GFont f_min = s_gb.now ? s_f_label : s_f_mod;
+  const int min_w = run_w(s_gb.min, f_min, !s_gb.now, 0);
+  const int unit_w = s_gb.now ? 0 : run_w("MIN", s_f_cap, false, TRACK);
+  const int v_w = s_gb.now ? min_w : min_w + sc(2) + unit_w;
+  s_gb.w = v_w > chips ? v_w : chips;
+  s_gb.gap = sc(MOD_GAP);
+  if (s_gb.w > avail_w) return;
+  const int x = c_start + avail_w - s_gb.w;
+  s_gb.sq = sq;
+  s_gb.cx = mapx(x + s_gb.w - chips, chips);
+  s_gb.cy = y + label_h - sq + (sq > label_h ? (sq - label_h) / 2 : 0);
+  s_gb.gx = s_gb.cx + (sq - run_w("G", s_f_label, false, 0)) / 2;
+  s_gb.bx = s_gb.cx + sq + sqg + (sq - run_w("B", s_f_label, false, 0)) / 2;
+  s_gb.ty = s_gb.cy + (sq - m_chip.cap) / 2 - m_chip.bearing;
+  s_gb.vx = mapx(x + s_gb.w - v_w, v_w);
+  s_gb.vy = y + label_h + lgap - (s_gb.now ? m_chip.bearing + (m_chip.cap - m_val.cap) : m_val.bearing);
+  s_gb.mx = s_gb.vx + min_w + sc(2);
+  s_gb.my = y + label_h + lgap + m_val.cap - m_cap.cap - m_cap.bearing;
+  s_gb.show = true;
+}
+
+static GColor chip_color(int route) {   // 0 G, 1 B
+#ifdef PBL_COLOR
+  return route ? GColorFromHEX(0x0055AA) : GColorFromHEX(0x00AA55);
+#else
+  (void)route; return s_ink;
+#endif
+}
+static void paint_gb(void) __attribute__((noinline));
+static void paint_gb(void) {
+  // The route that leaves later, if they have parted, takes the dim ink.
+  graphics_context_set_fill_color(s_ctx, s_gb.later == 1 ? s_dim : chip_color(0));
+  graphics_fill_rect(s_ctx, GRect(s_gb.cx, s_gb.cy, s_gb.sq, s_gb.sq), 0, GCornerNone);
+  graphics_context_set_fill_color(s_ctx, s_gb.later == 2 ? s_dim : chip_color(1));
+  graphics_fill_rect(s_ctx, GRect(s_gb.cx + s_gb.sq + sc(1), s_gb.cy, s_gb.sq, s_gb.sq), 0, GCornerNone);
+  graphics_context_set_text_color(s_ctx, PBL_IF_COLOR_ELSE(GColorWhite, s_ground));
+  draw_run_s("G", s_f_label, s_gb.gx, s_gb.ty, false, 0);
+  draw_run_s("B", s_f_label, s_gb.bx, s_gb.ty, false, 0);
+  graphics_context_set_text_color(s_ctx, s_ink);
+  if (s_gb.now) {
+    draw_run_s(s_gb.min, s_f_label, s_gb.vx, s_gb.vy, false, TRACK);
+  } else {
+    draw_run_s(s_gb.min, s_f_mod, s_gb.vx, s_gb.vy, true, 0);
+    graphics_context_set_text_color(s_ctx, s_dim);
+    draw_run_s("MIN", s_f_cap, s_gb.mx, s_gb.my, false, TRACK);
+  }
+}
+
+// ---- the quiet face: away from the hub, or outside its hours, there is
+// nothing to count down to, so the block goes and the date grows into the
+// room it leaves. Still on the wrist side: it is the part you already know.
+#define IDLE_DOW_GAP 6
+static struct { char dow[8], date[12]; int dow_y, date_y, top; Metrics m; } s_id;
+static void layout_idle(const struct tm *t, const Frame *fr) __attribute__((noinline));
+static void layout_idle(const struct tm *t, const Frame *fr) {
+  strftime(s_id.dow, sizeof(s_id.dow), "%a", t);
+  strftime(s_id.date, sizeof(s_id.date), "%d %b", t);
+  for (char *p = s_id.dow; *p; p++) *p = toupper((int)*p);
+  for (char *p = s_id.date; *p; p++) *p = toupper((int)*p);
+  s_id.m = barlow_metrics(measure("22 SEP", s_f_bigdate).h);
+  s_id.date_y = fr->bot - sc(DATE_PAD_BOT) - s_id.m.cap;
+  s_id.dow_y = s_id.date_y - sc(IDLE_DOW_GAP) - s_id.m.cap;
+  s_id.top = s_id.dow_y - sc(IDLE_DOW_GAP);   // where the band above ends
+}
+static void paint_idle(int fr_start) __attribute__((noinline));
+static void paint_idle(int fr_start) {
+  graphics_context_set_text_color(s_ctx, s_ink);
+  draw_run(s_id.dow, s_f_bigdate, fr_start, s_id.dow_y - s_id.m.bearing, false, TRACK);
+  graphics_context_set_text_color(s_ctx, s_dim);
+  draw_run(s_id.date, s_f_bigdate, fr_start, s_id.date_y - s_id.m.bearing, false, TRACK);
+}
+
 // The content box, inside the rail and the paddings, in logical x.
-typedef struct { int start, end, top, bot; } Frame;
 
 // Each zone is laid out into static storage by one function and painted by
 // another. The painters are what sit beneath the firmware's text renderer,
@@ -959,6 +1125,7 @@ static void face_update(Layer *layer, GContext *ctx) {
   static Schedule sch;
   static struct tm *t;
   static Frame fr;
+  static bool quiet, at_hub;
   s_ctx = ctx;
   full = layer_get_bounds(layer);
   b = layer_get_unobstructed_bounds(layer);
@@ -968,12 +1135,17 @@ static void face_update(Layer *layer, GContext *ctx) {
   t = localtime(&now);
   sch = schedule_for(t->tm_hour, t->tm_min, t->tm_sec);
 /*DEMO*/
+  // With the hub known, the countdown is for the hub: at it in its hours the
+  // face runs as ever, with the second countdown; anywhere else it is quiet.
+  at_hub = transit_fresh(now) && s_tr.state == 1;
+  quiet = transit_fresh(now) && s_tr.state == 0;
 
   theme_apply(t->tm_hour);
   graphics_context_set_fill_color(ctx, s_ground);
   graphics_fill_rect(ctx, full, 0, GCornerNone);
 
-  draw_rail(ctx, &sch, b.size.h);
+  if (quiet) draw_hairline(ctx, b.size.h);
+  else draw_rail(ctx, &sch, b.size.h);
 
   fr.start = sc(PAD_WRIST);                                       // logical left
   fr.end = s_w - sc(RAIL_W) - sc(RAIL_BORDER) - sc(PAD_GUTTER);   // logical right
@@ -981,14 +1153,21 @@ static void face_update(Layer *layer, GContext *ctx) {
   fr.bot = b.size.h - sc(PAD_BOTTOM);
 
   layout_time(t, &fr);
-  layout_block(t, &sch, &fr);
-  layout_modules(s_f_mod, s_f_cap, fr.start, fr.end - fr.start, s_tm.band_top, s_bk.block_y);
+  if (quiet) layout_idle(t, &fr);
+  else layout_block(t, &sch, &fr);
+  const int band_bot = quiet ? s_id.top : s_bk.block_y;
+  if (at_hub) layout_gb(fr.start, fr.end - fr.start, s_tm.band_top, band_bot, t->tm_hour * 60 + t->tm_min);
+  else s_gb.show = false;
+  layout_modules(s_f_mod, s_f_cap, fr.start, fr.end - fr.start - (s_gb.show ? s_gb.w + s_gb.gap : 0),
+                 s_tm.band_top, band_bot);
   paint_time();
-  paint_block(fr.start);
+  if (quiet) paint_idle(fr.start);
+  else paint_block(fr.start);
   paint_modules();
+  if (s_gb.show) paint_gb();
 
   // ---- boarding buzz, once on the transition into the solid block.
-  if (s_set.buzz && sch.remaining == THRESHOLD && s_last_remaining != THRESHOLD
+  if (!quiet && s_set.buzz && sch.remaining == THRESHOLD && s_last_remaining != THRESHOLD
       && !quiet_time_is_active()) {
     vibes_short_pulse();
   }
@@ -1070,6 +1249,26 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
     s_set.imperial = imperial;
   }
 
+  if ((tp = dict_find(iter, MESSAGE_KEY_TRANSIT))) {
+    s_set.transit = tp->value->int32 != 0;
+  }
+  if ((tp = dict_find(iter, MESSAGE_KEY_TR_RADIUS))) {
+    s_set.radius = (uint16_t)tp->value->int32;
+  }
+  // The hub's word arrives on the same channel, pushed by the JS side.
+  if ((tp = dict_find(iter, MESSAGE_KEY_TR_STATE))) {
+    Tuple *tg = dict_find(iter, MESSAGE_KEY_TR_G);
+    Tuple *tb = dict_find(iter, MESSAGE_KEY_TR_B);
+    Tuple *ta = dict_find(iter, MESSAGE_KEY_TR_AT);
+    s_tr.state = (uint8_t)tp->value->int32;
+    for (int i = 0; i < TR_MAX; i++) {
+      s_tr.g[i] = (tg && tg->length >= 2 * TR_MAX) ? (uint16_t)(tg->value->data[2 * i] | (tg->value->data[2 * i + 1] << 8)) : TR_NONE;
+      s_tr.b[i] = (tb && tb->length >= 2 * TR_MAX) ? (uint16_t)(tb->value->data[2 * i] | (tb->value->data[2 * i + 1] << 8)) : TR_NONE;
+    }
+    s_tr.at = ta ? (time_t)ta->value->int32 : time(NULL);
+    transit_save();
+  }
+
   // Weather arrives on the same channel, pushed by the JS side.
   if ((tp = dict_find(iter, MESSAGE_KEY_WOK))) {
     Tuple *tt = dict_find(iter, MESSAGE_KEY_TEMP);
@@ -1118,12 +1317,14 @@ static void window_unload(Window *window) {
 static void init(void) {
   settings_load();
   weather_load();
+  transit_load();
   s_f_time = fonts_load_custom_font(resource_get_handle(RES_TIME));
   s_f_count = fonts_load_custom_font(resource_get_handle(RES_COUNT));
   s_f_mod = fonts_load_custom_font(resource_get_handle(RES_MOD));
   s_f_label = fonts_load_custom_font(resource_get_handle(RES_LABEL));
   s_f_date = fonts_load_custom_font(resource_get_handle(RES_DATE));
   s_f_cap = fonts_load_custom_font(resource_get_handle(RES_CAP));
+  s_f_bigdate = fonts_load_custom_font(resource_get_handle(RES_BIGDATE));
 
   s_window = window_create();
   window_set_window_handlers(s_window, (WindowHandlers){
@@ -1145,6 +1346,7 @@ static void deinit(void) {
   fonts_unload_custom_font(s_f_label);
   fonts_unload_custom_font(s_f_date);
   fonts_unload_custom_font(s_f_cap);
+  fonts_unload_custom_font(s_f_bigdate);
   tick_timer_service_unsubscribe();
   window_destroy(s_window);
 }

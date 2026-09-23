@@ -1,7 +1,7 @@
 {
   "name": "headway",
   "author": "Aaron Herbst",
-  "version": "1.0.5",
+  "version": "1.1.0",
   "keywords": [
     "pebble-app",
     "watchface",
@@ -42,7 +42,13 @@
       "UNITS",
       "TEMP",
       "WCODE",
-      "WOK"
+      "WOK",
+      "TRANSIT",
+      "TR_RADIUS",
+      "TR_STATE",
+      "TR_G",
+      "TR_B",
+      "TR_AT"
     ],
     "resources": {
       "media": [
@@ -162,6 +168,25 @@
           "type": "raw",
           "name": "FONT_CAP_12",
           "file": "fonts/cap_12.pfo",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "raw",
+          "name": "FONT_DATE_18",
+          "file": "fonts/date_18.pfo",
+          "targetPlatforms": [
+            "aplite",
+            "basalt",
+            "diorite",
+            "flint"
+          ]
+        },
+        {
+          "type": "raw",
+          "name": "FONT_DATE_25",
+          "file": "fonts/date_25.pfo",
           "targetPlatforms": [
             "emery"
           ]
