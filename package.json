@@ -1,7 +1,7 @@
 {
   "name": "headway",
   "author": "Aaron Herbst",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "keywords": [
     "pebble-app",
     "watchface",
@@ -18,7 +18,8 @@
       "aplite",
       "basalt",
       "diorite",
-      "emery"
+      "emery",
+      "flint"
     ],
     "watchapp": {
       "watchface": true
@@ -58,7 +59,8 @@
           "targetPlatforms": [
             "aplite",
             "basalt",
-            "diorite"
+            "diorite",
+            "flint"
           ]
         },
         {
@@ -68,7 +70,8 @@
           "targetPlatforms": [
             "aplite",
             "basalt",
-            "diorite"
+            "diorite",
+            "flint"
           ]
         },
         {
@@ -78,7 +81,8 @@
           "targetPlatforms": [
             "aplite",
             "basalt",
-            "diorite"
+            "diorite",
+            "flint"
           ]
         },
         {
@@ -88,7 +92,8 @@
           "targetPlatforms": [
             "aplite",
             "basalt",
-            "diorite"
+            "diorite",
+            "flint"
           ]
         },
         {
@@ -98,7 +103,8 @@
           "targetPlatforms": [
             "aplite",
             "basalt",
-            "diorite"
+            "diorite",
+            "flint"
           ]
         },
         {
@@ -108,7 +114,8 @@
           "targetPlatforms": [
             "aplite",
             "basalt",
-            "diorite"
+            "diorite",
+            "flint"
           ]
         },
         {

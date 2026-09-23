@@ -193,9 +193,22 @@ static int16_t mapx(int lx, int w) {
   return s_set.wrist_right ? (int16_t)(s_w - lx - w) : (int16_t)lx;
 }
 
+// Every call into the firmware's text engine goes through one of two leaves.
+// The engine wants over a kilobyte of the app's 2KB stack on the watches
+// this runs on, so what sits beneath it must be nearly nothing: a leaf's
+// arguments live in static storage and its frame is the link register and
+// the words the ABI spills.
+static GContext *s_ctx;                                   // the frame being painted
+static struct { const char *t; GFont f; GRect r; GTextOverflowMode mode; } s_tx;
+
+static GSize measure(const char *t, GFont f) __attribute__((noinline));
 static GSize measure(const char *t, GFont f) {
   return graphics_text_layout_get_content_size(
       t, f, GRect(0, 0, 400, 200), GTextOverflowModeWordWrap, GTextAlignmentLeft);
+}
+static void tx_draw(void) __attribute__((noinline));
+static void tx_draw(void) {
+  graphics_draw_text(s_ctx, s_tx.t, s_tx.f, s_tx.r, s_tx.mode, GTextAlignmentLeft, NULL);
 }
 
 // A system font's glyph box carries fixed top bearing and sits shorter than
@@ -210,10 +223,13 @@ static Metrics barlow_metrics(int boxh) {
   return m;
 }
 
-// Draw text with its measured box placed at a logical origin.
-static void draw_at(GContext *ctx, const char *t, GFont f, int lx, int y, GSize sz) {
-  graphics_draw_text(ctx, t, f, GRect(mapx(lx, sz.w), y, sz.w, sz.h),
-                     GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
+// Draw text with its measured box placed at a logical origin. Inlined: the
+// caller stores the arguments and drops straight to the leaf.
+static inline __attribute__((always_inline))
+void draw_at(const char *t, GFont f, int lx, int y, GSize sz) {
+  s_tx.t = t; s_tx.f = f; s_tx.mode = GTextOverflowModeTrailingEllipsis;
+  s_tx.r = GRect(mapx(lx, sz.w), y, sz.w, sz.h);
+  tx_draw();
 }
 
 // Text drawn a glyph at a time, so the face can do what the design's CSS
@@ -233,42 +249,45 @@ static int glyph_at(const char *p, char *out) {
   return i;
 }
 
+static char s_glyph[5];
 static int run_w(const char *t, GFont f, bool tabular, int track) {
   const int cell = tabular ? measure("0", f).w : 0;
   int w = 0;
   for (const char *p = t; *p;) {
-    char one[5];
-    p += glyph_at(p, one);
-    w += ((tabular && isdigit((int)one[0])) ? cell : measure(one, f).w) + (*p ? track : 0);
+    p += glyph_at(p, s_glyph);
+    w += ((tabular && isdigit((int)s_glyph[0])) ? cell : measure(s_glyph, f).w) + (*p ? track : 0);
   }
   return w;
 }
 
-// This sits directly beneath the firmware's text renderer, which on the new
-// PebbleOS needs some 1.2KB of the app's 2KB stack, so its frame is kept to
-// a handful of registers: the glyph lives in static storage and the box is
-// built in place.
-static char s_glyph[5];
-// Draws from a screen x, advancing rightwards: the glyphs of a run keep
-// their reading order whichever wrist the face is laid out for.
-static void draw_run_s(GContext *ctx, const char *t, GFont f, int x, int y, bool tabular, int track) {
-  const int cell = tabular ? measure("0", f).w : 0;
-  for (const char *p = t; *p;) {
+// A run is described in static storage and drawn by one function whose
+// frame is a few saved registers. It draws from a screen x, advancing
+// rightwards: the glyphs keep their reading order whichever wrist the face
+// is laid out for.
+static struct { const char *t; GFont f; int x, y, track; bool tab; } s_run;
+static void run_draw(void) __attribute__((noinline));
+static void run_draw(void) {
+  const int cell = s_run.tab ? measure("0", s_run.f).w : 0;
+  for (const char *p = s_run.t; *p;) {
     p += glyph_at(p, s_glyph);
-    const GSize z = measure(s_glyph, f);
+    const GSize z = measure(s_glyph, s_run.f);
     // A glyph boxed at exactly its measured width can still be judged not
     // to fit and drawn as an ellipsis, so the box gets slack past its end.
-    graphics_draw_text(ctx, s_glyph, f, GRect(x, y, 2 * z.w + 4, z.h),
-                       GTextOverflowModeWordWrap, GTextAlignmentLeft, NULL);
-    x += ((tabular && isdigit((int)s_glyph[0])) ? cell : z.w) + track;
+    s_tx.t = s_glyph; s_tx.f = s_run.f; s_tx.mode = GTextOverflowModeWordWrap;
+    s_tx.r = GRect(s_run.x, s_run.y, 2 * z.w + 4, z.h);
+    tx_draw();
+    s_run.x += ((s_run.tab && isdigit((int)s_glyph[0])) ? cell : z.w) + s_run.track;
   }
 }
-
-// The same from a logical x: the run is mirrored as a whole for the other
-// wrist, so what is end-aligned on one is start-aligned on the other, as the
-// design lays it out.
-static void draw_run(GContext *ctx, const char *t, GFont f, int lx, int y, bool tabular, int track) {
-  draw_run_s(ctx, t, f, mapx(lx, run_w(t, f, tabular, track)), y, tabular, track);
+static inline __attribute__((always_inline))
+void draw_run_s(const char *t, GFont f, int x, int y, bool tabular, int track) {
+  s_run.t = t; s_run.f = f; s_run.x = x; s_run.y = y; s_run.tab = tabular; s_run.track = track;
+  run_draw();
+}
+// The same run placed by its logical x, measured from the wrist edge.
+static inline __attribute__((always_inline))
+void draw_run(const char *t, GFont f, int lx, int y, bool tabular, int track) {
+  draw_run_s(t, f, mapx(lx, run_w(t, f, tabular, track)), y, tabular, track);
 }
 
 #define TRACK 1   // the design's 6-10% letter-space, one pixel at these sizes
@@ -684,68 +703,83 @@ static void module_draw_icon(GContext *ctx, const Module *m, GRect box) {
 }
 
 // The row sits on the wrist side of the band the design leaves open, so a
-// sleeve covers it before the countdown or the rail.
-static void draw_modules(GContext *ctx, GFont f_val, GFont f_cap,
-                         int c_start, int avail_w, int band_top, int band_bot) {
-  Module mods[MODULE_COUNT];
-  int n = 0;
+// sleeve covers it before the countdown or the rail. Laid out into static
+// storage, then painted from it.
+static struct {
+  Module m[MODULE_COUNT];
+  int n, widths[MODULE_COUNT], x0, y, label_h, lgap, gap, icon;
+  Metrics m_cap, m_val;
+  GFont f_val, f_cap;
+} s_md;
+
+static void layout_modules(GFont f_val, GFont f_cap, int c_start, int avail_w,
+                           int band_top, int band_bot) __attribute__((noinline));
+static void layout_modules(GFont f_val, GFont f_cap, int c_start, int avail_w,
+                           int band_top, int band_bot) {
+  s_md.n = 0;
   for (int i = 0; i < MODULE_COUNT; i++) {
     if (s_set.mod[i] == MODULE_NONE) continue;
-    if (module_read(s_set.mod[i], &mods[n])) n++;
+    if (module_read(s_set.mod[i], &s_md.m[s_md.n])) s_md.n++;
   }
-  if (n == 0) return;
+  if (s_md.n == 0) return;
 
-  const GSize z_cap = measure("BPM", f_cap);
-  const GSize z_val = measure("88", f_val);
-  const Metrics m_val = barlow_metrics(z_val.h);
-  const int icon = m_val.cap;                 // an icon reads as one cap tall
+  s_md.f_val = f_val; s_md.f_cap = f_cap;
+  s_md.m_val = barlow_metrics(measure("88", f_val).h);
+  s_md.icon = s_md.m_val.cap;                 // an icon reads as one cap tall
   // Captions are laid out from the measured box, not an estimated cap: the
   // box bounds the glyph whatever the font's metrics turn out to be. An icon
   // fills its box where a caption's box carries slack, so it gets a wider
   // gap to the value.
   const bool icons = s_set.mod_icons;
-  const Metrics m_cap = barlow_metrics(z_cap.h);
-  const int label_h = icons ? icon : m_cap.cap;
-  const int lgap = icons ? sc(MOD_ICON_GAP) : sc(MOD_LABEL_GAP);
-  const int gap = sc(MOD_GAP);
+  s_md.m_cap = barlow_metrics(measure("BPM", f_cap).h);
+  s_md.label_h = icons ? s_md.icon : s_md.m_cap.cap;
+  s_md.lgap = icons ? sc(MOD_ICON_GAP) : sc(MOD_LABEL_GAP);
+  s_md.gap = sc(MOD_GAP);
 
   // Widths first: the row is dropped whole if it cannot fit the band.
-  int widths[MODULE_COUNT], total = 0;
-  for (int i = 0; i < n; i++) {
-    int w = run_w(mods[i].value, f_val, true, 0);
-    if (module_uses_icon(&mods[i])) {
-      const int iw = module_icon_w(&mods[i], icon);
+  int total = 0;
+  for (int i = 0; i < s_md.n; i++) {
+    int w = run_w(s_md.m[i].value, f_val, true, 0);
+    if (module_uses_icon(&s_md.m[i])) {
+      const int iw = module_icon_w(&s_md.m[i], s_md.icon);
       if (iw > w) w = iw;
+    } else {
+      const int cw = run_w(s_md.m[i].caption, f_cap, false, TRACK);
+      if (cw > w) w = cw;
     }
-    else { const int cw = run_w(mods[i].caption, f_cap, false, TRACK); if (cw > w) w = cw; }
-    widths[i] = w;
-    total += w + (i ? gap : 0);
+    s_md.widths[i] = w;
+    total += w + (i ? s_md.gap : 0);
   }
-  while (n > 1 && total > avail_w) { n--; total -= widths[n] + gap; }
-  if (total > avail_w) return;
+  while (s_md.n > 1 && total > avail_w) { s_md.n--; total -= s_md.widths[s_md.n] + s_md.gap; }
+  if (total > avail_w) { s_md.n = 0; return; }
 
-  const int row_h = label_h + lgap + m_val.cap;
+  const int row_h = s_md.label_h + s_md.lgap + s_md.m_val.cap;
   // A timeline peek squeezes the band to nothing. The modules are the lowest
   // zone in the design's ranking, so they go first rather than crowd the
   // countdown — the same order a sleeve would take them in.
-  if (band_bot - band_top < row_h) return;
+  if (band_bot - band_top < row_h) { s_md.n = 0; return; }
   // Centred, then the design's 4px padding-top nudges it down by half that.
-  const int y = (band_top + band_bot) / 2 - row_h / 2 + sc(1);
+  s_md.y = (band_top + band_bot) / 2 - row_h / 2 + sc(1);
+  s_md.x0 = c_start;
+}
 
-  int x = c_start;
-  for (int i = 0; i < n; i++) {
-    if (module_uses_icon(&mods[i])) {
-      graphics_context_set_fill_color(ctx, s_dim);
-      graphics_context_set_stroke_color(ctx, s_dim);
-      const int iw = module_icon_w(&mods[i], icon);
-      module_draw_icon(ctx, &mods[i], GRect(mapx(x, iw), y + label_h - icon, iw, icon));
+static void paint_modules(void) __attribute__((noinline));
+static void paint_modules(void) {
+  int x = s_md.x0;
+  for (int i = 0; i < s_md.n; i++) {
+    const Module *m = &s_md.m[i];
+    if (module_uses_icon(m)) {
+      graphics_context_set_fill_color(s_ctx, s_dim);
+      graphics_context_set_stroke_color(s_ctx, s_dim);
+      const int iw = module_icon_w(m, s_md.icon);
+      module_draw_icon(s_ctx, m, GRect(mapx(x, iw), s_md.y + s_md.label_h - s_md.icon, iw, s_md.icon));
     } else {
-      graphics_context_set_text_color(ctx, s_dim);
-      draw_run(ctx, mods[i].caption, f_cap, x, y + label_h - m_cap.cap - m_cap.bearing, false, TRACK);
+      graphics_context_set_text_color(s_ctx, s_dim);
+      draw_run(m->caption, s_md.f_cap, x, s_md.y + s_md.label_h - s_md.m_cap.cap - s_md.m_cap.bearing, false, TRACK);
     }
-    graphics_context_set_text_color(ctx, s_ink);
-    draw_run(ctx, mods[i].value, f_val, x, y + label_h + lgap - m_val.bearing, true, 0);
-    x += widths[i] + gap;
+    graphics_context_set_text_color(s_ctx, s_ink);
+    draw_run(m->value, s_md.f_val, x, s_md.y + s_md.label_h + s_md.lgap - s_md.m_val.bearing, true, 0);
+    x += s_md.widths[i] + s_md.gap;
   }
 }
 
@@ -785,18 +819,18 @@ static void layout_time(const struct tm *t, const Frame *fr) {
   s_tm.band_top = s_tm.y + m.bearing + m.cap + sc(3);
 }
 
-static void paint_time(GContext *ctx) __attribute__((noinline));
-static void paint_time(GContext *ctx) {
+static void paint_time(void) __attribute__((noinline));
+static void paint_time(void) {
   // The row is mirrored as a whole; hour, colon and minute keep their order.
   const int x = mapx(s_tm.x, s_tm.w);
-  graphics_context_set_text_color(ctx, s_ink);
-  draw_run_s(ctx, s_tm.hh, s_f_time, x, s_tm.y, true, 0);
-  draw_run_s(ctx, s_tm.mm, s_f_time, x + s_tm.hh_w + s_tm.colon_w, s_tm.y, true, 0);
+  graphics_context_set_text_color(s_ctx, s_ink);
+  draw_run_s(s_tm.hh, s_f_time, x, s_tm.y, true, 0);
+  draw_run_s(s_tm.mm, s_f_time, x + s_tm.hh_w + s_tm.colon_w, s_tm.y, true, 0);
   // The one accent in the time: the design's colon.
-  graphics_context_set_text_color(ctx, accent());
-  graphics_draw_text(ctx, ":", s_f_time,
-                     GRect(x + s_tm.hh_w + s_tm.cgap, s_tm.y, s_tm.z_colon.w, s_tm.z_colon.h),
-                     GTextOverflowModeWordWrap, GTextAlignmentLeft, NULL);
+  graphics_context_set_text_color(s_ctx, accent());
+  s_tx.t = ":"; s_tx.f = s_f_time; s_tx.mode = GTextOverflowModeWordWrap;
+  s_tx.r = GRect(x + s_tm.hh_w + s_tm.cgap, s_tm.y, s_tm.z_colon.w, s_tm.z_colon.h);
+  tx_draw();
 }
 
 // ---- zone 02: the countdown, and zone 04: weekday and date.
@@ -887,33 +921,33 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
   s_bk.dow_y = s_bk.date_y - sc(DOW_GAP) - s_bk.m_dow.cap;
 }
 
-static void paint_block(GContext *ctx, const Frame *fr) __attribute__((noinline));
-static void paint_block(GContext *ctx, const Frame *fr) {
+static void paint_block(int fr_start) __attribute__((noinline));
+static void paint_block(int fr_start) {
   if (s_bk.solid) {
     const GColor fill = s_bk.now ? s_ink : accent();
-    graphics_context_set_fill_color(ctx, fill);
-    graphics_fill_rect(ctx, GRect(mapx(s_bk.block_x, s_bk.block_w), s_bk.block_y, s_bk.block_w, s_bk.block_h),
+    graphics_context_set_fill_color(s_ctx, fill);
+    graphics_fill_rect(s_ctx, GRect(mapx(s_bk.block_x, s_bk.block_w), s_bk.block_y, s_bk.block_w, s_bk.block_h),
                        0, GCornerNone);
-    graphics_context_set_text_color(ctx, on_fill(fill));
+    graphics_context_set_text_color(s_ctx, on_fill(fill));
   } else {
-    graphics_context_set_text_color(ctx, s_ink);
+    graphics_context_set_text_color(s_ctx, s_ink);
   }
-  draw_run(ctx, s_bk.label, s_f_label, s_bk.inner_x + s_bk.inner_w - s_bk.label_w,
+  draw_run(s_bk.label, s_f_label, s_bk.inner_x + s_bk.inner_w - s_bk.label_w,
            s_bk.label_y - s_bk.m_lab.bearing, false, TRACK);
   const int num_x = s_bk.inner_x + s_bk.inner_w - s_bk.num_row_w;
   if (s_bk.now) {
-    draw_at(ctx, s_bk.num, s_f_count, num_x, s_bk.num_y - s_bk.m_num.bearing, s_bk.z_num);
+    draw_at(s_bk.num, s_f_count, num_x, s_bk.num_y - s_bk.m_num.bearing, s_bk.z_num);
   } else {
     // One row, mirrored as a whole: the number, then MIN on its baseline.
     const int x = mapx(num_x, s_bk.num_row_w);
-    draw_run_s(ctx, s_bk.num, s_f_count, x, s_bk.num_y - s_bk.m_num.bearing, true, 0);
-    draw_run_s(ctx, s_bk.unit, s_f_label, x + s_bk.num_w + sc(LABEL_GAP),
+    draw_run_s(s_bk.num, s_f_count, x, s_bk.num_y - s_bk.m_num.bearing, true, 0);
+    draw_run_s(s_bk.unit, s_f_label, x + s_bk.num_w + sc(LABEL_GAP),
                s_bk.num_y + s_bk.m_num.cap - s_bk.m_min.cap - s_bk.m_min.bearing, false, TRACK);
   }
-  graphics_context_set_text_color(ctx, s_ink);
-  draw_run(ctx, s_bk.dow, s_f_date, fr->start, s_bk.dow_y - s_bk.m_dow.bearing, false, TRACK);
-  graphics_context_set_text_color(ctx, s_dim);
-  draw_run(ctx, s_bk.date, s_f_date, fr->start, s_bk.date_y - s_bk.m_date.bearing, false, TRACK);
+  graphics_context_set_text_color(s_ctx, s_ink);
+  draw_run(s_bk.dow, s_f_date, fr_start, s_bk.dow_y - s_bk.m_dow.bearing, false, TRACK);
+  graphics_context_set_text_color(s_ctx, s_dim);
+  draw_run(s_bk.date, s_f_date, fr_start, s_bk.date_y - s_bk.m_date.bearing, false, TRACK);
 }
 
 static void face_update(Layer *layer, GContext *ctx) {
@@ -921,13 +955,18 @@ static void face_update(Layer *layer, GContext *ctx) {
   // where the countdown and the date sit. Laying out against the
   // unobstructed area keeps the second-most important zone on screen
   // instead of letting the peek bury it.
-  const GRect full = layer_get_bounds(layer);
-  const GRect b = layer_get_unobstructed_bounds(layer);
+  static GRect full, b;
+  static Schedule sch;
+  static struct tm *t;
+  static Frame fr;
+  s_ctx = ctx;
+  full = layer_get_bounds(layer);
+  b = layer_get_unobstructed_bounds(layer);
   s_w = b.size.w;
 
-  time_t now = time(NULL);
-  struct tm *t = localtime(&now);
-  Schedule sch = schedule_for(t->tm_hour, t->tm_min, t->tm_sec);
+  const time_t now = time(NULL);
+  t = localtime(&now);
+  sch = schedule_for(t->tm_hour, t->tm_min, t->tm_sec);
 /*DEMO*/
 
   theme_apply(t->tm_hour);
@@ -936,18 +975,17 @@ static void face_update(Layer *layer, GContext *ctx) {
 
   draw_rail(ctx, &sch, b.size.h);
 
-  const Frame fr = {
-    .start = sc(PAD_WRIST),                                       // logical left
-    .end = s_w - sc(RAIL_W) - sc(RAIL_BORDER) - sc(PAD_GUTTER),   // logical right
-    .top = sc(PAD_TOP),
-    .bot = b.size.h - sc(PAD_BOTTOM),
-  };
+  fr.start = sc(PAD_WRIST);                                       // logical left
+  fr.end = s_w - sc(RAIL_W) - sc(RAIL_BORDER) - sc(PAD_GUTTER);   // logical right
+  fr.top = sc(PAD_TOP);
+  fr.bot = b.size.h - sc(PAD_BOTTOM);
 
   layout_time(t, &fr);
   layout_block(t, &sch, &fr);
-  paint_time(ctx);
-  paint_block(ctx, &fr);
-  draw_modules(ctx, s_f_mod, s_f_cap, fr.start, fr.end - fr.start, s_tm.band_top, s_bk.block_y);
+  layout_modules(s_f_mod, s_f_cap, fr.start, fr.end - fr.start, s_tm.band_top, s_bk.block_y);
+  paint_time();
+  paint_block(fr.start);
+  paint_modules();
 
   // ---- boarding buzz, once on the transition into the solid block.
   if (s_set.buzz && sch.remaining == THRESHOLD && s_last_remaining != THRESHOLD

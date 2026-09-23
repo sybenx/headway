@@ -69,19 +69,22 @@ and no account.
 
 ## Platforms
 
-Rectangular displays only: `aplite`, `basalt`, `diorite` (144×168) and `emery`
-(200×228). The layout is an edge-flush rail on a rectangle, which a round
+Rectangular displays only: `aplite`, `basalt`, `diorite` and `flint` (144×168)
+and `emery` (200×228). The layout is an edge-flush rail on a rectangle, which a round
 screen cannot carry without a different design, so `chalk` and `gabbro` are
 not targeted.
 
-`flint` (Core 2 Duo) is out of this release. Its firmware gives a watchface a
-smaller stack than the older watches do, and the text renderer runs out of it
-on this face; 1.0.2 was the last build that ran there, and it comes back once
-the face fits.
+Every watch gives a face about 2KB of stack, and the firmware's text renderer
+wants well over half of it for each call. So the face keeps almost nothing of
+its own beneath that call: each zone is laid out into static storage, and the
+painters hand their text to one small leaf. Measured with the stack painted
+and read back, a full frame with three modules peaks at 1752 bytes on
+`basalt` and 1776 on `flint`, which is what lets `flint` (Core 2 Duo) ship
+again after 1.0.3 and 1.0.4 left it out.
 
-| aplite | diorite | emery |
-|---|---|---|
-| ![aplite](screenshots/aplite.png) | ![diorite](screenshots/diorite.png) | ![emery](screenshots/emery.png) |
+| aplite | diorite | flint | emery |
+|---|---|---|---|
+| ![aplite](screenshots/aplite.png) | ![diorite](screenshots/diorite.png) | ![flint](screenshots/flint.png) | ![emery](screenshots/emery.png) |
 
 On one-bit watches the accent becomes ink and the quarter-hour ticks dither,
 as the design's mono note asks. A module whose sensor the watch lacks — heart
