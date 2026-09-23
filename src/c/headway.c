@@ -51,10 +51,11 @@ typedef struct {
   bool imperial;
   uint8_t transit;     // TRANSIT_*: what knowing the hub changes
   uint16_t radius;     // metres around the hub that count as near
+  bool flick;          // a flick asks for the nearest stop
 } Settings;
 
 #define SETTINGS_KEY 1
-#define SETTINGS_VERSION 2
+#define SETTINGS_VERSION 3
 #define WEATHER_KEY  2
 #define TRANSIT_KEY  3
 #define THRESHOLD 5   // minutes; block goes solid at or under this
@@ -118,6 +119,7 @@ static void settings_defaults(void) {
   s_set.imperial = false;
   s_set.transit = TRANSIT_OFF;
   s_set.radius = 300;
+  s_set.flick = true;
 }
 
 static void settings_clamp(void) {
@@ -151,10 +153,10 @@ static void settings_load(void) {
       persist_read_data(SETTINGS_KEY, &stored, sizeof(stored));
       if (stored.version == SETTINGS_VERSION) s_set = stored;
     } else if (n >= (int)offsetof(Settings, transit) && n < (int)sizeof(s_set)) {
-      // Layout 1: the same fields up to the hub settings, which are appended.
+      // An older layout: the same fields up to where new ones were appended.
       // Carry it over rather than hand the wearer the defaults again.
       persist_read_data(SETTINGS_KEY, &stored, n);
-      if (stored.version == 1) s_set = stored;
+      if (stored.version >= 1 && stored.version <= SETTINGS_VERSION) s_set = stored;
     }
   }
   s_set.version = SETTINGS_VERSION;
@@ -979,8 +981,11 @@ static void paint_idle(int fr_start) {
 // never covers.
 #define SV_ROW_H 24
 #define SV_HEAD_GAP 18
+#define SV_ROW_H_COMPACT 16
+#define SV_ROWS_COMPACT 2
 static struct {
   int top, head_y, dist_x, dist_w, n;
+  bool compact;
   char dist[10], note[20], stop[24];
   struct { int y, badge_x, badge_w, badge_h, text_x, text_y, head_x, head_y, when_x, when_y, unit_x, unit_y; char head[20]; } r[SV_ROWS];
   Metrics m_lab, m_val, m_cap;
@@ -997,15 +1002,16 @@ static void format_dist(char *out, size_t n, int metres) {
   }
 }
 
-static void layout_stopview(const Frame *fr, int band_top) __attribute__((noinline));
-static void layout_stopview(const Frame *fr, int band_top) {
+static void layout_stopview(const Frame *fr, int band_top, bool compact) __attribute__((noinline));
+static void layout_stopview(const Frame *fr, int band_top, bool compact) {
   s_svl.m_lab = barlow_metrics(measure("B", s_f_label).h);
   s_svl.m_val = barlow_metrics(measure("8", s_f_mod).h);
   s_svl.m_cap = barlow_metrics(measure("M", s_f_cap).h);
   s_svl.top = band_top;
+  s_svl.compact = compact;
   s_svl.head_y = band_top + sc(4) - s_svl.m_lab.bearing;
   s_svl.dist_w = 0;
-  if (s_sv.dist > 60) {
+  if (s_sv.dist > 60 && !compact) {
     format_dist(s_svl.dist, sizeof(s_svl.dist), s_sv.dist);
     s_svl.dist_w = run_w(s_svl.dist, s_f_label, false, TRACK);
     s_svl.dist_x = fr->end - s_svl.dist_w;
@@ -1021,9 +1027,11 @@ static void layout_stopview(const Frame *fr, int band_top) {
   }
   s_svl.note[0] = 0;
   if (s_sv.n == 0) strncpy(s_svl.note, s_sv.stop[0] ? "NO MORE TODAY" : "NO STOPS NEARBY", sizeof(s_svl.note));
-  s_svl.n = s_sv.n;
-  int y = band_top + sc(SV_HEAD_GAP);
-  for (int i = 0; i < s_sv.n; i++) {
+  // Compact, the stop line goes and two rows sit in the band: the solid
+  // block below stays where it is.
+  s_svl.n = compact && s_sv.n > SV_ROWS_COMPACT ? SV_ROWS_COMPACT : s_sv.n;
+  int y = band_top + (compact ? sc(3) : sc(SV_HEAD_GAP));
+  for (int i = 0; i < s_svl.n; i++) {
     const SvRow *row = &s_sv.row[i];
     const int pad = sc(3);
     s_svl.r[i].y = y;
@@ -1051,21 +1059,23 @@ static void layout_stopview(const Frame *fr, int band_top) {
       *e = 0;
       while (e > s_svl.r[i].head && e[-1] == ' ') *--e = 0;
     }
-    y += sc(SV_ROW_H);
+    y += sc(compact ? SV_ROW_H_COMPACT : SV_ROW_H);
   }
 }
 
 static void paint_stopview(int fr_start) __attribute__((noinline));
 static void paint_stopview(int fr_start) {
-  graphics_context_set_text_color(s_ctx, s_dim);
-  draw_run(s_svl.stop, s_f_label, fr_start, s_svl.head_y, false, TRACK);
+  if (!s_svl.compact) {
+    graphics_context_set_text_color(s_ctx, s_dim);
+    draw_run(s_svl.stop, s_f_label, fr_start, s_svl.head_y, false, TRACK);
+  }
   if (s_svl.dist_w) {
     graphics_context_set_text_color(s_ctx, s_ink);
     draw_run(s_svl.dist, s_f_label, s_svl.dist_x, s_svl.head_y, false, TRACK);
   }
   if (s_svl.note[0]) {
     graphics_context_set_text_color(s_ctx, s_ink);
-    draw_run(s_svl.note, s_f_label, fr_start, s_svl.top + sc(SV_HEAD_GAP) + sc(2) - s_svl.m_lab.bearing, false, TRACK);
+    draw_run(s_svl.note, s_f_label, fr_start, s_svl.top + (s_svl.compact ? sc(6) : sc(SV_HEAD_GAP) + sc(2)) - s_svl.m_lab.bearing, false, TRACK);
   }
   for (int i = 0; i < s_svl.n; i++) {
     const SvRow *row = &s_sv.row[i];
@@ -1289,9 +1299,17 @@ static void face_update(Layer *layer, GContext *ctx) {
 
   layout_time(t, &fr);
   paint_time();
-  if (s_sv.valid) {
-    // The answer to a flick stands in for everything below the time.
-    layout_stopview(&fr, s_tm.band_top);
+  // The answer to a flick stands in for everything below the time, unless
+  // the block is solid: a bus is boarding, or leaving, and nothing covers
+  // that. Then the answer keeps to the band above the block, two rows.
+  const bool solid = !quiet && (sch.is_boarding || sch.is_final || sch.is_now);
+  if (s_sv.valid && !solid) {
+    layout_stopview(&fr, s_tm.band_top, false);
+    paint_stopview(fr.start);
+  } else if (s_sv.valid) {
+    layout_block(t, &sch, &fr);
+    layout_stopview(&fr, s_tm.band_top, true);
+    paint_block(fr.start);
     paint_stopview(fr.start);
   } else {
     if (quiet) layout_idle(t, &fr);
@@ -1362,7 +1380,7 @@ static void stopview_hold(uint32_t ms) {
 // read in the same glance.
 static void tap_handler(AccelAxisType axis, int32_t direction) {
   (void)axis; (void)direction;
-  if (s_set.transit == TRANSIT_OFF || s_sv.pending) return;
+  if (s_set.transit == TRANSIT_OFF || !s_set.flick || s_sv.pending) return;
   DictionaryIterator *out;
   if (app_message_outbox_begin(&out) != APP_MSG_OK) return;
   dict_write_uint8(out, MESSAGE_KEY_FLICK, 1);
@@ -1455,6 +1473,9 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
 
   if ((tp = dict_find(iter, MESSAGE_KEY_TRANSIT))) {
     s_set.transit = (uint8_t)tuple_int(tp);
+  }
+  if ((tp = dict_find(iter, MESSAGE_KEY_FLICK_ON))) {
+    s_set.flick = tp->value->int32 != 0;
   }
   if ((tp = dict_find(iter, MESSAGE_KEY_TR_RADIUS))) {
     s_set.radius = (uint16_t)tp->value->int32;

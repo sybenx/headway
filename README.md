@@ -63,7 +63,7 @@ Reachable from the Pebble app.
 - **Modules** — three slots: heart rate, steps, battery, weather or nothing
 - **Icons instead of captions**
 - **Units** — °C or °F
-- **Knowing the hub** — see below; off by default, with the radius
+- **Knowing the hub** — see below; off by default, with the radius and a switch for the flick
 
 Weather comes from [Open-Meteo](https://open-meteo.com), which needs no API key
 and no account.
@@ -102,6 +102,11 @@ minutes, or the clock time once it is more than an hour out. Stood at the
 stop, the line is just its name; further off, it says how far. Twin stops
 across a road are read as one. Nothing within a mile and a half, and it says
 so. The rail stays.
+
+It never covers a solid block. A bus boarding, the final minute, or NOW is
+the one thing on the face that must not be lost to a flick, least of all an
+accidental one, so then the answer keeps to the band above the block, two
+rows, and the block stays. A setting turns the flick off altogether.
 
 | at a stop | near one |
 |---|---|

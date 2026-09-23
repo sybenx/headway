@@ -314,6 +314,13 @@
         "max": 1000,
         "step": 50,
         "description": "Metres."
+      },
+      {
+        "type": "toggle",
+        "messageKey": "FLICK_ON",
+        "label": "Flick for the nearest stop",
+        "defaultValue": true,
+        "description": "A flick of the wrist shows the nearest stop and what leaves it next. It never covers a solid block."
       }
     ]
   },
