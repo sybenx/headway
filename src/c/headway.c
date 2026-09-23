@@ -221,21 +221,39 @@ static void icon_heart(GContext *ctx, GRect r) {
   }
 }
 
-// One print, not two. A pair at this size leaves five pixels per foot,
-// which reads as four dots; a single print gets the whole box and actually
-// looks like a foot — a ball, a gap, and a heel offset to one side.
+// Scale a 1-bit pattern into a box. Composed circles and rounded rects
+// cannot hold a recognisable shape at ten pixels; placing the pixels by
+// hand can, and this still scales up for emery and inverts with the theme.
+static void draw_bits(GContext *ctx, GRect r, const uint8_t *rows,
+                      int rw, int rh) {
+  for (int y = 0; y < rh; y++) {
+    for (int x = 0; x < rw; x++) {
+      if (!(rows[y] & (0x80 >> x))) continue;
+      const int16_t x0 = r.origin.x + x * r.size.w / rw;
+      const int16_t x1 = r.origin.x + (x + 1) * r.size.w / rw;
+      const int16_t y0 = r.origin.y + y * r.size.h / rh;
+      const int16_t y1 = r.origin.y + (y + 1) * r.size.h / rh;
+      graphics_fill_rect(ctx, GRect(x0, y0, x1 > x0 ? x1 - x0 : 1,
+                                    y1 > y0 ? y1 - y0 : 1), 0, GCornerNone);
+    }
+  }
+}
+
+// A shoe in profile: high at the heel, sloping to the toe, flat sole.
+static const uint8_t SHOE[7] = {
+  0xC0,  // # # . . . . . .
+  0xE0,  // # # # . . . . .
+  0xF0,  // # # # # . . . .
+  0xF8,  // # # # # # . . .
+  0xFE,  // # # # # # # # .
+  0xFF,  // # # # # # # # #
+  0xFF,  // # # # # # # # #
+};
+
 static void icon_steps(GContext *ctx, GRect r) {
-  const int16_t w = r.size.w, h = r.size.h;
-  const int16_t ball_w = w * 4 / 5;
-  const int16_t ball_h = h * 3 / 5;
-  const int16_t heel_w = w / 2 > 2 ? w / 2 : 2;
-  const int16_t heel_h = h - ball_h - 1 > 1 ? h - ball_h - 1 : 2;
-  const int16_t bx = r.origin.x + (w - ball_w) / 2;
-  graphics_fill_rect(ctx, GRect(bx, r.origin.y, ball_w, ball_h),
-                     ball_w / 2, GCornersAll);
-  // Heel sits inboard of the ball, which is what gives the foot an arch.
-  graphics_fill_rect(ctx, GRect(bx + ball_w - heel_w, r.origin.y + ball_h + 1,
-                                heel_w, heel_h), heel_w / 2, GCornersAll);
+  const int16_t h = r.size.w * 7 / 8;
+  draw_bits(ctx, GRect(r.origin.x, r.origin.y + (r.size.h - h) / 2,
+                       r.size.w, h), SHOE, 8, 7);
 }
 
 static void icon_battery(GContext *ctx, GRect r, int pct) {
@@ -637,186 +655,42 @@ static void draw_modules(GContext *ctx, GFont f_val, GFont f_cap,
   }
 }
 
+
 static void face_update(Layer *layer, GContext *ctx) {
-  // A timeline peek slides up over the bottom of the watchface — precisely
-  // where the countdown and the date sit. Laying out against the
-  // unobstructed area keeps the second-most important zone on screen
-  // instead of letting the peek bury it.
-  const GRect full = layer_get_bounds(layer);
-  const GRect b = layer_get_unobstructed_bounds(layer);
+  const GRect b = layer_get_bounds(layer);
   s_w = b.size.w;
-
-  time_t now = time(NULL);
-  struct tm *t = localtime(&now);
-  Schedule sch = schedule_for(t->tm_hour, t->tm_min, t->tm_sec);
-/*DEMO*/
-
-  theme_apply(t->tm_hour);
+  theme_apply(0);
   graphics_context_set_fill_color(ctx, s_ground);
-  graphics_fill_rect(ctx, full, 0, GCornerNone);
-
-  draw_rail(ctx, &sch, b.size.h);
-
-  // Content box, inside the rail and the paddings.
-  const int rail_total = sc(RAIL_W) + sc(RAIL_BORDER);
-  const int c_start = sc(PAD_WRIST);                        // logical left
-  const int c_end   = s_w - rail_total - sc(PAD_GUTTER);     // logical right
-  const int c_top   = sc(PAD_TOP);
-  const int c_bot   = b.size.h - sc(PAD_BOTTOM);
-
-  GFont f_time  = s_f_time;
-  GFont f_count = s_f_count;
-  // Gothic 14 Bold caps, per the build notes — one step up on emery, whose
-  // 200px width would otherwise leave the labels undersized next to the
-  // numerals, which do scale.
-#ifdef PBL_PLATFORM_EMERY
-  GFont f_label = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
-  GFont f_caption = fonts_get_system_font(FONT_KEY_GOTHIC_14);
-  GFont f_mod = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
-#else
-  GFont f_label = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
-  // The module caption is 7px at design scale, where a hand-tuned bitmap
-  // face beats anything a TTF rasterises.
-  GFont f_caption = fonts_get_system_font(FONT_KEY_GOTHIC_09);
-  // Module values are ~15px at design scale. Barlow rasterises unevenly that
-  // small; the hand-tuned bitmap Gothic stays crisp, so the bundled face is
-  // kept for the hero numerals where it has room to render properly.
-  GFont f_mod = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
-#endif
-
-  // ---- zone 03/04: the time, flush to the outer edge so the minute
-  // survives a cuff that hides the hour.
-  char hh[4], mm[4];
-  snprintf(hh, sizeof(hh), "%02d", display_hour(t->tm_hour));
-  snprintf(mm, sizeof(mm), "%02d", t->tm_min);
-
-  const GSize z_hh = measure(hh, f_time), z_mm = measure(mm, f_time);
-  const GSize z_colon = measure(":", f_time);
-  const Metrics m_time = barlow_metrics(z_hh.h);
-  const int cgap = sc(COLON_GAP);
-  const int colon_w = z_colon.w + 2 * cgap;
-  const int time_w = z_hh.w + colon_w + z_mm.w;
-  const int time_x = c_end - time_w;
-  const int time_y = c_top + sc(TIME_MARGIN_TOP) - m_time.bearing;
-
-  graphics_context_set_text_color(ctx, s_ink);
-  draw_at(ctx, hh, f_time, time_x, time_y, z_hh);
-  draw_at(ctx, mm, f_time, time_x + z_hh.w + colon_w, time_y, z_mm);
-
-  // The one accent in the time: the design's colon.
-  graphics_context_set_text_color(ctx, accent());
-  draw_at(ctx, ":", f_time, time_x + z_hh.w + cgap, time_y, z_colon);
-
-  // ---- optional extras, in the band the design leaves empty.
-  const int band_top = time_y + m_time.bearing + m_time.cap + sc(6);
-
-  // ---- zone 02: the countdown, and zone 04: weekday and date.
-  char dow[8], date[12], label[20], num[8];
-  strftime(dow, sizeof(dow), "%a", t);
-  strftime(date, sizeof(date), "%d %b", t);
-  for (char *p = dow; *p; p++) *p = toupper((int)*p);
-  for (char *p = date; *p; p++) *p = toupper((int)*p);
-
-  const bool solid = sch.is_now || sch.is_boarding;
-  const char *unit = "MIN";
-  if (sch.is_now) {
-    strncpy(label, "DEPARTS", sizeof(label));
-    strncpy(num, "NOW", sizeof(num));
-  } else {
-    snprintf(label, sizeof(label), "%s %d:%02d",
-             sch.is_boarding ? "LEAVES" : "NEXT",
-             display_hour(sch.next_h), sch.next_m);
-    snprintf(num, sizeof(num), "%d", sch.is_final ? sch.secs : sch.remaining);
-    if (sch.is_final) unit = "SEC";
+  graphics_fill_rect(ctx, b, 0, GCornerNone);
+  graphics_context_set_fill_color(ctx, s_ink);
+  graphics_context_set_stroke_color(ctx, s_ink);
+  const int S = 10, PAD = 4;
+  int codes[] = {0, 2, 3, 45, 61, 71, 95};
+  // row 0: heart, steps, battery 15/60/100
+  int x = PAD, y = PAD;
+  icon_heart(ctx, GRect(x, y, S, S)); x += S + 8;
+  icon_steps(ctx, GRect(x, y, S*4/5, S)); x += S + 8;
+  icon_battery(ctx, GRect(x, y, S*8/5, S), 15); x += S*8/5 + 8;
+  icon_battery(ctx, GRect(x, y, S*8/5, S), 60); x += S*8/5 + 8;
+  icon_battery(ctx, GRect(x, y, S*8/5, S), 100);
+  // rows 1-2: every distinct weather condition
+  x = PAD; y = PAD + S + 14;
+  for (int i = 0; i < 7; i++) {
+    if (i == 4) { x = PAD; y += S + 14; }
+    icon_weather(ctx, GRect(x, y, S, S), codes[i], s_ink, s_ground);
+    x += S + 10;
   }
-
-  // "NOW" is letters, so it needs a text face rather than LECO numbers.
-  GFont f_num = sch.is_now ? fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD) : f_count;
-  const GSize z_label = measure(label, f_label);
-  const GSize z_num = measure(num, f_num);
-  const GSize z_min = sch.is_now ? GSize(0, 0) : measure(unit, f_label);
-
-  const Metrics m_lab = gothic_metrics(z_label.h);
-  const Metrics m_min = gothic_metrics(z_min.h);
-  const Metrics m_num = sch.is_now ? gothic_metrics(z_num.h) : barlow_metrics(z_num.h);
-
-  const GSize z_dow = measure(dow, f_label), z_date = measure(date, f_label);
-
-  const int num_row_w = z_num.w + (sch.is_now ? 0 : sc(LABEL_GAP) + z_min.w);
-  int inner_w = num_row_w > z_label.w ? num_row_w : z_label.w;
-  const int min_inner = sc(BLOCK_MIN_W) - sc(BLOCK_PAD_IN) - sc(BLOCK_PAD_OUT);
-  if (inner_w < min_inner) inner_w = min_inner;
-
-  // The bottom row is a space-between pair and the block must not grow into
-  // the weekday/date column. The longest label ("LEAVES 10:30" in Gothic 14
-  // Bold) is a few pixels wider than the 144px row allows, so the block's own
-  // padding gives way first and the normal state keeps the design's spacing.
-  const int date_w = z_dow.w > z_date.w ? z_dow.w : z_date.w;
-  const int avail = c_end - c_start - date_w - sc(ROW_GAP);
-  int pad_in = sc(BLOCK_PAD_IN), pad_out = sc(BLOCK_PAD_OUT);
-  int over = inner_w + pad_in + pad_out - avail;
-  if (over > 0) {
-    int give = pad_in - sc(BLOCK_PAD_MIN);
-    if (give > over) give = over;
-    if (give > 0) { pad_in -= give; over -= give; }
+  // and the same weather set at double size, to see the intent
+  x = PAD; y += S + 16;
+  for (int i = 0; i < 4; i++) {
+    icon_weather(ctx, GRect(x, y, S*2, S*2), codes[i], s_ink, s_ground);
+    x += S*2 + 8;
   }
-  if (over > 0) {
-    int give = pad_out - sc(BLOCK_PAD_MIN);
-    if (give > over) give = over;
-    if (give > 0) { pad_out -= give; over -= give; }
+  x = PAD; y += S*2 + 8;
+  for (int i = 4; i < 7; i++) {
+    icon_weather(ctx, GRect(x, y, S*2, S*2), codes[i], s_ink, s_ground);
+    x += S*2 + 8;
   }
-  if (over > 0) inner_w -= over;   // last resort: the label ellipsizes
-
-  const int inner_h = m_lab.cap + sc(LABEL_GAP) + m_num.cap;
-  const int block_w = inner_w + pad_in + pad_out;
-  const int block_h = inner_h + sc(BLOCK_PAD_T) + sc(BLOCK_PAD_B);
-  const int block_x = c_end - block_w;
-  const int block_y = c_bot - block_h;
-
-  if (solid) {
-    const GColor fill = sch.is_now ? s_ink : accent();
-    graphics_context_set_fill_color(ctx, fill);
-    graphics_fill_rect(ctx, GRect(mapx(block_x, block_w), block_y, block_w, block_h), 0, GCornerNone);
-    graphics_context_set_text_color(ctx, on_fill(fill));
-  } else {
-    graphics_context_set_text_color(ctx, s_ink);
-  }
-
-  // Label and number are end-aligned within the block.
-  const int inner_x = block_x + pad_in;
-  const int label_y = block_y + sc(BLOCK_PAD_T);
-  graphics_draw_text(ctx, label, f_label,
-                     GRect(mapx(inner_x, inner_w), label_y - m_lab.bearing, inner_w, z_label.h),
-                     GTextOverflowModeTrailingEllipsis,
-                     s_set.wrist_right ? GTextAlignmentLeft : GTextAlignmentRight, NULL);
-
-  const int num_y = label_y + m_lab.cap + sc(LABEL_GAP);
-  const int num_x = inner_x + inner_w - num_row_w;
-  draw_at(ctx, num, f_num, num_x, num_y - m_num.bearing, z_num);
-  if (!sch.is_now) {
-    // "MIN" rides the baseline of the big number.
-    const int min_y = num_y + m_num.cap - m_min.cap;
-    draw_at(ctx, unit, f_label, num_x + z_num.w + sc(LABEL_GAP), min_y - m_min.bearing, z_min);
-  }
-
-  // Weekday and date sit on the wrist side: first to disappear.
-  const Metrics m_dow = gothic_metrics(z_dow.h), m_date = gothic_metrics(z_date.h);
-  const int date_y = c_bot - sc(DATE_PAD_BOT) - m_date.cap;
-  const int dow_y = date_y - sc(DOW_GAP) - m_dow.cap;
-
-  graphics_context_set_text_color(ctx, s_ink);
-  draw_at(ctx, dow, f_label, c_start, dow_y - m_dow.bearing, z_dow);
-  graphics_context_set_text_color(ctx, s_dim);
-  draw_at(ctx, date, f_label, c_start, date_y - m_date.bearing, z_date);
-
-  draw_modules(ctx, f_mod, f_caption, c_start, c_end - c_start, band_top, dow_y - sc(4));
-
-  // ---- boarding buzz, once on the transition into the solid block.
-  if (s_set.buzz && sch.remaining == THRESHOLD && s_last_remaining != THRESHOLD
-      && !quiet_time_is_active()) {
-    vibes_short_pulse();
-  }
-  s_last_remaining = sch.remaining;
 }
 
 // ------------------------------------------------------------------- wiring
