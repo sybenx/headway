@@ -138,22 +138,28 @@ static void weather_load(void) {
 #define PAD_BOTTOM    7
 #define PAD_WRIST     8   // inline-start: the wrist side
 #define PAD_GUTTER    6   // inline-end: between content and the rail
-#define DATE_PAD_BOT  3
+#define DATE_PAD_BOT  5
 #define BLOCK_PAD_T   4
 #define BLOCK_PAD_B   2
 #define BLOCK_PAD_IN  6   // toward the wrist
 #define BLOCK_PAD_OUT 5   // toward the rail
 #define BLOCK_MIN_W  65
-#define LABEL_GAP     3   // number to its MIN, on the baseline
-#define BLOCK_ROW_GAP 6   // label cap bottom to number cap top
-#define DOW_GAP       3
+#define LABEL_GAP     2   // number to its MIN, on the baseline
+// Label cap bottom to number cap top. The Gothic label's estimated cap runs a
+// pixel long, two on emery's larger face, so the constant carries the slack.
+#ifdef PBL_PLATFORM_EMERY
+  #define BLOCK_ROW_GAP 9
+#else
+  #define BLOCK_ROW_GAP 8
+#endif
+#define DOW_GAP       5
 #define ROW_GAP       2
 #define MOD_GAP       9
-#define MOD_LABEL_GAP 3
+#define MOD_LABEL_GAP 4
 #define MOD_ICON_GAP  4
 #define BLOCK_PAD_MIN 3
-#define TIME_MARGIN_TOP 3
-#define COLON_GAP     1
+#define TIME_MARGIN_TOP 10
+#define COLON_GAP     0   // the design's 2px margin, less its tracking
 
 // The design's own face. System LECO tops out at 42px, which is half the
 // scale the mock draws, so the numerals ship as a resource and scale per
@@ -162,13 +168,19 @@ static void weather_load(void) {
   #define RES_TIME  RESOURCE_ID_FONT_TIME_83
   #define RES_COUNT RESOURCE_ID_FONT_COUNT_61
   #define RES_MOD   RESOURCE_ID_FONT_MOD_21
+  #define RES_LABEL RESOURCE_ID_FONT_LABEL_15
+  #define RES_DATE  RESOURCE_ID_FONT_DATE_17
+  #define RES_CAP   RESOURCE_ID_FONT_CAP_12
 #else
   #define RES_TIME  RESOURCE_ID_FONT_TIME_60
   #define RES_COUNT RESOURCE_ID_FONT_COUNT_44
   #define RES_MOD   RESOURCE_ID_FONT_MOD_15
+  #define RES_LABEL RESOURCE_ID_FONT_LABEL_11
+  #define RES_DATE  RESOURCE_ID_FONT_DATE_12
+  #define RES_CAP   RESOURCE_ID_FONT_CAP_9
 #endif
 
-static GFont s_f_time, s_f_count, s_f_mod;
+static GFont s_f_time, s_f_count, s_f_mod, s_f_label, s_f_date, s_f_cap;
 static Window *s_window;
 static Layer *s_face;
 static int s_last_remaining = -1;
@@ -197,10 +209,6 @@ static Metrics barlow_metrics(int boxh) {
   Metrics m = { boxh * BARLOW_BEARING / 100, boxh * BARLOW_CAP / 100 };
   return m;
 }
-static Metrics gothic_metrics(int boxh) {
-  Metrics m = { boxh * 3 / 14, boxh * 10 / 14 };
-  return m;
-}
 
 // Draw text with its measured box placed at a logical origin.
 static void draw_at(GContext *ctx, const char *t, GFont f, int lx, int y, GSize sz) {
@@ -208,6 +216,53 @@ static void draw_at(GContext *ctx, const char *t, GFont f, int lx, int y, GSize 
                      GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, NULL);
 }
 
+// Text drawn a glyph at a time, so the face can do what the design's CSS
+// does and the Pebble text layer cannot: tabular figures (every digit takes
+// the advance of a zero, so a 1 no longer pulls its neighbours in and 10:11
+// is as wide as 00:00) and tracking (the design's labels are set with 6-10%
+// of letter-space). The design's -0.03em tracking on the numerals is folded
+// in: a tabular cell less that tracking is, to the pixel, a zero's own
+// advance in this face.
+// One UTF-8 sequence — the degree sign is two bytes — copied into a buffer.
+static int glyph_at(const char *p, char *out) {
+  const unsigned char c = (unsigned char)*p;
+  const int n = c < 0x80 ? 1 : (c >> 5) == 6 ? 2 : (c >> 4) == 14 ? 3 : 4;
+  int i = 0;
+  for (; i < n && p[i]; i++) out[i] = p[i];
+  out[i] = 0;
+  return i;
+}
+
+static int run_w(const char *t, GFont f, bool tabular, int track) {
+  const int cell = tabular ? measure("0", f).w : 0;
+  int w = 0;
+  for (const char *p = t; *p;) {
+    char one[5];
+    p += glyph_at(p, one);
+    w += ((tabular && isdigit((int)one[0])) ? cell : measure(one, f).w) + (*p ? track : 0);
+  }
+  return w;
+}
+
+static void draw_run(GContext *ctx, const char *t, GFont f, int lx, int y, bool tabular, int track) {
+  const int cell = tabular ? measure("0", f).w : 0;
+  for (const char *p = t; *p;) {
+    char one[5];
+    p += glyph_at(p, one);
+    const GSize z = measure(one, f);
+    // A glyph boxed at exactly its measured width can still be judged not
+    // to fit and drawn as an ellipsis, so the box gets slack on the side
+    // the glyph is not aligned to.
+    const int slack = z.w + 4;
+    GRect r = GRect(mapx(lx, z.w), y, z.w + slack, z.h);
+    if (s_set.wrist_right) r.origin.x -= slack;
+    graphics_draw_text(ctx, one, f, r, GTextOverflowModeWordWrap,
+                       s_set.wrist_right ? GTextAlignmentRight : GTextAlignmentLeft, NULL);
+    lx += ((tabular && isdigit((int)one[0])) ? cell : z.w) + track;
+  }
+}
+
+#define TRACK 1   // the design's 6-10% letter-space, one pixel at these sizes
 
 // ---------------------------------------------------------------- icons
 // Drawn rather than bundled: they invert with the theme, scale with the
@@ -640,20 +695,20 @@ static void draw_modules(GContext *ctx, GFont f_val, GFont f_cap,
   // fills its box where a caption's box carries slack, so it gets a wider
   // gap to the value.
   const bool icons = s_set.mod_icons;
-  const int label_h = icons ? icon : z_cap.h;
+  const Metrics m_cap = barlow_metrics(z_cap.h);
+  const int label_h = icons ? icon : m_cap.cap;
   const int lgap = icons ? sc(MOD_ICON_GAP) : sc(MOD_LABEL_GAP);
   const int gap = sc(MOD_GAP);
 
   // Widths first: the row is dropped whole if it cannot fit the band.
   int widths[MODULE_COUNT], total = 0;
   for (int i = 0; i < n; i++) {
-    const GSize zv = measure(mods[i].value, f_val);
-    int w = zv.w;
+    int w = run_w(mods[i].value, f_val, true, 0);
     if (module_uses_icon(&mods[i])) {
       const int iw = module_icon_w(&mods[i], icon);
       if (iw > w) w = iw;
     }
-    else { const GSize zc = measure(mods[i].caption, f_cap); if (zc.w > w) w = zc.w; }
+    else { const int cw = run_w(mods[i].caption, f_cap, false, TRACK); if (cw > w) w = cw; }
     widths[i] = w;
     total += w + (i ? gap : 0);
   }
@@ -665,7 +720,8 @@ static void draw_modules(GContext *ctx, GFont f_val, GFont f_cap,
   // zone in the design's ranking, so they go first rather than crowd the
   // countdown — the same order a sleeve would take them in.
   if (band_bot - band_top < row_h) return;
-  const int y = (band_top + band_bot) / 2 - row_h / 2;
+  // Centred, then the design's 4px padding-top nudges it down by half that.
+  const int y = (band_top + band_bot) / 2 - row_h / 2 + sc(1);
 
   int x = c_start;
   for (int i = 0; i < n; i++) {
@@ -676,12 +732,10 @@ static void draw_modules(GContext *ctx, GFont f_val, GFont f_cap,
       module_draw_icon(ctx, &mods[i], GRect(mapx(x, iw), y + label_h - icon, iw, icon));
     } else {
       graphics_context_set_text_color(ctx, s_dim);
-      const GSize zc = measure(mods[i].caption, f_cap);
-      draw_at(ctx, mods[i].caption, f_cap, x, y + label_h - zc.h, zc);
+      draw_run(ctx, mods[i].caption, f_cap, x, y + label_h - m_cap.cap - m_cap.bearing, false, TRACK);
     }
     graphics_context_set_text_color(ctx, s_ink);
-    const GSize zv = measure(mods[i].value, f_val);
-    draw_at(ctx, mods[i].value, f_val, x, y + label_h + lgap - m_val.bearing, zv);
+    draw_run(ctx, mods[i].value, f_val, x, y + label_h + lgap - m_val.bearing, true, 0);
     x += widths[i] + gap;
   }
 }
@@ -715,18 +769,10 @@ static void face_update(Layer *layer, GContext *ctx) {
 
   GFont f_time  = s_f_time;
   GFont f_count = s_f_count;
-  // Gothic 14 Bold caps, per the build notes — one step up on emery, whose
-  // 200px width would otherwise leave the labels undersized next to the
-  // numerals, which do scale.
-#ifdef PBL_PLATFORM_EMERY
-  GFont f_label = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
-  GFont f_caption = fonts_get_system_font(FONT_KEY_GOTHIC_14);
-#else
-  GFont f_label = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
-  // The module caption is 7px at design scale, where a hand-tuned bitmap
-  // face beats anything a TTF rasterises.
-  GFont f_caption = fonts_get_system_font(FONT_KEY_GOTHIC_09);
-#endif
+  // The build notes offered Gothic 14 Bold for the labels; the mock's own
+  // Barlow Condensed is preferred, at the mock's sizes, so the whole face is
+  // one voice.
+  GFont f_label = s_f_label, f_date = s_f_date, f_caption = s_f_cap;
 
   // ---- zone 03/04: the time, flush to the outer edge so the minute
   // survives a cuff that hides the hour.
@@ -734,25 +780,28 @@ static void face_update(Layer *layer, GContext *ctx) {
   snprintf(hh, sizeof(hh), "%02d", display_hour(t->tm_hour));
   snprintf(mm, sizeof(mm), "%02d", t->tm_min);
 
-  const GSize z_hh = measure(hh, f_time), z_mm = measure(mm, f_time);
   const GSize z_colon = measure(":", f_time);
-  const Metrics m_time = barlow_metrics(z_hh.h);
+  const Metrics m_time = barlow_metrics(measure("0", f_time).h);
   const int cgap = sc(COLON_GAP);
+  const int hh_w = run_w(hh, f_time, true, 0), mm_w = run_w(mm, f_time, true, 0);
   const int colon_w = z_colon.w + 2 * cgap;
-  const int time_w = z_hh.w + colon_w + z_mm.w;
+  const int time_w = hh_w + colon_w + mm_w;
   const int time_x = c_end - time_w;
+  // The design's line box sits its digits well below the padding: the cap
+  // top lands 18px down at this scale.
   const int time_y = c_top + sc(TIME_MARGIN_TOP) - m_time.bearing;
 
   graphics_context_set_text_color(ctx, s_ink);
-  draw_at(ctx, hh, f_time, time_x, time_y, z_hh);
-  draw_at(ctx, mm, f_time, time_x + z_hh.w + colon_w, time_y, z_mm);
+  draw_run(ctx, hh, f_time, time_x, time_y, true, 0);
+  draw_run(ctx, mm, f_time, time_x + hh_w + colon_w, time_y, true, 0);
 
   // The one accent in the time: the design's colon.
   graphics_context_set_text_color(ctx, accent());
-  draw_at(ctx, ":", f_time, time_x + z_hh.w + cgap, time_y, z_colon);
+  draw_at(ctx, ":", f_time, time_x + hh_w + cgap, time_y, z_colon);
 
-  // ---- optional extras, in the band the design leaves empty.
-  const int band_top = time_y + m_time.bearing + m_time.cap + sc(6);
+  // ---- optional extras, in the band the design leaves empty: from the
+  // time's line box to the top of the countdown block.
+  const int band_top = time_y + m_time.bearing + m_time.cap + sc(3);
 
   // ---- zone 02: the countdown, and zone 04: weekday and date.
   char dow[8], date[12], label[20], num[8];
@@ -774,20 +823,24 @@ static void face_update(Layer *layer, GContext *ctx) {
     if (sch.is_final) unit = "SEC";
   }
 
-  // "NOW" is letters, so it needs a text face rather than LECO numbers.
-  GFont f_num = sch.is_now ? fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD) : f_count;
+  // NOW is set in the countdown face itself, as the design draws it.
+  GFont f_num = f_count;
   const GSize z_label = measure(label, f_label);
   const GSize z_num = measure(num, f_num);
   const GSize z_min = sch.is_now ? GSize(0, 0) : measure(unit, f_label);
+  const int label_w = run_w(label, f_label, false, TRACK);
+  const int min_w = sch.is_now ? 0 : run_w(unit, f_label, false, TRACK);
 
-  const Metrics m_lab = gothic_metrics(z_label.h);
-  const Metrics m_min = gothic_metrics(z_min.h);
-  const Metrics m_num = sch.is_now ? gothic_metrics(z_num.h) : barlow_metrics(z_num.h);
+  const Metrics m_lab = barlow_metrics(z_label.h);
+  const Metrics m_min = barlow_metrics(z_min.h);
+  const Metrics m_num = barlow_metrics(z_num.h);
 
-  const GSize z_dow = measure(dow, f_label), z_date = measure(date, f_label);
+  const GSize z_dow = measure(dow, f_date), z_date = measure(date, f_date);
+  const int dow_w = run_w(dow, f_date, false, TRACK), date_w2 = run_w(date, f_date, false, TRACK);
 
-  const int num_row_w = z_num.w + (sch.is_now ? 0 : sc(LABEL_GAP) + z_min.w);
-  int inner_w = num_row_w > z_label.w ? num_row_w : z_label.w;
+  const int num_w = sch.is_now ? z_num.w : run_w(num, f_num, true, 0);
+  const int num_row_w = num_w + (sch.is_now ? 0 : sc(LABEL_GAP) + min_w);
+  int inner_w = num_row_w > label_w ? num_row_w : label_w;
   const int min_inner = sc(BLOCK_MIN_W) - sc(BLOCK_PAD_IN) - sc(BLOCK_PAD_OUT);
   if (inner_w < min_inner) inner_w = min_inner;
 
@@ -795,7 +848,7 @@ static void face_update(Layer *layer, GContext *ctx) {
   // the weekday/date column. The longest label ("LEAVES 10:30" in Gothic 14
   // Bold) is a few pixels wider than the 144px row allows, so the block's own
   // padding gives way first and the normal state keeps the design's spacing.
-  const int date_w = z_dow.w > z_date.w ? z_dow.w : z_date.w;
+  const int date_w = dow_w > date_w2 ? dow_w : date_w2;
   const int avail = c_end - c_start - date_w - sc(ROW_GAP);
   int pad_in = sc(BLOCK_PAD_IN), pad_out = sc(BLOCK_PAD_OUT);
   int over = inner_w + pad_in + pad_out - avail;
@@ -829,34 +882,33 @@ static void face_update(Layer *layer, GContext *ctx) {
   // Label and number are end-aligned within the block.
   const int inner_x = block_x + pad_in;
   const int label_y = block_y + sc(BLOCK_PAD_T);
-  graphics_draw_text(ctx, label, f_label,
-                     GRect(mapx(inner_x, inner_w), label_y - m_lab.bearing, inner_w, z_label.h),
-                     GTextOverflowModeTrailingEllipsis,
-                     s_set.wrist_right ? GTextAlignmentLeft : GTextAlignmentRight, NULL);
+  draw_run(ctx, label, f_label, inner_x + inner_w - label_w, label_y - m_lab.bearing, false, TRACK);
 
   // The design puts a full line of air between the label and the number:
-  // its 4px margin plus the slack of both line boxes, six pixels at this
-  // scale. Any less and the digits' shoulders touch the label.
+  // measured with its own font, 15px from the label's baseline to the top
+  // of the digits at 288 wide, so seven here. The estimated cap of the
+  // Gothic label runs a pixel long, hence eight in the constant.
   const int num_y = label_y + m_lab.cap + sc(BLOCK_ROW_GAP);
   const int num_x = inner_x + inner_w - num_row_w;
-  draw_at(ctx, num, f_num, num_x, num_y - m_num.bearing, z_num);
+  if (sch.is_now) draw_at(ctx, num, f_num, num_x, num_y - m_num.bearing, z_num);
+  else draw_run(ctx, num, f_num, num_x, num_y - m_num.bearing, true, 0);
   if (!sch.is_now) {
     // "MIN" rides the baseline of the big number.
     const int min_y = num_y + m_num.cap - m_min.cap;
-    draw_at(ctx, unit, f_label, num_x + z_num.w + sc(LABEL_GAP), min_y - m_min.bearing, z_min);
+    draw_run(ctx, unit, f_label, num_x + num_w + sc(LABEL_GAP), min_y - m_min.bearing, false, TRACK);
   }
 
   // Weekday and date sit on the wrist side: first to disappear.
-  const Metrics m_dow = gothic_metrics(z_dow.h), m_date = gothic_metrics(z_date.h);
+  const Metrics m_dow = barlow_metrics(z_dow.h), m_date = barlow_metrics(z_date.h);
   const int date_y = c_bot - sc(DATE_PAD_BOT) - m_date.cap;
   const int dow_y = date_y - sc(DOW_GAP) - m_dow.cap;
 
   graphics_context_set_text_color(ctx, s_ink);
-  draw_at(ctx, dow, f_label, c_start, dow_y - m_dow.bearing, z_dow);
+  draw_run(ctx, dow, f_date, c_start, dow_y - m_dow.bearing, false, TRACK);
   graphics_context_set_text_color(ctx, s_dim);
-  draw_at(ctx, date, f_label, c_start, date_y - m_date.bearing, z_date);
+  draw_run(ctx, date, f_date, c_start, date_y - m_date.bearing, false, TRACK);
 
-  draw_modules(ctx, s_f_mod, f_caption, c_start, c_end - c_start, band_top, dow_y - sc(4));
+  draw_modules(ctx, s_f_mod, f_caption, c_start, c_end - c_start, band_top, block_y);
 
   // ---- boarding buzz, once on the transition into the solid block.
   if (s_set.buzz && sch.remaining == THRESHOLD && s_last_remaining != THRESHOLD
@@ -992,6 +1044,9 @@ static void init(void) {
   s_f_time = fonts_load_custom_font(resource_get_handle(RES_TIME));
   s_f_count = fonts_load_custom_font(resource_get_handle(RES_COUNT));
   s_f_mod = fonts_load_custom_font(resource_get_handle(RES_MOD));
+  s_f_label = fonts_load_custom_font(resource_get_handle(RES_LABEL));
+  s_f_date = fonts_load_custom_font(resource_get_handle(RES_DATE));
+  s_f_cap = fonts_load_custom_font(resource_get_handle(RES_CAP));
 
   s_window = window_create();
   window_set_window_handlers(s_window, (WindowHandlers){
@@ -1010,6 +1065,9 @@ static void deinit(void) {
   fonts_unload_custom_font(s_f_time);
   fonts_unload_custom_font(s_f_count);
   fonts_unload_custom_font(s_f_mod);
+  fonts_unload_custom_font(s_f_label);
+  fonts_unload_custom_font(s_f_date);
+  fonts_unload_custom_font(s_f_cap);
   tick_timer_service_unsubscribe();
   window_destroy(s_window);
 }
