@@ -19,7 +19,10 @@ ap.add_argument('--agency', required=True)
 ap.add_argument('--name', default='HUB')
 ap.add_argument('--radius', type=int, default=150, help='metres around the hub that count as its stops')
 ap.add_argument('--out', default=os.path.join(os.path.dirname(__file__), '..', 'src', 'pkjs', 'transit.json'))
+ap.add_argument('--hints', help='JSON of headsign and stop-name abbreviations for this agency')
+ap.add_argument('--stops-out', help='directory for the per-stop departure files and the stop index (docs/data/<agency>)')
 a = ap.parse_args()
+hints = json.load(open(a.hints)) if a.hints else {}
 
 z = zipfile.ZipFile(a.gtfs)
 def table(name):
@@ -58,6 +61,41 @@ for st in table('stop_times.txt'):
     first[kind] = min(first.get(kind, 9999), m); last[kind] = max(last.get(kind, 0), m)
     if st['stop_id'] in hub_stops and routes[t['route_id']] in wanted:
         deps.setdefault(kind, {}).setdefault(routes[t['route_id']], set()).add(m)
+
+# ---- per-stop departures, for the stop view on a flick: one small file a
+# stop, fetched by the phone when the wearer asks, plus an index to find the
+# nearest stop by. Headsigns and stop names are shortened by the hints, since
+# a watch row has room for about a dozen letters.
+def short(text, table):
+    for k, v in table.items():
+        text = text.replace(k, v)
+    return text.strip().upper()
+
+if a.stops_out:
+    os.makedirs(os.path.join(a.stops_out, 'stops'), exist_ok=True)
+    route_by_id = {r['route_id']: r for r in table('routes.txt')}
+    stops_all = table('stops.txt')
+    per_stop = {}
+    for st in table('stop_times.txt'):
+        t = trips[st['trip_id']]; kind = svc.get(t['service_id'])
+        if not kind: continue
+        r = route_by_id[t['route_id']]
+        head = short(t.get('trip_headsign') or '', hints.get('headsigns', {}))
+        if not head and r['route_short_name'] in hints.get('loops', []): head = 'LOOP'
+        per_stop.setdefault(st['stop_id'], {}).setdefault(kind, set()).add((mins(st['departure_time']), r['route_short_name'], head))
+    index = []
+    for s_ in stops_all:
+        sid = s_['stop_id']
+        if sid not in per_stop: continue
+        days = {kind: [list(x) for x in sorted(v)] for kind, v in per_stop[sid].items()}
+        json.dump({'name': short(s_['stop_name'], hints.get('stops', {})), 'days': days},
+                  open(os.path.join(a.stops_out, 'stops', sid + '.json'), 'w'), separators=(',', ':'))
+        index.append([sid, round(float(s_['stop_lat']), 5), round(float(s_['stop_lon']), 5)])
+    colours = {r['route_short_name']: [r.get('route_color') or '888888', r.get('route_text_color') or '000000']
+               for r in route_by_id.values()}
+    json.dump({'agency': a.agency, 'hub': {'lat': lat, 'lon': lon}, 'routes': colours, 'stops': index},
+              open(os.path.join(a.stops_out, 'stops.json'), 'w'), separators=(',', ':'))
+    print('stops', len(index), 'files in', os.path.normpath(a.stops_out))
 
 out = {
     'agency': a.agency, 'hub': {'name': a.name, 'lat': lat, 'lon': lon}, 'routes': wanted,

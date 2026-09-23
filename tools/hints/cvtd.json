@@ -1,0 +1,20 @@
+{
+  "headsigns": {
+    "Transit Center": "ITC",
+    "Hyrum, Transit Center": "HYRUM ITC",
+    "L.R. Hospital - 800 E": "LR HOSP 800 E",
+    "North Logan, CV Hospital": "N LOGAN CVH",
+    "USU, Smithfield, Richmond": "USU SMITHFLD",
+    "USU, NE Logan 1600 E": "USU NE LOGAN",
+    "ROUTE 15 INBOUND": "INBOUND",
+    "GREEN LOOP": "LOOP",
+    "Northbound": "NORTH",
+    "Southbound": "SOUTH"
+  },
+  "stops": {
+    "150 East 500 North": "TRANSIT CTR",
+    " - Route ": " R",
+    " (Temp Stop)": ""
+  },
+  "loops": ["3", "6", "7", "8", "9", "B", "G"]
+}
