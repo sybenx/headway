@@ -1,7 +1,7 @@
 {
   "name": "headway",
   "author": "Aaron Herbst",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "keywords": [
     "pebble-app",
     "watchface",
@@ -52,10 +52,9 @@
           "menuIcon": true
         },
         {
-          "type": "font",
+          "type": "raw",
           "name": "FONT_TIME_60",
-          "file": "fonts/BarlowCondensed-SemiBold.ttf",
-          "characterRegex": "[0-9:]",
+          "file": "fonts/time_60.pfo",
           "targetPlatforms": [
             "aplite",
             "basalt",
@@ -63,10 +62,9 @@
           ]
         },
         {
-          "type": "font",
+          "type": "raw",
           "name": "FONT_COUNT_44",
-          "file": "fonts/BarlowCondensed-SemiBold.ttf",
-          "characterRegex": "[0-9NOW]",
+          "file": "fonts/count_44.pfo",
           "targetPlatforms": [
             "aplite",
             "basalt",
@@ -74,10 +72,9 @@
           ]
         },
         {
-          "type": "font",
+          "type": "raw",
           "name": "FONT_MOD_15",
-          "file": "fonts/BarlowCondensed-SemiBold.ttf",
-          "characterRegex": "[0-9.%\u00b0K]",
+          "file": "fonts/mod_15.pfo",
           "targetPlatforms": [
             "aplite",
             "basalt",
@@ -85,37 +82,9 @@
           ]
         },
         {
-          "type": "font",
-          "name": "FONT_TIME_83",
-          "file": "fonts/BarlowCondensed-SemiBold.ttf",
-          "characterRegex": "[0-9:]",
-          "targetPlatforms": [
-            "emery"
-          ]
-        },
-        {
-          "type": "font",
-          "name": "FONT_COUNT_61",
-          "file": "fonts/BarlowCondensed-SemiBold.ttf",
-          "characterRegex": "[0-9NOW]",
-          "targetPlatforms": [
-            "emery"
-          ]
-        },
-        {
-          "type": "font",
-          "name": "FONT_MOD_21",
-          "file": "fonts/BarlowCondensed-SemiBold.ttf",
-          "characterRegex": "[0-9.%\u00b0K]",
-          "targetPlatforms": [
-            "emery"
-          ]
-        },
-        {
-          "type": "font",
+          "type": "raw",
           "name": "FONT_LABEL_11",
-          "file": "fonts/BarlowCondensed-SemiBold.ttf",
-          "characterRegex": "[A-Z0-9: ]",
+          "file": "fonts/label_11.pfo",
           "targetPlatforms": [
             "aplite",
             "basalt",
@@ -123,10 +92,9 @@
           ]
         },
         {
-          "type": "font",
+          "type": "raw",
           "name": "FONT_DATE_12",
-          "file": "fonts/BarlowCondensed-SemiBold.ttf",
-          "characterRegex": "[A-Z0-9 ]",
+          "file": "fonts/date_12.pfo",
           "targetPlatforms": [
             "aplite",
             "basalt",
@@ -134,10 +102,9 @@
           ]
         },
         {
-          "type": "font",
+          "type": "raw",
           "name": "FONT_CAP_9",
-          "file": "fonts/BarlowCondensed-SemiBold.ttf",
-          "characterRegex": "[A-Z%\u00b0]",
+          "file": "fonts/cap_9.pfo",
           "targetPlatforms": [
             "aplite",
             "basalt",
@@ -145,28 +112,49 @@
           ]
         },
         {
-          "type": "font",
+          "type": "raw",
+          "name": "FONT_TIME_83",
+          "file": "fonts/time_83.pfo",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "raw",
+          "name": "FONT_COUNT_61",
+          "file": "fonts/count_61.pfo",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "raw",
+          "name": "FONT_MOD_21",
+          "file": "fonts/mod_21.pfo",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "raw",
           "name": "FONT_LABEL_15",
-          "file": "fonts/BarlowCondensed-SemiBold.ttf",
-          "characterRegex": "[A-Z0-9: ]",
+          "file": "fonts/label_15.pfo",
           "targetPlatforms": [
             "emery"
           ]
         },
         {
-          "type": "font",
+          "type": "raw",
           "name": "FONT_DATE_17",
-          "file": "fonts/BarlowCondensed-SemiBold.ttf",
-          "characterRegex": "[A-Z0-9 ]",
+          "file": "fonts/date_17.pfo",
           "targetPlatforms": [
             "emery"
           ]
         },
         {
-          "type": "font",
+          "type": "raw",
           "name": "FONT_CAP_12",
-          "file": "fonts/BarlowCondensed-SemiBold.ttf",
-          "characterRegex": "[A-Z%\u00b0]",
+          "file": "fonts/cap_12.pfo",
           "targetPlatforms": [
             "emery"
           ]

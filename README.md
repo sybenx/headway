@@ -87,9 +87,12 @@ On one-bit watches the accent becomes ink and the quarter-hour ticks dither,
 as the design's mono note asks. A module whose sensor the watch lacks — heart
 rate on aplite, say — removes itself rather than showing a blank.
 
-Light mode, with the accent set to red:
+Light mode with the accent set to red, and the right-wrist layout, mirrored
+so the sleeve comes from the other side:
 
-![light](screenshots/light.png)
+| Light | Right wrist |
+|---|---|
+| ![light](screenshots/light.png) | ![right wrist](screenshots/wrist-right.png) |
 
 ## Building
 
@@ -99,17 +102,29 @@ pebble build
 pebble install --emulator basalt
 ```
 
+The fonts are prebuilt. To regenerate them after changing a size or a
+character set in `tools/genfonts.py`:
+
+```bash
+~/.local/share/uv/tools/pebble-tool/bin/python tools/genfonts.py
+```
+
 ## Type
 
-Numerals are [Barlow Condensed](https://github.com/jpt/barlow) SemiBold, bundled
-as a resource at 60px (144-wide) and 83px (emery) so they scale with the
-display — Pebble's system fonts are a fixed pixel size and its largest numeric
-face, `LECO_42`, renders at half the scale the design calls for. Labels use the
-system Gothic Bold the design specifies, and module captions use Gothic 09,
-where a hand-tuned bitmap face beats anything a TTF rasterises at 7px.
+Everything is [Barlow Condensed](https://github.com/jpt/barlow) SemiBold, as
+the design draws it, at the design's sizes: 60px numerals (83px on emery),
+44px countdown, 11px labels, 12px date and 9px module captions. Digits are
+set tabular and the labels tracked, as the design's CSS has them, by drawing
+a glyph at a time.
 
-Module icons are drawn as vectors rather than bundled bitmaps, so they invert
-with the theme and scale with the display at no resource cost.
+The SDK's font generator rasterises through the font's own hints, which
+scatter one- and two-pixel stems across the small sizes. `tools/fontgen.py`
+is that generator, vendored from the SDK with FreeType's auto-hinter forced,
+and the `.pfo` blobs it writes ship as raw resources, which
+`fonts_load_custom_font` takes as it would any font.
+
+Module icons are hand-placed pixel patterns, scaled by nearest neighbour, so
+they invert with the theme and hold their shape on emery at no resource cost.
 
 ## Licence
 

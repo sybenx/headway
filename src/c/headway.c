@@ -249,20 +249,26 @@ static int run_w(const char *t, GFont f, bool tabular, int track) {
 // a handful of registers: the glyph lives in static storage and the box is
 // built in place.
 static char s_glyph[5];
-static void draw_run(GContext *ctx, const char *t, GFont f, int lx, int y, bool tabular, int track) {
+// Draws from a screen x, advancing rightwards: the glyphs of a run keep
+// their reading order whichever wrist the face is laid out for.
+static void draw_run_s(GContext *ctx, const char *t, GFont f, int x, int y, bool tabular, int track) {
   const int cell = tabular ? measure("0", f).w : 0;
   for (const char *p = t; *p;) {
     p += glyph_at(p, s_glyph);
     const GSize z = measure(s_glyph, f);
     // A glyph boxed at exactly its measured width can still be judged not
-    // to fit and drawn as an ellipsis, so the box gets slack on the side
-    // the glyph is not aligned to.
-    graphics_draw_text(ctx, s_glyph, f,
-                       GRect(mapx(lx, z.w) - (s_set.wrist_right ? z.w + 4 : 0), y, 2 * z.w + 4, z.h),
-                       GTextOverflowModeWordWrap,
-                       s_set.wrist_right ? GTextAlignmentRight : GTextAlignmentLeft, NULL);
-    lx += ((tabular && isdigit((int)s_glyph[0])) ? cell : z.w) + track;
+    // to fit and drawn as an ellipsis, so the box gets slack past its end.
+    graphics_draw_text(ctx, s_glyph, f, GRect(x, y, 2 * z.w + 4, z.h),
+                       GTextOverflowModeWordWrap, GTextAlignmentLeft, NULL);
+    x += ((tabular && isdigit((int)s_glyph[0])) ? cell : z.w) + track;
   }
+}
+
+// The same from a logical x: the run is mirrored as a whole for the other
+// wrist, so what is end-aligned on one is start-aligned on the other, as the
+// design lays it out.
+static void draw_run(GContext *ctx, const char *t, GFont f, int lx, int y, bool tabular, int track) {
+  draw_run_s(ctx, t, f, mapx(lx, run_w(t, f, tabular, track)), y, tabular, track);
 }
 
 #define TRACK 1   // the design's 6-10% letter-space, one pixel at these sizes
@@ -755,7 +761,7 @@ typedef struct { int start, end, top, bot; } Frame;
 // a cuff that hides the hour.
 static struct {
   char hh[4], mm[4];
-  int x, y, hh_w, colon_w, cgap, band_top;
+  int x, y, w, hh_w, colon_w, cgap, band_top;
   GSize z_colon;
 } s_tm;
 
@@ -769,7 +775,8 @@ static void layout_time(const struct tm *t, const Frame *fr) {
   s_tm.cgap = sc(COLON_GAP);
   s_tm.hh_w = run_w(s_tm.hh, f, true, 0);
   s_tm.colon_w = s_tm.z_colon.w + 2 * s_tm.cgap;
-  s_tm.x = fr->end - (s_tm.hh_w + s_tm.colon_w + run_w(s_tm.mm, f, true, 0));
+  s_tm.w = s_tm.hh_w + s_tm.colon_w + run_w(s_tm.mm, f, true, 0);
+  s_tm.x = fr->end - s_tm.w;
   // The design's line box sits its digits well below the padding: the cap
   // top lands 18px down at this scale.
   s_tm.y = fr->top + sc(TIME_MARGIN_TOP) - m.bearing;
@@ -780,12 +787,16 @@ static void layout_time(const struct tm *t, const Frame *fr) {
 
 static void paint_time(GContext *ctx) __attribute__((noinline));
 static void paint_time(GContext *ctx) {
+  // The row is mirrored as a whole; hour, colon and minute keep their order.
+  const int x = mapx(s_tm.x, s_tm.w);
   graphics_context_set_text_color(ctx, s_ink);
-  draw_run(ctx, s_tm.hh, s_f_time, s_tm.x, s_tm.y, true, 0);
-  draw_run(ctx, s_tm.mm, s_f_time, s_tm.x + s_tm.hh_w + s_tm.colon_w, s_tm.y, true, 0);
+  draw_run_s(ctx, s_tm.hh, s_f_time, x, s_tm.y, true, 0);
+  draw_run_s(ctx, s_tm.mm, s_f_time, x + s_tm.hh_w + s_tm.colon_w, s_tm.y, true, 0);
   // The one accent in the time: the design's colon.
   graphics_context_set_text_color(ctx, accent());
-  draw_at(ctx, ":", s_f_time, s_tm.x + s_tm.hh_w + s_tm.cgap, s_tm.y, s_tm.z_colon);
+  graphics_draw_text(ctx, ":", s_f_time,
+                     GRect(x + s_tm.hh_w + s_tm.cgap, s_tm.y, s_tm.z_colon.w, s_tm.z_colon.h),
+                     GTextOverflowModeWordWrap, GTextAlignmentLeft, NULL);
 }
 
 // ---- zone 02: the countdown, and zone 04: weekday and date.
@@ -893,10 +904,11 @@ static void paint_block(GContext *ctx, const Frame *fr) {
   if (s_bk.now) {
     draw_at(ctx, s_bk.num, s_f_count, num_x, s_bk.num_y - s_bk.m_num.bearing, s_bk.z_num);
   } else {
-    draw_run(ctx, s_bk.num, s_f_count, num_x, s_bk.num_y - s_bk.m_num.bearing, true, 0);
-    // "MIN" rides the baseline of the big number.
-    draw_run(ctx, s_bk.unit, s_f_label, num_x + s_bk.num_w + sc(LABEL_GAP),
-             s_bk.num_y + s_bk.m_num.cap - s_bk.m_min.cap - s_bk.m_min.bearing, false, TRACK);
+    // One row, mirrored as a whole: the number, then MIN on its baseline.
+    const int x = mapx(num_x, s_bk.num_row_w);
+    draw_run_s(ctx, s_bk.num, s_f_count, x, s_bk.num_y - s_bk.m_num.bearing, true, 0);
+    draw_run_s(ctx, s_bk.unit, s_f_label, x + s_bk.num_w + sc(LABEL_GAP),
+               s_bk.num_y + s_bk.m_num.cap - s_bk.m_min.cap - s_bk.m_min.bearing, false, TRACK);
   }
   graphics_context_set_text_color(ctx, s_ink);
   draw_run(ctx, s_bk.dow, s_f_date, fr->start, s_bk.dow_y - s_bk.m_dow.bearing, false, TRACK);
