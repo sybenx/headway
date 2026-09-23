@@ -812,7 +812,10 @@ static void layout_modules(GFont f_val, GFont f_cap, int c_start, int avail_w,
   // gap to the value.
   const bool icons = s_set.mod_icons;
   s_md.m_cap = barlow_metrics(measure("BPM", f_cap).h);
-  s_md.label_h = icons ? s_md.icon : s_md.m_cap.cap;
+  // The value line sits where the captions put it whichever labels are on:
+  // an icon is taller than a caption and stands up into the band's air
+  // rather than push the numbers down.
+  s_md.label_h = s_md.m_cap.cap;
   s_md.lgap = icons ? sc(MOD_ICON_GAP) : sc(MOD_LABEL_GAP);
   s_md.gap = sc(MOD_GAP);
 
