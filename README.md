@@ -56,14 +56,14 @@ Reachable from the Pebble app.
 - **Headway** — 30 / 20 / 15 minutes between runs
 - **Departure offset** — minutes past the hour of the first run
 - **Boarding buzz** — a single pulse at T-5, off by default
-- **Theme** — dark (default), light, or dark at night only, with a configurable night window
+- **Theme** — dark at night and light by day (default), with a configurable night window; or dark, or light
 - **Accent** — any colour; drives the rail, the colon and the boarding block
 - **Wrist** — mirrors the whole layout so the sleeve comes from the other side
 - **Time format** — system, 12h or 24h
 - **Modules** — three slots: heart rate, steps, battery, weather or nothing
 - **Icons instead of captions**
 - **Units** — °C or °F
-- **Only near the hub** — see below; off by default, with the radius
+- **Knowing the hub** — see below; off by default, with the radius
 
 Weather comes from [Open-Meteo](https://open-meteo.com), which needs no API key
 and no account.
@@ -71,16 +71,18 @@ and no account.
 ## Near the hub
 
 For riders of a system whose hub the face knows. With it on, the phone asks
-where it is every few minutes, coarsely, and the face changes by the answer:
+where it is every few minutes, coarsely, and the face changes by the answer.
+Two ways to have it:
 
-- **At the hub, in its hours** — the countdown runs as ever, and the routes
-  that leave the hub together on their own timetable get a second one, in the
-  module band, at the end furthest from the cuff: a chip per route and the
-  minutes to the next departure. If the two have parted, the later one's chip
-  goes dim.
-- **Anywhere else, or after hours** — there is nothing to count down to, so
-  the block and the rail's fill go, and the date grows into the room they
-  leave.
+- **Second countdown near the hub** — the half-hour countdown runs everywhere,
+  as it always has, and near the hub in its hours the routes that leave it
+  together on their own timetable get a second one, in the module band, at
+  the end furthest from the cuff: a chip per route and the minutes to the next
+  departure. If the two have parted, the later one's chip goes dim. Set the
+  radius wide and it is there for the drive in.
+- **Both only near the hub** — the same at the hub; anywhere else, or after
+  hours, there is nothing to count down to, so the block and the rail's fill
+  go, and the date grows into the room they leave.
 
 | at the hub | away |
 |---|---|

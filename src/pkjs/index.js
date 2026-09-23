@@ -105,7 +105,7 @@ function sendTransit(state, g, b) {
 
 function checkTransit() {
   var s = settings();
-  if (!s.TRANSIT) return;
+  if (!s.TRANSIT || String(s.TRANSIT) === '0') return;
   var radius = Number(s.TR_RADIUS) || 300;
 
   navigator.geolocation.getCurrentPosition(function (pos) {

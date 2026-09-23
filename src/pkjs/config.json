@@ -72,8 +72,12 @@
         "type": "select",
         "messageKey": "THEME",
         "label": "Theme",
-        "defaultValue": "0",
+        "defaultValue": "2",
         "options": [
+          {
+            "label": "Dark at night, light by day",
+            "value": "2"
+          },
           {
             "label": "Dark",
             "value": "0"
@@ -81,10 +85,6 @@
           {
             "label": "Light",
             "value": "1"
-          },
-          {
-            "label": "Dark at night only",
-            "value": "2"
           }
         ]
       },
@@ -92,7 +92,7 @@
         "type": "slider",
         "messageKey": "NIGHT_START",
         "label": "Night starts",
-        "description": "Used only by \"Dark at night only\".",
+        "description": "The window the day/night theme calls night.",
         "defaultValue": 19,
         "min": 0,
         "max": 23,
@@ -283,13 +283,27 @@
       },
       {
         "type": "text",
-        "defaultValue": "For riders of a system whose hub the face knows. Within the radius of the hub and inside its hours, the countdown runs and the routes on their own timetable get a second one. Elsewhere the face goes quiet: no countdown, a larger date. Off, and the countdown runs everywhere, as it always has. Knows CVTD (Logan, Utah) for now."
+        "defaultValue": "For riders of a system whose hub the face knows. Near the hub and in its hours, the routes on their own timetable get a second countdown. Either the half-hour countdown runs everywhere, as it always has, or only near the hub, with the face quiet elsewhere: no countdown, a larger date. Knows CVTD (Logan, Utah) for now."
       },
       {
-        "type": "toggle",
+        "type": "select",
         "messageKey": "TRANSIT",
-        "label": "Only near the hub",
-        "defaultValue": false
+        "label": "Knowing the hub",
+        "defaultValue": "0",
+        "options": [
+          {
+            "label": "Off: countdown everywhere",
+            "value": "0"
+          },
+          {
+            "label": "Second countdown near the hub",
+            "value": "1"
+          },
+          {
+            "label": "Both only near the hub",
+            "value": "2"
+          }
+        ]
       },
       {
         "type": "slider",

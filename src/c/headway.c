@@ -30,6 +30,10 @@
 #define MODULE_WEATHER 4
 #define MODULE_COUNT   3
 
+#define TRANSIT_OFF   0   // the hub is not consulted
+#define TRANSIT_CHIPS 1   // countdown everywhere; the second one near the hub
+#define TRANSIT_NEAR  2   // both only near the hub, in its hours
+
 typedef struct {
   uint8_t version;     // bumped whenever the fields below change
   bool wrist_right;    // true: rail on the left, sleeve from the right
@@ -45,7 +49,7 @@ typedef struct {
   bool mod_icons;      // icons in place of the captions
   bool final_seconds;  // count the last minute down in seconds
   bool imperial;
-  bool transit;        // the countdown only near the hub, in its hours
+  uint8_t transit;     // TRANSIT_*: what knowing the hub changes
   uint16_t radius;     // metres around the hub that count as near
 } Settings;
 
@@ -86,7 +90,7 @@ static void settings_defaults(void) {
   s_set.headway = 30;
   s_set.buzz = false;
   s_set.time_fmt = TIME_FMT_SYSTEM;
-  s_set.theme = THEME_DARK;
+  s_set.theme = THEME_AUTO;   // dark through the night, light by day
   s_set.night_start = 19;
   s_set.night_end = 7;
   s_set.accent = 0x0055AA;   // Cobalt Blue, the design's one accent
@@ -98,7 +102,7 @@ static void settings_defaults(void) {
   s_set.mod_icons = false;
   s_set.final_seconds = true;
   s_set.imperial = false;
-  s_set.transit = false;
+  s_set.transit = TRANSIT_OFF;
   s_set.radius = 300;
 }
 
@@ -108,13 +112,14 @@ static void settings_clamp(void) {
   }
   if (s_set.offset >= s_set.headway) s_set.offset %= s_set.headway;
   if (s_set.time_fmt > TIME_FMT_24H) s_set.time_fmt = TIME_FMT_SYSTEM;
-  if (s_set.theme > THEME_AUTO) s_set.theme = THEME_DARK;
+  if (s_set.theme > THEME_AUTO) s_set.theme = THEME_AUTO;
   if (s_set.night_start > 23) s_set.night_start = 19;
   if (s_set.night_end > 23) s_set.night_end = 7;
   s_set.accent &= 0xFFFFFF;
   for (int i = 0; i < MODULE_COUNT; i++) {
     if (s_set.mod[i] > MODULE_WEATHER) s_set.mod[i] = MODULE_NONE;
   }
+  if (s_set.transit > TRANSIT_NEAR) s_set.transit = TRANSIT_OFF;
   if (s_set.radius < 50) s_set.radius = 50;
   if (s_set.radius > 2000) s_set.radius = 2000;
 }
@@ -169,7 +174,7 @@ static void transit_save(void) {
 // The phone's word holds for a few hours, then the face falls back to the
 // plain countdown rather than stay quiet on a stale fix.
 static bool transit_fresh(time_t now) {
-  return s_set.transit && s_tr.at != 0 && now - s_tr.at < TR_STALE;
+  return s_set.transit != TRANSIT_OFF && s_tr.at != 0 && now - s_tr.at < TR_STALE;
 }
 // Minutes until the first of a route's departures still ahead, or -1.
 static int transit_next(const uint16_t *list, int now_min) {
@@ -1138,7 +1143,7 @@ static void face_update(Layer *layer, GContext *ctx) {
   // With the hub known, the countdown is for the hub: at it in its hours the
   // face runs as ever, with the second countdown; anywhere else it is quiet.
   at_hub = transit_fresh(now) && s_tr.state == 1;
-  quiet = transit_fresh(now) && s_tr.state == 0;
+  quiet = transit_fresh(now) && s_tr.state == 0 && s_set.transit == TRANSIT_NEAR;
 
   theme_apply(t->tm_hour);
   graphics_context_set_fill_color(ctx, s_ground);
@@ -1197,6 +1202,13 @@ static void tick_handler(struct tm *tick_time, TimeUnits units) {
   layer_mark_dirty(s_face);
 }
 
+// A setting from the page arrives as the string it was chosen as, but a
+// value can also come back as an int, and reading an int as a string gives
+// whatever bytes it holds. Take either.
+static int tuple_int(const Tuple *tp) {
+  return tp->type == TUPLE_CSTRING ? atoi(tp->value->cstring) : (int)tp->value->int32;
+}
+
 static void inbox_received(DictionaryIterator *iter, void *ctx) {
   Tuple *tp;
   if ((tp = dict_find(iter, MESSAGE_KEY_WRIST))) {
@@ -1206,16 +1218,16 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
     s_set.offset = (uint8_t)tp->value->int32;
   }
   if ((tp = dict_find(iter, MESSAGE_KEY_HEADWAY))) {
-    s_set.headway = (uint8_t)atoi(tp->value->cstring);
+    s_set.headway = (uint8_t)tuple_int(tp);
   }
   if ((tp = dict_find(iter, MESSAGE_KEY_BUZZ))) {
     s_set.buzz = tp->value->int32 != 0;
   }
   if ((tp = dict_find(iter, MESSAGE_KEY_H24))) {
-    s_set.time_fmt = (uint8_t)atoi(tp->value->cstring);
+    s_set.time_fmt = (uint8_t)tuple_int(tp);
   }
   if ((tp = dict_find(iter, MESSAGE_KEY_THEME))) {
-    s_set.theme = (uint8_t)atoi(tp->value->cstring);
+    s_set.theme = (uint8_t)tuple_int(tp);
   }
   if ((tp = dict_find(iter, MESSAGE_KEY_NIGHT_START))) {
     s_set.night_start = (uint8_t)tp->value->int32;
@@ -1227,13 +1239,13 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
     s_set.accent = (uint32_t)tp->value->int32 & 0xFFFFFF;
   }
   if ((tp = dict_find(iter, MESSAGE_KEY_MOD1))) {
-    s_set.mod[0] = (uint8_t)atoi(tp->value->cstring);
+    s_set.mod[0] = (uint8_t)tuple_int(tp);
   }
   if ((tp = dict_find(iter, MESSAGE_KEY_MOD2))) {
-    s_set.mod[1] = (uint8_t)atoi(tp->value->cstring);
+    s_set.mod[1] = (uint8_t)tuple_int(tp);
   }
   if ((tp = dict_find(iter, MESSAGE_KEY_MOD3))) {
-    s_set.mod[2] = (uint8_t)atoi(tp->value->cstring);
+    s_set.mod[2] = (uint8_t)tuple_int(tp);
   }
   if ((tp = dict_find(iter, MESSAGE_KEY_MOD_ICONS))) {
     s_set.mod_icons = tp->value->int32 != 0;
@@ -1250,7 +1262,7 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
   }
 
   if ((tp = dict_find(iter, MESSAGE_KEY_TRANSIT))) {
-    s_set.transit = tp->value->int32 != 0;
+    s_set.transit = (uint8_t)tuple_int(tp);
   }
   if ((tp = dict_find(iter, MESSAGE_KEY_TR_RADIUS))) {
     s_set.radius = (uint16_t)tp->value->int32;
