@@ -92,6 +92,26 @@ The phone's word holds for three hours; if it goes quiet longer than that, the
 face falls back to the plain countdown rather than stay quiet on a stale fix.
 Off, and the countdown runs everywhere, as it always has.
 
+### A flick for the nearest stop
+
+With the hub known, a flick of the wrist asks the phone where you are, this
+time precisely, and the face shows the nearest stop and what leaves it next
+for a few seconds, with the light on: a line for the stop, then a row a
+departure — the route in the agency's own colour, where it is going, and the
+minutes, or the clock time once it is more than an hour out. Stood at the
+stop, the line is just its name; further off, it says how far. Twin stops
+across a road are read as one. Nothing within a mile and a half, and it says
+so. The rail stays.
+
+| at a stop | near one |
+|---|---|
+| ![at a stop](screenshots/stop.png) | ![near a stop](screenshots/stop-near.png) |
+
+The departures come from a small file a stop, served from this repository's
+pages and rewritten every night from the agency's feed by a workflow, so the
+watchface never needs a release for a timetable change. The phone caches what
+it fetches.
+
 The face knows one hub so far: the Cache Valley Transit District's transit
 center in Logan, Utah, where most routes leave on the half hour and routes
 G and B keep their own timetable. `tools/transit.py` reduces an agency's GTFS

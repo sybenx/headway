@@ -23,8 +23,8 @@ DIGITS = '[0-9:]'
 FONTS = [
     ('time_60', 60, DIGITS), ('time_83', 83, DIGITS),
     ('count_44', 44, '[0-9NOW]'), ('count_61', 61, '[0-9NOW]'),
-    ('mod_15', 15, '[0-9.%°K]'), ('mod_21', 21, '[0-9.%°K]'),
-    ('label_11', 11, '[A-Z0-9: ]'), ('label_15', 15, '[A-Z0-9: ]'),
+    ('mod_15', 15, '[0-9.%°KA-Z: ]'), ('mod_21', 21, '[0-9.%°KA-Z: ]'),   # letters and a colon for the stop view's badges and clock times
+    ('label_11', 11, '[A-Z0-9:. ]'), ('label_15', 15, '[A-Z0-9:. ]'),   # the point in a distance
     ('date_12', 12, '[A-Z0-9 ]'), ('date_17', 17, '[A-Z0-9 ]'),
     ('date_18', 18, '[A-Z0-9 ]'), ('date_25', 25, '[A-Z0-9 ]'),   # the idle face's larger date
     ('cap_9', 9, '[A-Z%°]'), ('cap_12', 12, '[A-Z%°]'),

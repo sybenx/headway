@@ -79,6 +79,20 @@ typedef struct {
   time_t at;
 } Transit;
 
+// The stop view: what the phone answered the last flick with. Shown for a
+// few seconds, then the face is itself again.
+#define SV_ROWS 3
+#define SV_SHOW_MS 12000
+#define SV_WAIT_MS 15000
+typedef struct { char route[8], head[20], when[8]; uint32_t color; bool mins; } SvRow;
+static struct {
+  bool valid, pending;
+  char stop[24];
+  int dist, n;
+  SvRow row[SV_ROWS];
+  AppTimer *timer;
+} s_sv;
+
 static Settings s_set;
 static Weather s_wx;
 static Transit s_tr;
@@ -955,6 +969,119 @@ static void paint_idle(int fr_start) {
   draw_run(s_id.date, s_f_bigdate, fr_start, s_id.date_y - s_id.m.bearing, false, TRACK);
 }
 
+// ---- the stop view: on a flick, the nearest stop and what leaves it next.
+// It takes the whole of the face below the time for a few seconds: a line
+// for the stop, then a row a departure — the route in its own colour, where
+// it is going, and when. The rail stays; it is the one thing the design
+// never covers.
+#define SV_ROW_H 24
+#define SV_HEAD_GAP 18
+static struct {
+  int top, head_y, dist_x, dist_w, n;
+  char dist[10], note[20], stop[24];
+  struct { int y, badge_x, badge_w, badge_h, text_x, text_y, head_x, head_y, when_x, when_y, unit_x, unit_y; char head[20]; } r[SV_ROWS];
+  Metrics m_lab, m_val, m_cap;
+} s_svl;
+
+static void format_dist(char *out, size_t n, int metres) {
+  if (s_set.imperial) {
+    const int ft = metres * 328 / 100;
+    if (ft < 1000) snprintf(out, n, "%d FT", ft);
+    else snprintf(out, n, "%d.%d MI", ft / 5280, (ft % 5280) * 10 / 5280);
+  } else {
+    if (metres < 1000) snprintf(out, n, "%d M", metres);
+    else snprintf(out, n, "%d.%d KM", metres / 1000, (metres % 1000) / 100);
+  }
+}
+
+static void layout_stopview(const Frame *fr, int band_top) __attribute__((noinline));
+static void layout_stopview(const Frame *fr, int band_top) {
+  s_svl.m_lab = barlow_metrics(measure("B", s_f_label).h);
+  s_svl.m_val = barlow_metrics(measure("8", s_f_mod).h);
+  s_svl.m_cap = barlow_metrics(measure("M", s_f_cap).h);
+  s_svl.top = band_top;
+  s_svl.head_y = band_top + sc(4) - s_svl.m_lab.bearing;
+  s_svl.dist_w = 0;
+  if (s_sv.dist > 60) {
+    format_dist(s_svl.dist, sizeof(s_svl.dist), s_sv.dist);
+    s_svl.dist_w = run_w(s_svl.dist, s_f_label, false, TRACK);
+    s_svl.dist_x = fr->end - s_svl.dist_w;
+  }
+  // The stop's name gives way to the distance, a glyph at a time.
+  strncpy(s_svl.stop, s_sv.stop, sizeof(s_svl.stop) - 1); s_svl.stop[sizeof(s_svl.stop) - 1] = 0;
+  const int name_room = (s_svl.dist_w ? s_svl.dist_x - sc(6) : fr->end) - fr->start;
+  while (s_svl.stop[0] && run_w(s_svl.stop, s_f_label, false, TRACK) > name_room) {
+    char *e = s_svl.stop + strlen(s_svl.stop) - 1;
+    while (e > s_svl.stop && ((unsigned char)*e & 0xC0) == 0x80) e--;
+    *e = 0;
+    while (e > s_svl.stop && e[-1] == ' ') *--e = 0;
+  }
+  s_svl.note[0] = 0;
+  if (s_sv.n == 0) strncpy(s_svl.note, s_sv.stop[0] ? "NO MORE TODAY" : "NO STOPS NEARBY", sizeof(s_svl.note));
+  s_svl.n = s_sv.n;
+  int y = band_top + sc(SV_HEAD_GAP);
+  for (int i = 0; i < s_sv.n; i++) {
+    const SvRow *row = &s_sv.row[i];
+    const int pad = sc(3);
+    s_svl.r[i].y = y;
+    s_svl.r[i].badge_w = run_w(row->route, s_f_mod, false, 0) + 2 * pad;
+    s_svl.r[i].badge_h = s_svl.m_val.cap + 2 * sc(2);
+    s_svl.r[i].badge_x = fr->start;
+    s_svl.r[i].text_x = fr->start + pad;
+    s_svl.r[i].text_y = y + sc(2) - s_svl.m_val.bearing;
+    // when: minutes in the value font with a small MIN, or a clock time
+    const int w_w = run_w(row->when, s_f_mod, row->mins, 0);
+    const int u_w = row->mins ? sc(2) + run_w("MIN", s_f_cap, false, TRACK) : 0;
+    s_svl.r[i].when_x = fr->end - w_w - u_w;
+    s_svl.r[i].when_y = y + sc(2) - s_svl.m_val.bearing;
+    s_svl.r[i].unit_x = fr->end - u_w + sc(2);
+    s_svl.r[i].unit_y = y + sc(2) + s_svl.m_val.cap - s_svl.m_cap.cap - s_svl.m_cap.bearing;
+    // the headsign takes what is left, a glyph at a time
+    s_svl.r[i].head_x = fr->start + s_svl.r[i].badge_w + sc(4);
+    s_svl.r[i].head_y = y + sc(2) + s_svl.m_val.cap - s_svl.m_lab.cap - s_svl.m_lab.bearing;
+    const int room = s_svl.r[i].when_x - sc(4) - s_svl.r[i].head_x;
+    strncpy(s_svl.r[i].head, row->head, sizeof(s_svl.r[i].head) - 1);
+    s_svl.r[i].head[sizeof(s_svl.r[i].head) - 1] = 0;
+    while (s_svl.r[i].head[0] && run_w(s_svl.r[i].head, s_f_label, false, TRACK) > room) {
+      char *e = s_svl.r[i].head + strlen(s_svl.r[i].head) - 1;
+      while (e > s_svl.r[i].head && ((unsigned char)*e & 0xC0) == 0x80) e--;   // a whole UTF-8 sequence
+      *e = 0;
+      while (e > s_svl.r[i].head && e[-1] == ' ') *--e = 0;
+    }
+    y += sc(SV_ROW_H);
+  }
+}
+
+static void paint_stopview(int fr_start) __attribute__((noinline));
+static void paint_stopview(int fr_start) {
+  graphics_context_set_text_color(s_ctx, s_dim);
+  draw_run(s_svl.stop, s_f_label, fr_start, s_svl.head_y, false, TRACK);
+  if (s_svl.dist_w) {
+    graphics_context_set_text_color(s_ctx, s_ink);
+    draw_run(s_svl.dist, s_f_label, s_svl.dist_x, s_svl.head_y, false, TRACK);
+  }
+  if (s_svl.note[0]) {
+    graphics_context_set_text_color(s_ctx, s_ink);
+    draw_run(s_svl.note, s_f_label, fr_start, s_svl.top + sc(SV_HEAD_GAP) + sc(2) - s_svl.m_lab.bearing, false, TRACK);
+  }
+  for (int i = 0; i < s_svl.n; i++) {
+    const SvRow *row = &s_sv.row[i];
+    const GColor fill = PBL_IF_COLOR_ELSE(GColorFromHEX(row->color), s_ink);
+    graphics_context_set_fill_color(s_ctx, fill);
+    graphics_fill_rect(s_ctx, GRect(mapx(s_svl.r[i].badge_x, s_svl.r[i].badge_w), s_svl.r[i].y,
+                                    s_svl.r[i].badge_w, s_svl.r[i].badge_h), sc(3), GCornersAll);
+    graphics_context_set_text_color(s_ctx, on_fill(fill));
+    draw_run(row->route, s_f_mod, s_svl.r[i].text_x, s_svl.r[i].text_y, false, 0);
+    graphics_context_set_text_color(s_ctx, s_ink);
+    draw_run(s_svl.r[i].head, s_f_label, s_svl.r[i].head_x, s_svl.r[i].head_y, false, TRACK);
+    draw_run(row->when, s_f_mod, s_svl.r[i].when_x, s_svl.r[i].when_y, row->mins, 0);
+    if (row->mins) {
+      graphics_context_set_text_color(s_ctx, s_dim);
+      draw_run("MIN", s_f_cap, s_svl.r[i].unit_x, s_svl.r[i].unit_y, false, TRACK);
+    }
+  }
+}
+
 // The content box, inside the rail and the paddings, in logical x.
 
 // Each zone is laid out into static storage by one function and painted by
@@ -1158,18 +1285,24 @@ static void face_update(Layer *layer, GContext *ctx) {
   fr.bot = b.size.h - sc(PAD_BOTTOM);
 
   layout_time(t, &fr);
-  if (quiet) layout_idle(t, &fr);
-  else layout_block(t, &sch, &fr);
-  const int band_bot = quiet ? s_id.top : s_bk.block_y;
-  if (at_hub) layout_gb(fr.start, fr.end - fr.start, s_tm.band_top, band_bot, t->tm_hour * 60 + t->tm_min);
-  else s_gb.show = false;
-  layout_modules(s_f_mod, s_f_cap, fr.start, fr.end - fr.start - (s_gb.show ? s_gb.w + s_gb.gap : 0),
-                 s_tm.band_top, band_bot);
   paint_time();
-  if (quiet) paint_idle(fr.start);
-  else paint_block(fr.start);
-  paint_modules();
-  if (s_gb.show) paint_gb();
+  if (s_sv.valid) {
+    // The answer to a flick stands in for everything below the time.
+    layout_stopview(&fr, s_tm.band_top);
+    paint_stopview(fr.start);
+  } else {
+    if (quiet) layout_idle(t, &fr);
+    else layout_block(t, &sch, &fr);
+    const int band_bot = quiet ? s_id.top : s_bk.block_y;
+    if (at_hub) layout_gb(fr.start, fr.end - fr.start, s_tm.band_top, band_bot, t->tm_hour * 60 + t->tm_min);
+    else s_gb.show = false;
+    layout_modules(s_f_mod, s_f_cap, fr.start, fr.end - fr.start - (s_gb.show ? s_gb.w + s_gb.gap : 0),
+                   s_tm.band_top, band_bot);
+    if (quiet) paint_idle(fr.start);
+    else paint_block(fr.start);
+    paint_modules();
+    if (s_gb.show) paint_gb();
+  }
 
   // ---- boarding buzz, once on the transition into the solid block.
   if (!quiet && s_set.buzz && sch.remaining == THRESHOLD && s_last_remaining != THRESHOLD
@@ -1209,8 +1342,64 @@ static int tuple_int(const Tuple *tp) {
   return tp->type == TUPLE_CSTRING ? atoi(tp->value->cstring) : (int)tp->value->int32;
 }
 
+static void stopview_done(void *data) {
+  (void)data;
+  s_sv.timer = NULL;
+  s_sv.valid = false;
+  s_sv.pending = false;
+  layer_mark_dirty(s_face);
+}
+static void stopview_hold(uint32_t ms) {
+  if (s_sv.timer) app_timer_reschedule(s_sv.timer, ms);
+  else s_sv.timer = app_timer_register(ms, stopview_done, NULL);
+}
+
+// A flick of the wrist asks the phone for the nearest stop. The light comes
+// on with the gesture, and again when the answer lands, so the answer is
+// read in the same glance.
+static void tap_handler(AccelAxisType axis, int32_t direction) {
+  (void)axis; (void)direction;
+  if (s_set.transit == TRANSIT_OFF || s_sv.pending) return;
+  DictionaryIterator *out;
+  if (app_message_outbox_begin(&out) != APP_MSG_OK) return;
+  dict_write_uint8(out, MESSAGE_KEY_FLICK, 1);
+  if (app_message_outbox_send() != APP_MSG_OK) return;
+  s_sv.pending = true;
+  light_enable_interaction();
+  stopview_hold(SV_WAIT_MS);
+}
+
+static void take_row(DictionaryIterator *iter, int i, uint32_t kr, uint32_t kh, uint32_t kw, uint32_t kc, uint32_t kt) {
+  Tuple *tr = dict_find(iter, kr), *th = dict_find(iter, kh), *tw = dict_find(iter, kw);
+  Tuple *tc = dict_find(iter, kc), *tt = dict_find(iter, kt);
+  SvRow *row = &s_sv.row[i];
+  strncpy(row->route, tr ? tr->value->cstring : "", sizeof(row->route) - 1); row->route[sizeof(row->route) - 1] = 0;
+  strncpy(row->head, th ? th->value->cstring : "", sizeof(row->head) - 1); row->head[sizeof(row->head) - 1] = 0;
+  strncpy(row->when, tw ? tw->value->cstring : "", sizeof(row->when) - 1); row->when[sizeof(row->when) - 1] = 0;
+  row->color = tc ? (uint32_t)tc->value->int32 & 0xFFFFFF : 0x888888;
+  row->mins = tt ? tt->value->int32 != 0 : true;
+}
+
 static void inbox_received(DictionaryIterator *iter, void *ctx) {
   Tuple *tp;
+  if ((tp = dict_find(iter, MESSAGE_KEY_SV_N))) {
+    Tuple *ts = dict_find(iter, MESSAGE_KEY_SV_STOP);
+    Tuple *td = dict_find(iter, MESSAGE_KEY_SV_DIST);
+    s_sv.n = (int)tp->value->int32;
+    if (s_sv.n > SV_ROWS) s_sv.n = SV_ROWS;
+    if (s_sv.n < 0) s_sv.n = 0;
+    strncpy(s_sv.stop, ts ? ts->value->cstring : "", sizeof(s_sv.stop) - 1); s_sv.stop[sizeof(s_sv.stop) - 1] = 0;
+    s_sv.dist = td ? (int)td->value->int32 : 0;
+    take_row(iter, 0, MESSAGE_KEY_SV_R1, MESSAGE_KEY_SV_H1, MESSAGE_KEY_SV_W1, MESSAGE_KEY_SV_C1, MESSAGE_KEY_SV_T1);
+    take_row(iter, 1, MESSAGE_KEY_SV_R2, MESSAGE_KEY_SV_H2, MESSAGE_KEY_SV_W2, MESSAGE_KEY_SV_C2, MESSAGE_KEY_SV_T2);
+    take_row(iter, 2, MESSAGE_KEY_SV_R3, MESSAGE_KEY_SV_H3, MESSAGE_KEY_SV_W3, MESSAGE_KEY_SV_C3, MESSAGE_KEY_SV_T3);
+    s_sv.valid = true;
+    s_sv.pending = false;
+    light_enable_interaction();
+    stopview_hold(SV_SHOW_MS);
+    layer_mark_dirty(s_face);
+    return;
+  }
   if ((tp = dict_find(iter, MESSAGE_KEY_WRIST))) {
     s_set.wrist_right = (strcmp(tp->value->cstring, "right") == 0);
   }
@@ -1348,7 +1537,8 @@ static void init(void) {
   retune_tick();
 
   app_message_register_inbox_received(inbox_received);
-  app_message_open(256, 64);
+  app_message_open(512, 64);
+  accel_tap_service_subscribe(tap_handler);
 }
 
 static void deinit(void) {
@@ -1360,6 +1550,7 @@ static void deinit(void) {
   fonts_unload_custom_font(s_f_cap);
   fonts_unload_custom_font(s_f_bigdate);
   tick_timer_service_unsubscribe();
+  accel_tap_service_unsubscribe();
   window_destroy(s_window);
 }
 

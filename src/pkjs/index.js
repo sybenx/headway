@@ -126,6 +126,109 @@ function checkTransit() {
   }, { timeout: 10000, maximumAge: 4 * 60 * 1000 });
 }
 
+// ---- the flick: the nearest stop and what leaves it next.
+//
+// The stop index and the per-stop files come from the repo's own pages,
+// written nightly by tools/transit.py. A precise fix picks the stop; twin
+// stops across a road are merged, since the headsign tells them apart.
+var DATA_URL = 'https://sybenx.github.io/headway/data/cvtd/';
+var INDEX_TTL = 24 * 60 * 60 * 1000, STOP_TTL = 6 * 60 * 60 * 1000;
+var AT_STOP = 60, TWIN = 45, NEARBY = 1500;
+
+function cached(key, ttl) {
+  try {
+    var v = JSON.parse(localStorage.getItem(key));
+    if (v && Date.now() - v.at < ttl) return v.data;
+  } catch (e) {}
+  return null;
+}
+function remember(key, data) {
+  try { localStorage.setItem(key, JSON.stringify({ at: Date.now(), data: data })); } catch (e) {}
+}
+function getJSON(url, key, ttl, cb) {
+  var hit = cached(key, ttl);
+  if (hit) return cb(hit);
+  var req = new XMLHttpRequest();
+  req.open('GET', url, true);
+  req.onload = function () {
+    if (req.status !== 200) return cb(null);
+    try { var d = JSON.parse(req.responseText); remember(key, d); cb(d); } catch (e) { cb(null); }
+  };
+  req.onerror = function () { cb(null); };
+  req.timeout = 8000;
+  req.ontimeout = function () { cb(null); };
+  req.send();
+}
+
+function whenText(dep, nowMin, h24) {
+  var m = dep - nowMin;
+  if (m < 60) return { text: String(m), mins: 1 };
+  var h = Math.floor(dep / 60) % 24, mm = dep % 60;
+  if (h24) return { text: h + ':' + (mm < 10 ? '0' : '') + mm, mins: 0 };
+  var hh = ((h + 11) % 12) + 1;
+  return { text: hh + ':' + (mm < 10 ? '0' : '') + mm + (h < 12 ? 'A' : 'P'), mins: 0 };
+}
+
+function sendStopView(name, dist, rows) {
+  console.log('headway: stop view ' + (name || '(none)') + ' ' + rows.length + ' rows');
+  var msg = { SV_STOP: name, SV_DIST: Math.round(dist), SV_N: rows.length };
+  for (var i = 0; i < rows.length && i < 3; i++) {
+    msg['SV_R' + (i + 1)] = rows[i].route;
+    msg['SV_H' + (i + 1)] = rows[i].head;
+    msg['SV_W' + (i + 1)] = rows[i].when.text;
+    msg['SV_T' + (i + 1)] = rows[i].when.mins;
+    msg['SV_C' + (i + 1)] = rows[i].color;
+  }
+  Pebble.sendAppMessage(msg);
+}
+
+function onFlick() {
+  // The watch only asks when its own setting allows, so no gate here.
+  var s = settings();
+  var h24 = String(s.H24) === '2';
+  navigator.geolocation.getCurrentPosition(function (pos) {
+    var lat = pos.coords.latitude, lon = pos.coords.longitude;
+    console.log('headway: fix ' + lat.toFixed(4) + ',' + lon.toFixed(4) + ' +-' + Math.round(pos.coords.accuracy) + 'm');
+    getJSON(DATA_URL + 'stops.json', 'hw-stops', INDEX_TTL, function (index) {
+      if (!index) return sendStopView('', 0, []);
+      var ranked = index.stops.map(function (st) {
+        return { id: st[0], d: metres(lat, lon, st[1], st[2]), lat: st[1], lon: st[2] };
+      }).sort(function (a, b) { return a.d - b.d; });
+      if (!ranked.length || ranked[0].d > NEARBY) return sendStopView('', 0, []);
+      var best = ranked[0];
+      // Twins across a road, or the bays of a hub: read as one stop.
+      var group = ranked.filter(function (st) { return metres(best.lat, best.lon, st.lat, st.lon) <= TWIN; }).slice(0, 8);
+      var kind = (function (d) { var wd = d.getDay(); return wd === 0 ? 'sunday' : wd === 6 ? 'saturday' : 'weekday'; })(new Date());
+      var now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes();
+      var pending = group.length, name = '', deps = [];
+      group.forEach(function (st) {
+        getJSON(DATA_URL + 'stops/' + st.id + '.json', 'hw-stop-' + st.id, STOP_TTL, function (stop) {
+          if (stop) {
+            if (!name) name = stop.name;
+            (stop.days[kind] || []).forEach(function (dep) {
+              if (dep[0] >= nowMin) deps.push({ t: dep[0], route: dep[1], head: dep[2] });
+            });
+          }
+          if (--pending) return;
+          deps.sort(function (a, b) { return a.t - b.t; });
+          var rows = deps.slice(0, 3).map(function (dep) {
+            var col = (index.routes[dep.route] || ['888888'])[0];
+            return { route: dep.route, head: dep.head, when: whenText(dep.t, nowMin, h24), color: parseInt(col, 16) };
+          });
+          sendStopView(name, best.d <= AT_STOP ? 0 : best.d, rows);
+        });
+      });
+    });
+  }, function (err) {
+    console.log('headway: no fix ' + (err && err.message));
+    sendStopView('', 0, []);
+  }, { enableHighAccuracy: true, timeout: 9000, maximumAge: 20000 });
+}
+
+Pebble.addEventListener('appmessage', function (e) {
+  if (e.payload && e.payload.FLICK) { console.log('headway: flick'); onFlick(); }
+});
+
 Pebble.addEventListener('ready', function () { fetchWeather(true); checkTransit(); });
 Pebble.addEventListener('webviewclosed', function () {
   // Settings may have switched weather or transit on, or changed units.

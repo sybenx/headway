@@ -1,7 +1,7 @@
 {
   "name": "headway",
   "author": "Aaron Herbst",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "keywords": [
     "pebble-app",
     "watchface",
@@ -48,7 +48,26 @@
       "TR_STATE",
       "TR_G",
       "TR_B",
-      "TR_AT"
+      "TR_AT",
+      "FLICK",
+      "SV_STOP",
+      "SV_DIST",
+      "SV_N",
+      "SV_R1",
+      "SV_R2",
+      "SV_R3",
+      "SV_H1",
+      "SV_H2",
+      "SV_H3",
+      "SV_W1",
+      "SV_W2",
+      "SV_W3",
+      "SV_C1",
+      "SV_C2",
+      "SV_C3",
+      "SV_T1",
+      "SV_T2",
+      "SV_T3"
     ],
     "resources": {
       "media": [
