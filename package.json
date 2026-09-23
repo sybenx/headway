@@ -18,7 +18,6 @@
       "aplite",
       "basalt",
       "diorite",
-      "flint",
       "emery"
     ],
     "watchapp": {
@@ -60,8 +59,7 @@
           "targetPlatforms": [
             "aplite",
             "basalt",
-            "diorite",
-            "flint"
+            "diorite"
           ]
         },
         {
@@ -72,8 +70,7 @@
           "targetPlatforms": [
             "aplite",
             "basalt",
-            "diorite",
-            "flint"
+            "diorite"
           ]
         },
         {
@@ -84,8 +81,7 @@
           "targetPlatforms": [
             "aplite",
             "basalt",
-            "diorite",
-            "flint"
+            "diorite"
           ]
         },
         {
@@ -123,8 +119,7 @@
           "targetPlatforms": [
             "aplite",
             "basalt",
-            "diorite",
-            "flint"
+            "diorite"
           ]
         },
         {
@@ -135,8 +130,7 @@
           "targetPlatforms": [
             "aplite",
             "basalt",
-            "diorite",
-            "flint"
+            "diorite"
           ]
         },
         {
@@ -147,8 +141,7 @@
           "targetPlatforms": [
             "aplite",
             "basalt",
-            "diorite",
-            "flint"
+            "diorite"
           ]
         },
         {

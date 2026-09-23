@@ -69,14 +69,19 @@ and no account.
 
 ## Platforms
 
-Rectangular displays only: `aplite`, `basalt`, `diorite`, `flint` (144×168) and
-`emery` (200×228). The layout is an edge-flush rail on a rectangle, which a
-round screen cannot carry without a different design, so `chalk` and `gabbro`
-are not targeted.
+Rectangular displays only: `aplite`, `basalt`, `diorite` (144×168) and `emery`
+(200×228). The layout is an edge-flush rail on a rectangle, which a round
+screen cannot carry without a different design, so `chalk` and `gabbro` are
+not targeted.
 
-| aplite | diorite | flint | emery |
-|---|---|---|---|
-| ![aplite](screenshots/aplite.png) | ![diorite](screenshots/diorite.png) | ![flint](screenshots/flint.png) | ![emery](screenshots/emery.png) |
+`flint` (Core 2 Duo) is out of this release. Its firmware gives a watchface a
+smaller stack than the older watches do, and the text renderer runs out of it
+on this face; 1.0.2 was the last build that ran there, and it comes back once
+the face fits.
+
+| aplite | diorite | emery |
+|---|---|---|
+| ![aplite](screenshots/aplite.png) | ![diorite](screenshots/diorite.png) | ![emery](screenshots/emery.png) |
 
 On one-bit watches the accent becomes ink and the quarter-hour ticks dither,
 as the design's mono note asks. A module whose sensor the watch lacks — heart

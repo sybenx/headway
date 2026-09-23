@@ -244,21 +244,24 @@ static int run_w(const char *t, GFont f, bool tabular, int track) {
   return w;
 }
 
+// This sits directly beneath the firmware's text renderer, which on the new
+// PebbleOS needs some 1.2KB of the app's 2KB stack, so its frame is kept to
+// a handful of registers: the glyph lives in static storage and the box is
+// built in place.
+static char s_glyph[5];
 static void draw_run(GContext *ctx, const char *t, GFont f, int lx, int y, bool tabular, int track) {
   const int cell = tabular ? measure("0", f).w : 0;
   for (const char *p = t; *p;) {
-    char one[5];
-    p += glyph_at(p, one);
-    const GSize z = measure(one, f);
+    p += glyph_at(p, s_glyph);
+    const GSize z = measure(s_glyph, f);
     // A glyph boxed at exactly its measured width can still be judged not
     // to fit and drawn as an ellipsis, so the box gets slack on the side
     // the glyph is not aligned to.
-    const int slack = z.w + 4;
-    GRect r = GRect(mapx(lx, z.w), y, z.w + slack, z.h);
-    if (s_set.wrist_right) r.origin.x -= slack;
-    graphics_draw_text(ctx, one, f, r, GTextOverflowModeWordWrap,
+    graphics_draw_text(ctx, s_glyph, f,
+                       GRect(mapx(lx, z.w) - (s_set.wrist_right ? z.w + 4 : 0), y, 2 * z.w + 4, z.h),
+                       GTextOverflowModeWordWrap,
                        s_set.wrist_right ? GTextAlignmentRight : GTextAlignmentLeft, NULL);
-    lx += ((tabular && isdigit((int)one[0])) ? cell : z.w) + track;
+    lx += ((tabular && isdigit((int)s_glyph[0])) ? cell : z.w) + track;
   }
 }
 
@@ -740,6 +743,167 @@ static void draw_modules(GContext *ctx, GFont f_val, GFont f_cap,
   }
 }
 
+// The content box, inside the rail and the paddings, in logical x.
+typedef struct { int start, end, top, bot; } Frame;
+
+// Each zone is laid out into static storage by one function and painted by
+// another. The painters are what sit beneath the firmware's text renderer,
+// and with their numbers in memory rather than in locals their frames stay
+// small enough to leave it the stack it needs.
+
+// ---- zone 03/04: the time, flush to the outer edge so the minute survives
+// a cuff that hides the hour.
+static struct {
+  char hh[4], mm[4];
+  int x, y, hh_w, colon_w, cgap, band_top;
+  GSize z_colon;
+} s_tm;
+
+static void layout_time(const struct tm *t, const Frame *fr) __attribute__((noinline));
+static void layout_time(const struct tm *t, const Frame *fr) {
+  snprintf(s_tm.hh, sizeof(s_tm.hh), "%02d", display_hour(t->tm_hour));
+  snprintf(s_tm.mm, sizeof(s_tm.mm), "%02d", t->tm_min);
+  const GFont f = s_f_time;
+  const Metrics m = barlow_metrics(measure("0", f).h);
+  s_tm.z_colon = measure(":", f);
+  s_tm.cgap = sc(COLON_GAP);
+  s_tm.hh_w = run_w(s_tm.hh, f, true, 0);
+  s_tm.colon_w = s_tm.z_colon.w + 2 * s_tm.cgap;
+  s_tm.x = fr->end - (s_tm.hh_w + s_tm.colon_w + run_w(s_tm.mm, f, true, 0));
+  // The design's line box sits its digits well below the padding: the cap
+  // top lands 18px down at this scale.
+  s_tm.y = fr->top + sc(TIME_MARGIN_TOP) - m.bearing;
+  // The band the design leaves empty runs from the time's line box down to
+  // the top of the countdown block.
+  s_tm.band_top = s_tm.y + m.bearing + m.cap + sc(3);
+}
+
+static void paint_time(GContext *ctx) __attribute__((noinline));
+static void paint_time(GContext *ctx) {
+  graphics_context_set_text_color(ctx, s_ink);
+  draw_run(ctx, s_tm.hh, s_f_time, s_tm.x, s_tm.y, true, 0);
+  draw_run(ctx, s_tm.mm, s_f_time, s_tm.x + s_tm.hh_w + s_tm.colon_w, s_tm.y, true, 0);
+  // The one accent in the time: the design's colon.
+  graphics_context_set_text_color(ctx, accent());
+  draw_at(ctx, ":", s_f_time, s_tm.x + s_tm.hh_w + s_tm.cgap, s_tm.y, s_tm.z_colon);
+}
+
+// ---- zone 02: the countdown, and zone 04: weekday and date.
+static struct {
+  char dow[8], date[12], label[20], num[8];
+  const char *unit;
+  bool now, solid;
+  GSize z_num;
+  Metrics m_lab, m_min, m_num, m_dow, m_date;
+  int label_w, num_w, num_row_w, inner_w, inner_x, label_y, num_y;
+  int block_x, block_y, block_w, block_h, date_y, dow_y;
+} s_bk;
+
+static void layout_block(const struct tm *t, const Schedule *sch, const Frame *fr) __attribute__((noinline));
+static void layout_block(const struct tm *t, const Schedule *sch, const Frame *fr) {
+  strftime(s_bk.dow, sizeof(s_bk.dow), "%a", t);
+  strftime(s_bk.date, sizeof(s_bk.date), "%d %b", t);
+  for (char *p = s_bk.dow; *p; p++) *p = toupper((int)*p);
+  for (char *p = s_bk.date; *p; p++) *p = toupper((int)*p);
+
+  s_bk.now = sch->is_now;
+  s_bk.solid = sch->is_now || sch->is_boarding;
+  s_bk.unit = "MIN";
+  if (sch->is_now) {
+    strncpy(s_bk.label, "DEPARTS", sizeof(s_bk.label));
+    strncpy(s_bk.num, "NOW", sizeof(s_bk.num));
+  } else {
+    snprintf(s_bk.label, sizeof(s_bk.label), "%s %d:%02d",
+             sch->is_boarding ? "LEAVES" : "NEXT",
+             display_hour(sch->next_h), sch->next_m);
+    snprintf(s_bk.num, sizeof(s_bk.num), "%d", sch->is_final ? sch->secs : sch->remaining);
+    if (sch->is_final) s_bk.unit = "SEC";
+  }
+
+  // NOW is set in the countdown face itself, as the design draws it.
+  const GFont f_label = s_f_label, f_date = s_f_date, f_num = s_f_count;
+  s_bk.z_num = measure(s_bk.num, f_num);
+  s_bk.label_w = run_w(s_bk.label, f_label, false, TRACK);
+  const int min_w = sch->is_now ? 0 : run_w(s_bk.unit, f_label, false, TRACK);
+  s_bk.m_lab = barlow_metrics(measure(s_bk.label, f_label).h);
+  s_bk.m_min = barlow_metrics(sch->is_now ? 0 : measure(s_bk.unit, f_label).h);
+  s_bk.m_num = barlow_metrics(s_bk.z_num.h);
+  s_bk.m_dow = barlow_metrics(measure(s_bk.dow, f_date).h);
+  s_bk.m_date = barlow_metrics(measure(s_bk.date, f_date).h);
+  const int dow_w = run_w(s_bk.dow, f_date, false, TRACK);
+  const int date_w2 = run_w(s_bk.date, f_date, false, TRACK);
+
+  s_bk.num_w = sch->is_now ? s_bk.z_num.w : run_w(s_bk.num, f_num, true, 0);
+  s_bk.num_row_w = s_bk.num_w + (sch->is_now ? 0 : sc(LABEL_GAP) + min_w);
+  int inner_w = s_bk.num_row_w > s_bk.label_w ? s_bk.num_row_w : s_bk.label_w;
+  const int min_inner = sc(BLOCK_MIN_W) - sc(BLOCK_PAD_IN) - sc(BLOCK_PAD_OUT);
+  if (inner_w < min_inner) inner_w = min_inner;
+
+  // The bottom row is a space-between pair and the block must not grow into
+  // the weekday/date column. Should a label outgrow the row, the block's own
+  // padding gives way first and the normal state keeps the design's spacing.
+  const int date_w = dow_w > date_w2 ? dow_w : date_w2;
+  const int avail = fr->end - fr->start - date_w - sc(ROW_GAP);
+  int pad_in = sc(BLOCK_PAD_IN), pad_out = sc(BLOCK_PAD_OUT);
+  int over = inner_w + pad_in + pad_out - avail;
+  if (over > 0) {
+    int give = pad_in - sc(BLOCK_PAD_MIN);
+    if (give > over) give = over;
+    if (give > 0) { pad_in -= give; over -= give; }
+  }
+  if (over > 0) {
+    int give = pad_out - sc(BLOCK_PAD_MIN);
+    if (give > over) give = over;
+    if (give > 0) { pad_out -= give; over -= give; }
+  }
+  if (over > 0) inner_w -= over;   // last resort: the label overruns
+
+  s_bk.inner_w = inner_w;
+  s_bk.block_w = inner_w + pad_in + pad_out;
+  s_bk.block_h = s_bk.m_lab.cap + sc(BLOCK_ROW_GAP) + s_bk.m_num.cap + sc(BLOCK_PAD_T) + sc(BLOCK_PAD_B);
+  s_bk.block_x = fr->end - s_bk.block_w;
+  s_bk.block_y = fr->bot - s_bk.block_h;
+  // Label and number are end-aligned within the block. The design puts a
+  // full line of air between them: measured with its own font, 15px from
+  // the label's baseline to the top of the digits at 288 wide, so seven
+  // here. The estimated cap of the label runs a pixel long, hence eight in
+  // the constant.
+  s_bk.inner_x = s_bk.block_x + pad_in;
+  s_bk.label_y = s_bk.block_y + sc(BLOCK_PAD_T);
+  s_bk.num_y = s_bk.label_y + s_bk.m_lab.cap + sc(BLOCK_ROW_GAP);
+  // Weekday and date sit on the wrist side: first to disappear.
+  s_bk.date_y = fr->bot - sc(DATE_PAD_BOT) - s_bk.m_date.cap;
+  s_bk.dow_y = s_bk.date_y - sc(DOW_GAP) - s_bk.m_dow.cap;
+}
+
+static void paint_block(GContext *ctx, const Frame *fr) __attribute__((noinline));
+static void paint_block(GContext *ctx, const Frame *fr) {
+  if (s_bk.solid) {
+    const GColor fill = s_bk.now ? s_ink : accent();
+    graphics_context_set_fill_color(ctx, fill);
+    graphics_fill_rect(ctx, GRect(mapx(s_bk.block_x, s_bk.block_w), s_bk.block_y, s_bk.block_w, s_bk.block_h),
+                       0, GCornerNone);
+    graphics_context_set_text_color(ctx, on_fill(fill));
+  } else {
+    graphics_context_set_text_color(ctx, s_ink);
+  }
+  draw_run(ctx, s_bk.label, s_f_label, s_bk.inner_x + s_bk.inner_w - s_bk.label_w,
+           s_bk.label_y - s_bk.m_lab.bearing, false, TRACK);
+  const int num_x = s_bk.inner_x + s_bk.inner_w - s_bk.num_row_w;
+  if (s_bk.now) {
+    draw_at(ctx, s_bk.num, s_f_count, num_x, s_bk.num_y - s_bk.m_num.bearing, s_bk.z_num);
+  } else {
+    draw_run(ctx, s_bk.num, s_f_count, num_x, s_bk.num_y - s_bk.m_num.bearing, true, 0);
+    // "MIN" rides the baseline of the big number.
+    draw_run(ctx, s_bk.unit, s_f_label, num_x + s_bk.num_w + sc(LABEL_GAP),
+             s_bk.num_y + s_bk.m_num.cap - s_bk.m_min.cap - s_bk.m_min.bearing, false, TRACK);
+  }
+  graphics_context_set_text_color(ctx, s_ink);
+  draw_run(ctx, s_bk.dow, s_f_date, fr->start, s_bk.dow_y - s_bk.m_dow.bearing, false, TRACK);
+  graphics_context_set_text_color(ctx, s_dim);
+  draw_run(ctx, s_bk.date, s_f_date, fr->start, s_bk.date_y - s_bk.m_date.bearing, false, TRACK);
+}
+
 static void face_update(Layer *layer, GContext *ctx) {
   // A timeline peek slides up over the bottom of the watchface — precisely
   // where the countdown and the date sit. Laying out against the
@@ -760,155 +924,18 @@ static void face_update(Layer *layer, GContext *ctx) {
 
   draw_rail(ctx, &sch, b.size.h);
 
-  // Content box, inside the rail and the paddings.
-  const int rail_total = sc(RAIL_W) + sc(RAIL_BORDER);
-  const int c_start = sc(PAD_WRIST);                        // logical left
-  const int c_end   = s_w - rail_total - sc(PAD_GUTTER);     // logical right
-  const int c_top   = sc(PAD_TOP);
-  const int c_bot   = b.size.h - sc(PAD_BOTTOM);
+  const Frame fr = {
+    .start = sc(PAD_WRIST),                                       // logical left
+    .end = s_w - sc(RAIL_W) - sc(RAIL_BORDER) - sc(PAD_GUTTER),   // logical right
+    .top = sc(PAD_TOP),
+    .bot = b.size.h - sc(PAD_BOTTOM),
+  };
 
-  GFont f_time  = s_f_time;
-  GFont f_count = s_f_count;
-  // The build notes offered Gothic 14 Bold for the labels; the mock's own
-  // Barlow Condensed is preferred, at the mock's sizes, so the whole face is
-  // one voice.
-  GFont f_label = s_f_label, f_date = s_f_date, f_caption = s_f_cap;
-
-  // ---- zone 03/04: the time, flush to the outer edge so the minute
-  // survives a cuff that hides the hour.
-  char hh[4], mm[4];
-  snprintf(hh, sizeof(hh), "%02d", display_hour(t->tm_hour));
-  snprintf(mm, sizeof(mm), "%02d", t->tm_min);
-
-  const GSize z_colon = measure(":", f_time);
-  const Metrics m_time = barlow_metrics(measure("0", f_time).h);
-  const int cgap = sc(COLON_GAP);
-  const int hh_w = run_w(hh, f_time, true, 0), mm_w = run_w(mm, f_time, true, 0);
-  const int colon_w = z_colon.w + 2 * cgap;
-  const int time_w = hh_w + colon_w + mm_w;
-  const int time_x = c_end - time_w;
-  // The design's line box sits its digits well below the padding: the cap
-  // top lands 18px down at this scale.
-  const int time_y = c_top + sc(TIME_MARGIN_TOP) - m_time.bearing;
-
-  graphics_context_set_text_color(ctx, s_ink);
-  draw_run(ctx, hh, f_time, time_x, time_y, true, 0);
-  draw_run(ctx, mm, f_time, time_x + hh_w + colon_w, time_y, true, 0);
-
-  // The one accent in the time: the design's colon.
-  graphics_context_set_text_color(ctx, accent());
-  draw_at(ctx, ":", f_time, time_x + hh_w + cgap, time_y, z_colon);
-
-  // ---- optional extras, in the band the design leaves empty: from the
-  // time's line box to the top of the countdown block.
-  const int band_top = time_y + m_time.bearing + m_time.cap + sc(3);
-
-  // ---- zone 02: the countdown, and zone 04: weekday and date.
-  char dow[8], date[12], label[20], num[8];
-  strftime(dow, sizeof(dow), "%a", t);
-  strftime(date, sizeof(date), "%d %b", t);
-  for (char *p = dow; *p; p++) *p = toupper((int)*p);
-  for (char *p = date; *p; p++) *p = toupper((int)*p);
-
-  const bool solid = sch.is_now || sch.is_boarding;
-  const char *unit = "MIN";
-  if (sch.is_now) {
-    strncpy(label, "DEPARTS", sizeof(label));
-    strncpy(num, "NOW", sizeof(num));
-  } else {
-    snprintf(label, sizeof(label), "%s %d:%02d",
-             sch.is_boarding ? "LEAVES" : "NEXT",
-             display_hour(sch.next_h), sch.next_m);
-    snprintf(num, sizeof(num), "%d", sch.is_final ? sch.secs : sch.remaining);
-    if (sch.is_final) unit = "SEC";
-  }
-
-  // NOW is set in the countdown face itself, as the design draws it.
-  GFont f_num = f_count;
-  const GSize z_label = measure(label, f_label);
-  const GSize z_num = measure(num, f_num);
-  const GSize z_min = sch.is_now ? GSize(0, 0) : measure(unit, f_label);
-  const int label_w = run_w(label, f_label, false, TRACK);
-  const int min_w = sch.is_now ? 0 : run_w(unit, f_label, false, TRACK);
-
-  const Metrics m_lab = barlow_metrics(z_label.h);
-  const Metrics m_min = barlow_metrics(z_min.h);
-  const Metrics m_num = barlow_metrics(z_num.h);
-
-  const GSize z_dow = measure(dow, f_date), z_date = measure(date, f_date);
-  const int dow_w = run_w(dow, f_date, false, TRACK), date_w2 = run_w(date, f_date, false, TRACK);
-
-  const int num_w = sch.is_now ? z_num.w : run_w(num, f_num, true, 0);
-  const int num_row_w = num_w + (sch.is_now ? 0 : sc(LABEL_GAP) + min_w);
-  int inner_w = num_row_w > label_w ? num_row_w : label_w;
-  const int min_inner = sc(BLOCK_MIN_W) - sc(BLOCK_PAD_IN) - sc(BLOCK_PAD_OUT);
-  if (inner_w < min_inner) inner_w = min_inner;
-
-  // The bottom row is a space-between pair and the block must not grow into
-  // the weekday/date column. The longest label ("LEAVES 10:30" in Gothic 14
-  // Bold) is a few pixels wider than the 144px row allows, so the block's own
-  // padding gives way first and the normal state keeps the design's spacing.
-  const int date_w = dow_w > date_w2 ? dow_w : date_w2;
-  const int avail = c_end - c_start - date_w - sc(ROW_GAP);
-  int pad_in = sc(BLOCK_PAD_IN), pad_out = sc(BLOCK_PAD_OUT);
-  int over = inner_w + pad_in + pad_out - avail;
-  if (over > 0) {
-    int give = pad_in - sc(BLOCK_PAD_MIN);
-    if (give > over) give = over;
-    if (give > 0) { pad_in -= give; over -= give; }
-  }
-  if (over > 0) {
-    int give = pad_out - sc(BLOCK_PAD_MIN);
-    if (give > over) give = over;
-    if (give > 0) { pad_out -= give; over -= give; }
-  }
-  if (over > 0) inner_w -= over;   // last resort: the label ellipsizes
-
-  const int inner_h = m_lab.cap + sc(BLOCK_ROW_GAP) + m_num.cap;
-  const int block_w = inner_w + pad_in + pad_out;
-  const int block_h = inner_h + sc(BLOCK_PAD_T) + sc(BLOCK_PAD_B);
-  const int block_x = c_end - block_w;
-  const int block_y = c_bot - block_h;
-
-  if (solid) {
-    const GColor fill = sch.is_now ? s_ink : accent();
-    graphics_context_set_fill_color(ctx, fill);
-    graphics_fill_rect(ctx, GRect(mapx(block_x, block_w), block_y, block_w, block_h), 0, GCornerNone);
-    graphics_context_set_text_color(ctx, on_fill(fill));
-  } else {
-    graphics_context_set_text_color(ctx, s_ink);
-  }
-
-  // Label and number are end-aligned within the block.
-  const int inner_x = block_x + pad_in;
-  const int label_y = block_y + sc(BLOCK_PAD_T);
-  draw_run(ctx, label, f_label, inner_x + inner_w - label_w, label_y - m_lab.bearing, false, TRACK);
-
-  // The design puts a full line of air between the label and the number:
-  // measured with its own font, 15px from the label's baseline to the top
-  // of the digits at 288 wide, so seven here. The estimated cap of the
-  // Gothic label runs a pixel long, hence eight in the constant.
-  const int num_y = label_y + m_lab.cap + sc(BLOCK_ROW_GAP);
-  const int num_x = inner_x + inner_w - num_row_w;
-  if (sch.is_now) draw_at(ctx, num, f_num, num_x, num_y - m_num.bearing, z_num);
-  else draw_run(ctx, num, f_num, num_x, num_y - m_num.bearing, true, 0);
-  if (!sch.is_now) {
-    // "MIN" rides the baseline of the big number.
-    const int min_y = num_y + m_num.cap - m_min.cap;
-    draw_run(ctx, unit, f_label, num_x + num_w + sc(LABEL_GAP), min_y - m_min.bearing, false, TRACK);
-  }
-
-  // Weekday and date sit on the wrist side: first to disappear.
-  const Metrics m_dow = barlow_metrics(z_dow.h), m_date = barlow_metrics(z_date.h);
-  const int date_y = c_bot - sc(DATE_PAD_BOT) - m_date.cap;
-  const int dow_y = date_y - sc(DOW_GAP) - m_dow.cap;
-
-  graphics_context_set_text_color(ctx, s_ink);
-  draw_run(ctx, dow, f_date, c_start, dow_y - m_dow.bearing, false, TRACK);
-  graphics_context_set_text_color(ctx, s_dim);
-  draw_run(ctx, date, f_date, c_start, date_y - m_date.bearing, false, TRACK);
-
-  draw_modules(ctx, s_f_mod, f_caption, c_start, c_end - c_start, band_top, block_y);
+  layout_time(t, &fr);
+  layout_block(t, &sch, &fr);
+  paint_time(ctx);
+  paint_block(ctx, &fr);
+  draw_modules(ctx, s_f_mod, s_f_cap, fr.start, fr.end - fr.start, s_tm.band_top, s_bk.block_y);
 
   // ---- boarding buzz, once on the transition into the solid block.
   if (s_set.buzz && sch.remaining == THRESHOLD && s_last_remaining != THRESHOLD
