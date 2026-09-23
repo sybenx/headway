@@ -49,6 +49,11 @@ not appear.
 - **Boarding** — five minutes out, the block goes solid. Optional single buzz.
 - **Departing** — rail empty, `NOW` for one minute.
 
+When a timeline peek covers the bottom third of the screen, the face reflows
+into what is left, as the design has it: the date goes first, the time and
+the countdown step down a size, and the modules and the second countdown keep
+their band. The rail draws to the visible height, so its fill still reads.
+
 ## Settings
 
 Reachable from the Pebble app.

@@ -232,6 +232,8 @@ static int transit_next(const uint16_t *list, int now_min) {
 #define MOD_ICON_GAP  4
 #define BLOCK_PAD_MIN 3
 #define BLOCK_ROW_GAP_S 4   // the flick view's block, a size down
+#define BLOCK_ROW_GAP_P 3   // and under a peek
+#define TIME_MARGIN_TOP_P 4
 #define TIME_MARGIN_TOP 10
 #define COLON_GAP     0   // the design's 2px margin, less its tracking
 
@@ -248,6 +250,7 @@ static int transit_next(const uint16_t *list, int now_min) {
   #define RES_BIGDATE RESOURCE_ID_FONT_DATE_25
   #define RES_TIME_S  RESOURCE_ID_FONT_TIME_67
   #define RES_COUNT_S RESOURCE_ID_FONT_COUNT_42
+  #define RES_TIME_P  RESOURCE_ID_FONT_TIME_53
 #else
   #define RES_TIME  RESOURCE_ID_FONT_TIME_60
   #define RES_COUNT RESOURCE_ID_FONT_COUNT_44
@@ -258,10 +261,12 @@ static int transit_next(const uint16_t *list, int now_min) {
   #define RES_BIGDATE RESOURCE_ID_FONT_DATE_18
   #define RES_TIME_S  RESOURCE_ID_FONT_TIME_48
   #define RES_COUNT_S RESOURCE_ID_FONT_COUNT_30
+  #define RES_TIME_P  RESOURCE_ID_FONT_TIME_38
 #endif
 
 static GFont s_f_time, s_f_count, s_f_mod, s_f_label, s_f_date, s_f_cap, s_f_bigdate;
 static GFont s_f_time_s, s_f_count_s;   // the flick view's sizes
+static GFont s_f_time_p;                // the time under a timeline peek
 static Window *s_window;
 static Layer *s_face;
 static int s_last_remaining = -1;
@@ -1117,8 +1122,8 @@ static struct {
   GFont f;
 } s_tm;
 
-static void layout_time(const struct tm *t, const Frame *fr, GFont f) __attribute__((noinline));
-static void layout_time(const struct tm *t, const Frame *fr, GFont f) {
+static void layout_time(const struct tm *t, const Frame *fr, GFont f, int margin_top) __attribute__((noinline));
+static void layout_time(const struct tm *t, const Frame *fr, GFont f, int margin_top) {
   snprintf(s_tm.hh, sizeof(s_tm.hh), "%02d", display_hour(t->tm_hour));
   snprintf(s_tm.mm, sizeof(s_tm.mm), "%02d", t->tm_min);
   s_tm.f = f;
@@ -1131,7 +1136,7 @@ static void layout_time(const struct tm *t, const Frame *fr, GFont f) {
   s_tm.x = fr->end - s_tm.w;
   // The design's line box sits its digits well below the padding: the cap
   // top lands 18px down at this scale.
-  s_tm.y = fr->top + sc(TIME_MARGIN_TOP) - m.bearing;
+  s_tm.y = fr->top + sc(margin_top) - m.bearing;
   // The band the design leaves empty runs from the time's line box down to
   // the top of the countdown block.
   s_tm.band_top = s_tm.y + m.bearing + m.cap + sc(3);
@@ -1281,11 +1286,12 @@ static void face_update(Layer *layer, GContext *ctx) {
   static Schedule sch;
   static struct tm *t;
   static Frame fr;
-  static bool quiet, at_hub;
+  static bool quiet, at_hub, peek;
   s_ctx = ctx;
   full = layer_get_bounds(layer);
   b = layer_get_unobstructed_bounds(layer);
   s_w = b.size.w;
+  peek = b.size.h < full.size.h - sc(8);
 
   const time_t now = time(NULL);
   t = localtime(&now);
@@ -1313,16 +1319,20 @@ static void face_update(Layer *layer, GContext *ctx) {
   // number on the face. Nothing is lost to a flick, least of all a bus
   // boarding. Date and modules sit it out.
   if (s_sv.valid) {
-    layout_time(t, &fr, s_f_time_s);
+    layout_time(t, &fr, s_f_time_s, TIME_MARGIN_TOP);
     paint_time();
     layout_block(t, &sch, &fr, s_f_count_s, BLOCK_ROW_GAP_S, false);
     layout_stopview(&fr, s_tm.band_top, s_bk.block_y);
     paint_block(fr.start);
     paint_stopview(fr.start);
   } else {
-    layout_time(t, &fr, s_f_time);
+    // A timeline peek covers the bottom third. The date goes first, the time
+    // and the countdown step down, and the modules and the second countdown
+    // keep their band, as the design reflows it.
+    layout_time(t, &fr, peek ? s_f_time_p : s_f_time, peek ? TIME_MARGIN_TOP_P : TIME_MARGIN_TOP);
     paint_time();
     if (quiet) layout_idle(t, &fr);
+    else if (peek) layout_block(t, &sch, &fr, s_f_count_s, BLOCK_ROW_GAP_P, false);
     else layout_block(t, &sch, &fr, s_f_count, BLOCK_ROW_GAP, true);
     const int band_bot = quiet ? s_id.top : s_bk.block_y;
     if (at_hub) layout_gb(fr.start, fr.end - fr.start, s_tm.band_top, band_bot, t->tm_hour * 60 + t->tm_min);
@@ -1562,6 +1572,7 @@ static void init(void) {
   s_f_bigdate = fonts_load_custom_font(resource_get_handle(RES_BIGDATE));
   s_f_time_s = fonts_load_custom_font(resource_get_handle(RES_TIME_S));
   s_f_count_s = fonts_load_custom_font(resource_get_handle(RES_COUNT_S));
+  s_f_time_p = fonts_load_custom_font(resource_get_handle(RES_TIME_P));
 
   s_window = window_create();
   window_set_window_handlers(s_window, (WindowHandlers){
@@ -1587,6 +1598,7 @@ static void deinit(void) {
   fonts_unload_custom_font(s_f_bigdate);
   fonts_unload_custom_font(s_f_time_s);
   fonts_unload_custom_font(s_f_count_s);
+  fonts_unload_custom_font(s_f_time_p);
   tick_timer_service_unsubscribe();
   accel_tap_service_unsubscribe();
   window_destroy(s_window);
