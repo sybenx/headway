@@ -283,24 +283,28 @@
       },
       {
         "type": "text",
-        "defaultValue": "For riders of a system whose hub the face knows. Near the hub and in its hours, the routes on their own timetable get a second countdown. Either the half-hour countdown runs everywhere, as it always has, or only near the hub, with the face quiet elsewhere: no countdown, a larger date. Knows CVTD (Logan, Utah) for now."
+        "defaultValue": "The face knows some transit systems: their hub, its hours, and every stop. Automatic, the default, asks the phone where it is now and then, and near a known system the countdown gets its second count near the hub and a flick shows the nearest stop; elsewhere it is a plain watch. Or keep the countdown everywhere and the second count near the hub always, or have both only near the hub with the face quiet elsewhere. Knows CVTD (Logan, Utah) so far."
       },
       {
         "type": "select",
         "messageKey": "TRANSIT",
-        "label": "Knowing the hub",
-        "defaultValue": "0",
+        "label": "Knowing a system",
+        "defaultValue": "3",
         "options": [
           {
-            "label": "Off: countdown everywhere",
+            "label": "Automatic: near a system the face knows",
+            "value": "3"
+          },
+          {
+            "label": "Off",
             "value": "0"
           },
           {
-            "label": "Second countdown near the hub",
+            "label": "Always: second countdown near the hub",
             "value": "1"
           },
           {
-            "label": "Both only near the hub",
+            "label": "Always: both only near the hub",
             "value": "2"
           }
         ]

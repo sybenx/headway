@@ -21,6 +21,8 @@ ap.add_argument('--radius', type=int, default=150, help='metres around the hub t
 ap.add_argument('--out', default=os.path.join(os.path.dirname(__file__), '..', 'src', 'pkjs', 'transit.json'))
 ap.add_argument('--hints', help='JSON of headsign and stop-name abbreviations for this agency')
 ap.add_argument('--stops-out', help='directory for the per-stop departure files and the stop index (docs/data/<agency>)')
+ap.add_argument('--data-url', default='', help='where the per-stop files are served from, for the phone')
+ap.add_argument('--margin', type=float, default=3000, help='metres around the outermost stops that still count as the system\'s area')
 a = ap.parse_args()
 hints = json.load(open(a.hints)) if a.hints else {}
 
@@ -97,14 +99,30 @@ if a.stops_out:
               open(os.path.join(a.stops_out, 'stops.json'), 'w'), separators=(',', ':'))
     print('stops', len(index), 'files in', os.path.normpath(a.stops_out))
 
-out = {
+# The system's area: a box around every stop, with a margin, so the phone
+# can tell which system it is in from a coarse fix.
+lats = [float(s_['stop_lat']) for s_ in table('stops.txt')]
+lons = [float(s_['stop_lon']) for s_ in table('stops.txt')]
+dlat = a.margin / 111000.0
+dlon = a.margin / (111000.0 * math.cos(math.radians(lat)))
+system = {
     'agency': a.agency, 'hub': {'name': a.name, 'lat': lat, 'lon': lon}, 'routes': wanted,
+    'area': [round(min(lats) - dlat, 4), round(min(lons) - dlon, 4), round(max(lats) + dlat, 4), round(max(lons) + dlon, 4)],
+    'data': a.data_url,
     'days': {kind: {'hours': [first[kind], last[kind]],
                     'dep': {r: sorted(v) for r, v in deps.get(kind, {}).items()}}
              for kind in sorted(first)},
 }
-json.dump(out, open(a.out, 'w'), separators=(',', ':'))
-for kind, d in out['days'].items():
+# One file, many systems: replace this agency's entry, keep the others.
+try:
+    existing = json.load(open(a.out))
+    systems = existing.get('systems', [])
+except (OSError, ValueError):
+    systems = []
+systems = [x for x in systems if x.get('agency') != a.agency] + [system]
+json.dump({'systems': systems}, open(a.out, 'w'), separators=(',', ':'))
+print('area', system['area'])
+for kind, d in system['days'].items():
     print(kind, 'hours %02d:%02d-%02d:%02d' % (d['hours'][0] // 60, d['hours'][0] % 60, d['hours'][1] // 60, d['hours'][1] % 60),
           {r: len(v) for r, v in d['dep'].items()})
 print('wrote', os.path.normpath(a.out), os.path.getsize(a.out), 'bytes')

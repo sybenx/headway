@@ -68,34 +68,45 @@ Reachable from the Pebble app.
 - **Modules** — three slots: heart rate, steps, battery, weather or nothing
 - **Icons instead of captions**
 - **Units** — °C or °F
-- **Knowing the hub** — see below; off by default, with the radius and a switch for the flick
+- **Knowing a system** — see below; automatic by default, with the hub radius and a switch for the flick
 
 Weather comes from [Open-Meteo](https://open-meteo.com), which needs no API key
 and no account.
 
-## Near the hub
+## Near a system it knows
 
-For riders of a system whose hub the face knows. With it on, the phone asks
-where it is every few minutes, coarsely, and the face changes by the answer.
-Two ways to have it:
+The face knows some transit systems: each one's hub, its hours, the routes
+that leave the hub together on their own timetable, and every stop. By
+default it is automatic: the phone asks where it is now and then, coarsely,
+and inside a known system's area the face changes by the answer. Outside
+every known system it is the plain watch, and it asks less often.
 
-- **Second countdown near the hub** — the half-hour countdown runs everywhere,
-  as it always has, and near the hub in its hours the routes that leave it
-  together on their own timetable get a second one, in the module band, at
-  the end furthest from the cuff: a chip per route and the minutes to the next
-  departure. If the two have parted, the later one's chip goes dim. Set the
-  radius wide and it is there for the drive in.
-- **Both only near the hub** — the same at the hub; anywhere else, or after
-  hours, there is nothing to count down to, so the block and the rail's fill
-  go, and the date grows into the room they leave.
+- **At the hub, in its hours** — the countdown runs as ever, and the routes
+  on their own timetable get a second one, in the module band, at the end
+  furthest from the cuff: a chip per route and the minutes to the next
+  departure. If the two have parted, the later one's chip goes dim.
+- **Elsewhere in the system** — the countdown runs as ever, and a flick shows
+  the nearest stop.
 
-| at the hub | away |
+Two always-on choices in settings replace the automatic one: the second
+countdown near the hub with the half-hour countdown everywhere, wherever you
+are — set the radius wide and it is there for the drive in — or both only
+near the hub, with the face quiet anywhere else or after hours: no countdown,
+a larger date. And off.
+
+| at the hub | quiet, away from it |
 |---|---|
 | ![at the hub](screenshots/hub.png) | ![away](screenshots/away.png) |
 
 The phone's word holds for three hours; if it goes quiet longer than that, the
 face falls back to the plain countdown rather than stay quiet on a stale fix.
-Off, and the countdown runs everywhere, as it always has.
+
+The face knows one system so far: the Cache Valley Transit District in Logan,
+Utah, whose routes leave the transit center on the half hour and whose G and
+B keep their own timetable. `tools/transit.py` reduces an agency's GTFS to
+what the phone needs — the hub, its hours, those departures, the area its
+stops cover — and adds it to `src/pkjs/transit.json`; the watch never reads
+the feed.
 
 ### A flick for the nearest stop
 

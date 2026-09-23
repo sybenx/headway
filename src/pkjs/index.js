@@ -3,8 +3,11 @@ var Clay = require('pebble-clay/dist/js/index.js');
 var clayConfig = require('./config.json');
 var clay = new Clay(clayConfig);
 
-// The hub the face knows: written by tools/transit.py from the agency's GTFS.
+// The systems the face knows: written by tools/transit.py from each agency's
+// GTFS. Each has a hub, its hours, the routes on their own timetable, the
+// box its stops sit in, and where its per-stop files are served from.
 var transit = require('./transit.json');
+var MODE_OFF = '0', MODE_CHIPS = '1', MODE_NEAR = '2', MODE_AUTO = '3';
 
 // Weather comes from Open-Meteo, which needs no API key and no account.
 var WEATHER_TTL = 30 * 60 * 1000;
@@ -69,11 +72,25 @@ function metres(aLat, aLon, bLat, bLon) {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
+// The system whose area holds the fix, or null.
+function systemAt(lat, lon) {
+  var list = transit.systems || [];
+  for (var i = 0; i < list.length; i++) {
+    var a = list[i].area;
+    if (a && lat >= a[0] && lon >= a[1] && lat <= a[2] && lon <= a[3]) return list[i];
+  }
+  return null;
+}
+function hubMode() {
+  var s = settings();
+  return s.TRANSIT === undefined ? MODE_AUTO : String(s.TRANSIT);
+}
+
 // The day type in the hub's own week: weekday, saturday, sunday, or none.
-function dayTable(d) {
+function dayTable(sys, d) {
   var wd = d.getDay();
   var kind = wd === 0 ? 'sunday' : wd === 6 ? 'saturday' : 'weekday';
-  return transit.days[kind] || null;
+  return sys.days[kind] || null;
 }
 
 // The next departures of a route from a minute of the day, as minutes.
@@ -94,8 +111,9 @@ function packMinutes(list) {
   return bytes;
 }
 
-function sendTransit(state, g, b) {
+function sendTransit(area, state, g, b) {
   Pebble.sendAppMessage({
+    TR_AREA: area,
     TR_STATE: state,
     TR_G: packMinutes(g),
     TR_B: packMinutes(b),
@@ -103,24 +121,43 @@ function sendTransit(state, g, b) {
   });
 }
 
-function checkTransit() {
+// Away from every known system the phone asks less often.
+var lastOutside = 0;
+var OUTSIDE_EVERY = 15 * 60 * 1000;
+
+function checkTransit(force) {
+  var mode = hubMode();
+  if (mode === MODE_OFF) return;
+  if (!force && mode === MODE_AUTO && lastOutside && Date.now() - lastOutside < OUTSIDE_EVERY) return;
   var s = settings();
-  if (!s.TRANSIT || String(s.TRANSIT) === '0') return;
   var radius = Number(s.TR_RADIUS) || 300;
 
   navigator.geolocation.getCurrentPosition(function (pos) {
-    var d = metres(pos.coords.latitude, pos.coords.longitude, transit.hub.lat, transit.hub.lon);
+    var lat = pos.coords.latitude, lon = pos.coords.longitude;
+    var sys = systemAt(lat, lon);
+    if (!sys) {
+      // Outside every system the face knows. Automatic: a plain watch; the
+      // always-on modes still take the first system as their hub.
+      lastOutside = Date.now();
+      if (mode === MODE_AUTO) { console.log('headway: outside any known system'); return sendTransit(0, 0, [], []); }
+      sys = (transit.systems || [])[0];
+      if (!sys) return;
+    } else {
+      lastOutside = 0;
+    }
+    var d = metres(lat, lon, sys.hub.lat, sys.hub.lon);
     var now = new Date();
     var nowMin = now.getHours() * 60 + now.getMinutes();
-    var day = dayTable(now);
+    var day = dayTable(sys, now);
     // A quarter hour before the first run counts as hours: that is when the
     // first riders are standing there.
     var inHours = !!day && nowMin >= day.hours[0] - 15 && nowMin <= day.hours[1];
     var active = d <= radius && inHours;
-    var routes = transit.routes;
+    var routes = sys.routes;
     var g = active ? upcoming(day.dep[routes[0]] || [], nowMin) : [];
     var b = active ? upcoming(day.dep[routes[1]] || [], nowMin) : [];
-    sendTransit(active ? 1 : 0, g, b);
+    console.log('headway: ' + sys.agency + ' ' + Math.round(d) + 'm from the hub, ' + (active ? 'at it' : 'away'));
+    sendTransit(1, active ? 1 : 0, g, b);
   }, function () {
     // No fix: say nothing, and the watch keeps its last word until it is stale.
   }, { timeout: 10000, maximumAge: 4 * 60 * 1000 });
@@ -131,7 +168,6 @@ function checkTransit() {
 // The stop index and the per-stop files come from the repo's own pages,
 // written nightly by tools/transit.py. A precise fix picks the stop; twin
 // stops across a road are merged, since the headsign tells them apart.
-var DATA_URL = 'https://sybenx.github.io/headway/data/cvtd/';
 var INDEX_TTL = 24 * 60 * 60 * 1000, STOP_TTL = 6 * 60 * 60 * 1000;
 var AT_STOP = 60, TWIN = 45, NEARBY = 1500;
 
@@ -189,7 +225,10 @@ function onFlick() {
   navigator.geolocation.getCurrentPosition(function (pos) {
     var lat = pos.coords.latitude, lon = pos.coords.longitude;
     console.log('headway: fix ' + lat.toFixed(4) + ',' + lon.toFixed(4) + ' +-' + Math.round(pos.coords.accuracy) + 'm');
-    getJSON(DATA_URL + 'stops.json', 'hw-stops', INDEX_TTL, function (index) {
+    var sys = systemAt(lat, lon);
+    if (!sys || !sys.data) return sendStopView('', 0, []);
+    var DATA_URL = sys.data, tag = sys.agency.toLowerCase();
+    getJSON(DATA_URL + 'stops.json', 'hw-stops-' + tag, INDEX_TTL, function (index) {
       if (!index) return sendStopView('', 0, []);
       var ranked = index.stops.map(function (st) {
         return { id: st[0], d: metres(lat, lon, st[1], st[2]), lat: st[1], lon: st[2] };
@@ -202,7 +241,7 @@ function onFlick() {
       var now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes();
       var pending = group.length, name = '', deps = [];
       group.forEach(function (st) {
-        getJSON(DATA_URL + 'stops/' + st.id + '.json', 'hw-stop-' + st.id, STOP_TTL, function (stop) {
+        getJSON(DATA_URL + 'stops/' + st.id + '.json', 'hw-stop-' + tag + '-' + st.id, STOP_TTL, function (stop) {
           if (stop) {
             if (!name) name = stop.name;
             (stop.days[kind] || []).forEach(function (dep) {
@@ -229,10 +268,10 @@ Pebble.addEventListener('appmessage', function (e) {
   if (e.payload && e.payload.FLICK) { console.log('headway: flick'); onFlick(); }
 });
 
-Pebble.addEventListener('ready', function () { fetchWeather(true); checkTransit(); });
+Pebble.addEventListener('ready', function () { fetchWeather(true); checkTransit(true); });
 Pebble.addEventListener('webviewclosed', function () {
   // Settings may have switched weather or transit on, or changed units.
-  setTimeout(function () { fetchWeather(true); checkTransit(); }, 500);
+  setTimeout(function () { fetchWeather(true); checkTransit(true); }, 500);
 });
 setInterval(function () { fetchWeather(false); }, 10 * 60 * 1000);
-setInterval(checkTransit, TRANSIT_EVERY);
+setInterval(function () { checkTransit(false); }, TRANSIT_EVERY);

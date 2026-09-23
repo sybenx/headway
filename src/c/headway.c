@@ -33,6 +33,7 @@
 #define TRANSIT_OFF   0   // the hub is not consulted
 #define TRANSIT_CHIPS 1   // countdown everywhere; the second one near the hub
 #define TRANSIT_NEAR  2   // both only near the hub, in its hours
+#define TRANSIT_AUTO  3   // as CHIPS, but only inside a system the face knows
 
 typedef struct {
   uint8_t version;     // bumped whenever the fields below change
@@ -55,7 +56,7 @@ typedef struct {
 } Settings;
 
 #define SETTINGS_KEY 1
-#define SETTINGS_VERSION 3
+#define SETTINGS_VERSION 4
 #define WEATHER_KEY  2
 #define TRANSIT_KEY  3
 #define THRESHOLD 5   // minutes; block goes solid at or under this
@@ -76,6 +77,7 @@ typedef struct {
 #define TR_STALE (3 * 60 * 60)   // seconds before the phone's word lapses
 typedef struct {
   uint8_t state;           // 0 away or out of hours, 1 at the hub
+  uint8_t area;            // 1 inside a system the face knows
   uint16_t g[TR_MAX], b[TR_MAX];
   time_t at;
 } Transit;
@@ -117,7 +119,7 @@ static void settings_defaults(void) {
   s_set.mod_icons = false;
   s_set.final_seconds = true;
   s_set.imperial = false;
-  s_set.transit = TRANSIT_OFF;
+  s_set.transit = TRANSIT_AUTO;
   s_set.radius = 300;
   s_set.flick = true;
 }
@@ -135,7 +137,7 @@ static void settings_clamp(void) {
   for (int i = 0; i < MODULE_COUNT; i++) {
     if (s_set.mod[i] > MODULE_WEATHER) s_set.mod[i] = MODULE_NONE;
   }
-  if (s_set.transit > TRANSIT_NEAR) s_set.transit = TRANSIT_OFF;
+  if (s_set.transit > TRANSIT_AUTO) s_set.transit = TRANSIT_AUTO;
   if (s_set.radius < 50) s_set.radius = 50;
   if (s_set.radius > 2000) s_set.radius = 2000;
 }
@@ -157,6 +159,9 @@ static void settings_load(void) {
       // Carry it over rather than hand the wearer the defaults again.
       persist_read_data(SETTINGS_KEY, &stored, n);
       if (stored.version >= 1 && stored.version <= SETTINGS_VERSION) s_set = stored;
+      // Before layout 4 the hub was off unless chosen; now it is automatic
+      // unless chosen, and an unchosen off reads as automatic.
+      if (stored.version < 4 && s_set.transit == TRANSIT_OFF) s_set.transit = TRANSIT_AUTO;
     }
   }
   s_set.version = SETTINGS_VERSION;
@@ -187,10 +192,16 @@ static void transit_load(void) {
 static void transit_save(void) {
   persist_write_data(TRANSIT_KEY, &s_tr, sizeof(s_tr));
 }
+// What the setting comes to right now: automatic is the second countdown
+// and the flick inside a known system, and nothing outside one.
+static uint8_t transit_mode(void) {
+  if (s_set.transit == TRANSIT_AUTO) return s_tr.area ? TRANSIT_CHIPS : TRANSIT_OFF;
+  return s_set.transit;
+}
 // The phone's word holds for a few hours, then the face falls back to the
 // plain countdown rather than stay quiet on a stale fix.
 static bool transit_fresh(time_t now) {
-  return s_set.transit != TRANSIT_OFF && s_tr.at != 0 && now - s_tr.at < TR_STALE;
+  return transit_mode() != TRANSIT_OFF && s_tr.at != 0 && now - s_tr.at < TR_STALE;
 }
 // Minutes until the first of a route's departures still ahead, or -1.
 static int transit_next(const uint16_t *list, int now_min) {
@@ -1300,7 +1311,7 @@ static void face_update(Layer *layer, GContext *ctx) {
   // With the hub known, the countdown is for the hub: at it in its hours the
   // face runs as ever, with the second countdown; anywhere else it is quiet.
   at_hub = transit_fresh(now) && s_tr.state == 1;
-  quiet = transit_fresh(now) && s_tr.state == 0 && s_set.transit == TRANSIT_NEAR;
+  quiet = transit_fresh(now) && s_tr.state == 0 && transit_mode() == TRANSIT_NEAR;
 
   theme_apply(t->tm_hour);
   graphics_context_set_fill_color(ctx, s_ground);
@@ -1400,7 +1411,7 @@ static void stopview_hold(uint32_t ms) {
 // read in the same glance.
 static void tap_handler(AccelAxisType axis, int32_t direction) {
   (void)axis; (void)direction;
-  if (s_set.transit == TRANSIT_OFF || !s_set.flick || s_sv.pending) return;
+  if (transit_mode() == TRANSIT_OFF || !s_set.flick || s_sv.pending) return;
   DictionaryIterator *out;
   if (app_message_outbox_begin(&out) != APP_MSG_OK) return;
   dict_write_uint8(out, MESSAGE_KEY_FLICK, 1);
@@ -1505,7 +1516,9 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
     Tuple *tg = dict_find(iter, MESSAGE_KEY_TR_G);
     Tuple *tb = dict_find(iter, MESSAGE_KEY_TR_B);
     Tuple *ta = dict_find(iter, MESSAGE_KEY_TR_AT);
+    Tuple *tarea = dict_find(iter, MESSAGE_KEY_TR_AREA);
     s_tr.state = (uint8_t)tp->value->int32;
+    s_tr.area = tarea ? (uint8_t)(tarea->value->int32 != 0) : 1;
     for (int i = 0; i < TR_MAX; i++) {
       s_tr.g[i] = (tg && tg->length >= 2 * TR_MAX) ? (uint16_t)(tg->value->data[2 * i] | (tg->value->data[2 * i + 1] << 8)) : TR_NONE;
       s_tr.b[i] = (tb && tb->length >= 2 * TR_MAX) ? (uint16_t)(tb->value->data[2 * i] | (tb->value->data[2 * i + 1] << 8)) : TR_NONE;
