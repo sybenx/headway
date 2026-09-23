@@ -51,6 +51,13 @@
         "label": "Boarding buzz",
         "description": "A single pulse when the block goes solid, five minutes out.",
         "defaultValue": false
+      },
+      {
+        "type": "toggle",
+        "messageKey": "SECONDS",
+        "label": "Seconds in the final minute",
+        "description": "The one place the face moves. Off keeps it to one redraw a minute.",
+        "defaultValue": true
       }
     ]
   },

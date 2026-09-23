@@ -30,6 +30,7 @@
 #define MODULE_COUNT   3
 
 typedef struct {
+  uint8_t version;     // bumped whenever the fields below change
   bool wrist_right;    // true: rail on the left, sleeve from the right
   uint8_t offset;      // departure, minutes past the hour (0..headway-1)
   uint8_t headway;     // minutes between runs: 30, 20 or 15
@@ -41,10 +42,12 @@ typedef struct {
   uint32_t accent;     // 0xRRGGBB, snapped to the Pebble 64 at use
   uint8_t mod[3];      // MODULE_*, left to right from the wrist edge
   bool mod_icons;      // icons in place of the captions
+  bool final_seconds;  // count the last minute down in seconds
   bool imperial;
 } Settings;
 
 #define SETTINGS_KEY 1
+#define SETTINGS_VERSION 1
 #define WEATHER_KEY  2
 #define THRESHOLD 5   // minutes; block goes solid at or under this
 
@@ -59,6 +62,7 @@ static Settings s_set;
 static Weather s_wx;
 
 static void settings_defaults(void) {
+  s_set.version = SETTINGS_VERSION;
   s_set.wrist_right = false;
   s_set.offset = 0;
   s_set.headway = 30;
@@ -72,6 +76,7 @@ static void settings_defaults(void) {
   s_set.mod[1] = MODULE_STEPS;
   s_set.mod[2] = MODULE_BATTERY;
   s_set.mod_icons = false;
+  s_set.final_seconds = true;
   s_set.imperial = false;
 }
 
@@ -92,9 +97,17 @@ static void settings_clamp(void) {
 
 static void settings_load(void) {
   settings_defaults();
-  if (persist_exists(SETTINGS_KEY)) {
-    persist_read_data(SETTINGS_KEY, &s_set, sizeof(s_set));
+  // Only adopt a stored blob written by this layout. Size alone will not do
+  // it: a new bool lands in the struct's existing padding, so the size is
+  // unchanged while the byte it reads is whatever the old build left there —
+  // which reads back as a setting silently stuck off.
+  if (persist_exists(SETTINGS_KEY)
+      && persist_get_size(SETTINGS_KEY) == (int)sizeof(s_set)) {
+    Settings stored;
+    persist_read_data(SETTINGS_KEY, &stored, sizeof(stored));
+    if (stored.version == SETTINGS_VERSION) s_set = stored;
   }
+  s_set.version = SETTINGS_VERSION;
   settings_clamp();
 }
 
@@ -104,7 +117,10 @@ static void settings_save(void) {
 
 static void weather_load(void) {
   memset(&s_wx, 0, sizeof(s_wx));
-  if (persist_exists(WEATHER_KEY)) persist_read_data(WEATHER_KEY, &s_wx, sizeof(s_wx));
+  if (persist_exists(WEATHER_KEY)
+      && persist_get_size(WEATHER_KEY) == (int)sizeof(s_wx)) {
+    persist_read_data(WEATHER_KEY, &s_wx, sizeof(s_wx));
+  }
   // A reading more than three hours old is worse than no reading.
   if (s_wx.valid && time(NULL) - s_wx.at > 3 * 60 * 60) s_wx.valid = false;
 }
@@ -298,19 +314,23 @@ static void icon_weather(GContext *ctx, GRect r, int code) {
 
 typedef struct {
   int remaining;      // minutes until the next departure
+  int secs;           // seconds until it, within the final minute
   int next_h, next_m; // clock time of that departure
-  bool is_now, is_boarding;
+  bool is_now, is_boarding, is_final;
 } Schedule;
 
-static Schedule schedule_for(int hour, int minute) {
+static Schedule schedule_for(int hour, int minute, int second) {
   Schedule s;
   int hw = s_set.headway;
   s.remaining = ((s_set.offset - minute) % hw + hw) % hw;
+  s.secs = 60 - second;
   s.next_h = hour;
   s.next_m = minute + s.remaining;
   if (s.next_m >= 60) { s.next_m -= 60; s.next_h = (s.next_h + 1) % 24; }
   s.is_now = (s.remaining == 0);
   s.is_boarding = (s.remaining > 0 && s.remaining <= THRESHOLD);
+  // The last minute, counted in seconds — the one place the face moves.
+  s.is_final = s_set.final_seconds && s.remaining == 1;
   return s;
 }
 
@@ -462,7 +482,7 @@ static bool module_read(uint8_t kind, Module *m) {
     case MODULE_BATTERY: {
       const BatteryChargeState b = battery_state_service_peek();
       snprintf(m->value, sizeof(m->value), "%d%%", b.charge_percent);
-      m->caption = "BATT";
+      m->caption = (b.is_charging || b.is_plugged) ? "CHG" : "BATT";
       m->extra = b.charge_percent;
       return true;
     }
@@ -549,8 +569,11 @@ static void draw_modules(GContext *ctx, GFont f_val, GFont f_cap,
   if (total > avail_w) return;
 
   const int row_h = label_h + lgap + m_val.cap;
-  int y = (band_top + band_bot) / 2 - row_h / 2;
-  if (y < band_top) y = band_top;
+  // A timeline peek squeezes the band to nothing. The modules are the lowest
+  // zone in the design's ranking, so they go first rather than crowd the
+  // countdown — the same order a sleeve would take them in.
+  if (band_bot - band_top < row_h) return;
+  const int y = (band_top + band_bot) / 2 - row_h / 2;
 
   int x = c_start;
   for (int i = 0; i < n; i++) {
@@ -572,17 +595,22 @@ static void draw_modules(GContext *ctx, GFont f_val, GFont f_cap,
 }
 
 static void face_update(Layer *layer, GContext *ctx) {
-  const GRect b = layer_get_bounds(layer);
+  // A timeline peek slides up over the bottom of the watchface — precisely
+  // where the countdown and the date sit. Laying out against the
+  // unobstructed area keeps the second-most important zone on screen
+  // instead of letting the peek bury it.
+  const GRect full = layer_get_bounds(layer);
+  const GRect b = layer_get_unobstructed_bounds(layer);
   s_w = b.size.w;
 
   time_t now = time(NULL);
   struct tm *t = localtime(&now);
-  Schedule sch = schedule_for(t->tm_hour, t->tm_min);
+  Schedule sch = schedule_for(t->tm_hour, t->tm_min, t->tm_sec);
 /*DEMO*/
 
   theme_apply(t->tm_hour);
   graphics_context_set_fill_color(ctx, s_ground);
-  graphics_fill_rect(ctx, b, 0, GCornerNone);
+  graphics_fill_rect(ctx, full, 0, GCornerNone);
 
   draw_rail(ctx, &sch, b.size.h);
 
@@ -642,6 +670,7 @@ static void face_update(Layer *layer, GContext *ctx) {
   for (char *p = date; *p; p++) *p = toupper((int)*p);
 
   const bool solid = sch.is_now || sch.is_boarding;
+  const char *unit = "MIN";
   if (sch.is_now) {
     strncpy(label, "DEPARTS", sizeof(label));
     strncpy(num, "NOW", sizeof(num));
@@ -649,14 +678,15 @@ static void face_update(Layer *layer, GContext *ctx) {
     snprintf(label, sizeof(label), "%s %d:%02d",
              sch.is_boarding ? "LEAVES" : "NEXT",
              display_hour(sch.next_h), sch.next_m);
-    snprintf(num, sizeof(num), "%d", sch.remaining);
+    snprintf(num, sizeof(num), "%d", sch.is_final ? sch.secs : sch.remaining);
+    if (sch.is_final) unit = "SEC";
   }
 
   // "NOW" is letters, so it needs a text face rather than LECO numbers.
   GFont f_num = sch.is_now ? fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD) : f_count;
   const GSize z_label = measure(label, f_label);
   const GSize z_num = measure(num, f_num);
-  const GSize z_min = sch.is_now ? GSize(0, 0) : measure("MIN", f_label);
+  const GSize z_min = sch.is_now ? GSize(0, 0) : measure(unit, f_label);
 
   const Metrics m_lab = gothic_metrics(z_label.h);
   const Metrics m_min = gothic_metrics(z_min.h);
@@ -718,7 +748,7 @@ static void face_update(Layer *layer, GContext *ctx) {
   if (!sch.is_now) {
     // "MIN" rides the baseline of the big number.
     const int min_y = num_y + m_num.cap - m_min.cap;
-    draw_at(ctx, "MIN", f_label, num_x + z_num.w + sc(LABEL_GAP), min_y - m_min.bearing, z_min);
+    draw_at(ctx, unit, f_label, num_x + z_num.w + sc(LABEL_GAP), min_y - m_min.bearing, z_min);
   }
 
   // Weekday and date sit on the wrist side: first to disappear.
@@ -734,7 +764,8 @@ static void face_update(Layer *layer, GContext *ctx) {
   draw_modules(ctx, s_f_mod, f_caption, c_start, c_end - c_start, band_top, dow_y - sc(4));
 
   // ---- boarding buzz, once on the transition into the solid block.
-  if (s_set.buzz && sch.remaining == THRESHOLD && s_last_remaining != THRESHOLD) {
+  if (s_set.buzz && sch.remaining == THRESHOLD && s_last_remaining != THRESHOLD
+      && !quiet_time_is_active()) {
     vibes_short_pulse();
   }
   s_last_remaining = sch.remaining;
@@ -742,7 +773,24 @@ static void face_update(Layer *layer, GContext *ctx) {
 
 // ------------------------------------------------------------------- wiring
 
+// Once a minute, as the design asks, except through the final minute, where
+// the countdown is running in seconds.
+static bool s_ticking_seconds = false;
+
+static void tick_handler(struct tm *tick_time, TimeUnits units);
+
+static void retune_tick(void) {
+  const time_t now = time(NULL);
+  struct tm *t = localtime(&now);
+  const Schedule s = schedule_for(t->tm_hour, t->tm_min, t->tm_sec);
+  if (s.is_final == s_ticking_seconds) return;
+  tick_timer_service_unsubscribe();
+  tick_timer_service_subscribe(s.is_final ? SECOND_UNIT : MINUTE_UNIT, tick_handler);
+  s_ticking_seconds = s.is_final;
+}
+
 static void tick_handler(struct tm *tick_time, TimeUnits units) {
+  retune_tick();
   layer_mark_dirty(s_face);
 }
 
@@ -787,8 +835,15 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
   if ((tp = dict_find(iter, MESSAGE_KEY_MOD_ICONS))) {
     s_set.mod_icons = tp->value->int32 != 0;
   }
+  if ((tp = dict_find(iter, MESSAGE_KEY_SECONDS))) {
+    s_set.final_seconds = tp->value->int32 != 0;
+  }
   if ((tp = dict_find(iter, MESSAGE_KEY_UNITS))) {
-    s_set.imperial = (strcmp(tp->value->cstring, "imperial") == 0);
+    const bool imperial = (strcmp(tp->value->cstring, "imperial") == 0);
+    // The stored reading is in the old unit. Showing it under the new label
+    // would be wrong by 30-odd degrees, so drop it until the next fetch.
+    if (imperial != s_set.imperial) s_wx.valid = false;
+    s_set.imperial = imperial;
   }
 
   // Weather arrives on the same channel, pushed by the JS side.
@@ -806,6 +861,15 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
 
   settings_clamp();
   settings_save();
+  retune_tick();
+  layer_mark_dirty(s_face);
+}
+
+static void unobstructed_changing(AnimationProgress progress, void *context) {
+  layer_mark_dirty(s_face);
+}
+
+static void unobstructed_settled(void *context) {
   layer_mark_dirty(s_face);
 }
 
@@ -814,9 +878,16 @@ static void window_load(Window *window) {
   s_face = layer_create(layer_get_bounds(root));
   layer_set_update_proc(s_face, face_update);
   layer_add_child(root, s_face);
+
+  const UnobstructedAreaHandlers handlers = {
+      .change = unobstructed_changing,
+      .did_change = unobstructed_settled,
+  };
+  unobstructed_area_service_subscribe(handlers, NULL);
 }
 
 static void window_unload(Window *window) {
+  unobstructed_area_service_unsubscribe();
   layer_destroy(s_face);
 }
 
@@ -833,8 +904,8 @@ static void init(void) {
   window_set_background_color(s_window, GColorBlack);
   window_stack_push(s_window, true);
 
-  // Once per minute. No seconds, no animation — battery and legibility.
   tick_timer_service_subscribe(MINUTE_UNIT, tick_handler);
+  retune_tick();
 
   app_message_register_inbox_received(inbox_received);
   app_message_open(256, 64);

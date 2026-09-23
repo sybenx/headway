@@ -29,6 +29,7 @@
       "OFFSET",
       "HEADWAY",
       "BUZZ",
+      "SECONDS",
       "H24",
       "THEME",
       "NIGHT_START",
