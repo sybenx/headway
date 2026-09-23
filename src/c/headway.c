@@ -158,14 +158,12 @@ static void weather_load(void) {
 #ifdef PBL_PLATFORM_EMERY
   #define RES_TIME  RESOURCE_ID_FONT_TIME_83
   #define RES_COUNT RESOURCE_ID_FONT_COUNT_61
-  #define RES_MOD   RESOURCE_ID_FONT_MOD_21
 #else
   #define RES_TIME  RESOURCE_ID_FONT_TIME_60
   #define RES_COUNT RESOURCE_ID_FONT_COUNT_44
-  #define RES_MOD   RESOURCE_ID_FONT_MOD_15
 #endif
 
-static GFont s_f_time, s_f_count, s_f_mod;
+static GFont s_f_time, s_f_count;
 static Window *s_window;
 static Layer *s_face;
 static int s_last_remaining = -1;
@@ -223,22 +221,21 @@ static void icon_heart(GContext *ctx, GRect r) {
   }
 }
 
-// A footprint is a ball with the heel set off below it, not one blob: the
-// break between them is what makes it a foot and not a raindrop. Two of them,
-// offset, read as a stride.
+// One print, not two. A pair at this size leaves five pixels per foot,
+// which reads as four dots; a single print gets the whole box and actually
+// looks like a foot — a ball, a gap, and a heel offset to one side.
 static void icon_steps(GContext *ctx, GRect r) {
-  const int16_t fw = r.size.w * 3 / 8;          // one print
-  const int16_t ball_h = r.size.h * 13 / 20;
-  const int16_t heel_w = fw / 2 > 1 ? fw / 2 : 1;
-  const int16_t heel_h = r.size.h - ball_h - 1 > 1 ? r.size.h - ball_h - 1 : 1;
-
-  for (int i = 0; i < 2; i++) {
-    const int16_t x = r.origin.x + (i ? r.size.w - fw : 0);
-    const int16_t y = r.origin.y + (i ? 0 : r.size.h - (ball_h + 1 + heel_h));
-    graphics_fill_rect(ctx, GRect(x, y, fw, ball_h), fw / 2, GCornersAll);
-    graphics_fill_rect(ctx, GRect(x + (fw - heel_w) / 2, y + ball_h + 1, heel_w, heel_h),
-                       heel_w / 2, GCornersAll);
-  }
+  const int16_t w = r.size.w, h = r.size.h;
+  const int16_t ball_w = w * 4 / 5;
+  const int16_t ball_h = h * 3 / 5;
+  const int16_t heel_w = w / 2 > 2 ? w / 2 : 2;
+  const int16_t heel_h = h - ball_h - 1 > 1 ? h - ball_h - 1 : 2;
+  const int16_t bx = r.origin.x + (w - ball_w) / 2;
+  graphics_fill_rect(ctx, GRect(bx, r.origin.y, ball_w, ball_h),
+                     ball_w / 2, GCornersAll);
+  // Heel sits inboard of the ball, which is what gives the foot an arch.
+  graphics_fill_rect(ctx, GRect(bx + ball_w - heel_w, r.origin.y + ball_h + 1,
+                                heel_w, heel_h), heel_w / 2, GCornersAll);
 }
 
 static void icon_battery(GContext *ctx, GRect r, int pct) {
@@ -247,66 +244,112 @@ static void icon_battery(GContext *ctx, GRect r, int pct) {
   const int16_t bw = r.size.w - 2;
   graphics_draw_rect(ctx, GRect(r.origin.x, y, bw, h));
   graphics_fill_rect(ctx, GRect(r.origin.x + bw, y + h / 3, 2, h / 3), 0, GCornerNone);
-  const int16_t inner = bw - 2;
-  const int16_t fill = (inner * pct + 50) / 100;
-  if (fill > 0) graphics_fill_rect(ctx, GRect(r.origin.x + 1, y + 1, fill, h - 2), 0, GCornerNone);
+  // Inset by two so the outline still reads at a full charge, and never let a
+  // non-empty battery draw as empty.
+  const int16_t inner = bw - 4;
+  int16_t fill = (inner * pct + 50) / 100;
+  if (fill <= 0 && pct > 0) fill = 1;
+  if (fill > 0) graphics_fill_rect(ctx, GRect(r.origin.x + 2, y + 2, fill, h - 4), 0, GCornerNone);
 }
 
-static void icon_cloud(GContext *ctx, GRect r, int16_t drop) {
-  const int16_t w = r.size.w, y = r.origin.y + drop;
-  const int16_t rad = w / 4;
-  graphics_fill_circle(ctx, GPoint(r.origin.x + rad + 1, y + rad + 1), rad);
-  graphics_fill_circle(ctx, GPoint(r.origin.x + w - rad - 1, y + rad + 1), rad - 1);
-  graphics_fill_circle(ctx, GPoint(r.origin.x + w / 2, y + rad), rad);
-  graphics_fill_rect(ctx, GRect(r.origin.x + 1, y + rad, w - 2, rad + 1), 0, GCornerNone);
+// A cloud is a raised centre lump between two lower shoulders, on a flat
+// base. Equal lumps at equal heights just merge into a dome, which reads as
+// a hill rather than a cloud.
+static void cloud_body(GContext *ctx, GRect r) {
+  const int16_t w = r.size.w, h = r.size.h;
+  const int16_t base = r.origin.y + h;
+  const int16_t big = h / 2 > 2 ? h / 2 : 2;
+  const int16_t small = h / 3 > 1 ? h / 3 : 1;
+  graphics_fill_circle(ctx, GPoint(r.origin.x + small, base - small), small);
+  graphics_fill_circle(ctx, GPoint(r.origin.x + w - small - 1, base - small), small);
+  graphics_fill_circle(ctx, GPoint(r.origin.x + w / 2, base - big - 1), big);
+  graphics_fill_rect(ctx, GRect(r.origin.x, base - small - 1, w, small + 1), 0, GCornerNone);
 }
 
 static void icon_sun(GContext *ctx, GRect r, bool rays) {
   const int16_t cx = r.origin.x + r.size.w / 2, cy = r.origin.y + r.size.h / 2;
-  const int16_t rad = r.size.w / 4;
+  // At module size the rays have nowhere to go; a solid disc is unmistakable
+  // next to the cloud shapes, so they only appear once there is room.
+  const int16_t rad = r.size.w / 3;
   graphics_fill_circle(ctx, GPoint(cx, cy), rad);
-  if (!rays) return;
-  const int16_t a = rad + 1, b = rad + r.size.w / 5;
-  graphics_draw_line(ctx, GPoint(cx, cy - a), GPoint(cx, cy - b));
-  graphics_draw_line(ctx, GPoint(cx, cy + a), GPoint(cx, cy + b));
-  graphics_draw_line(ctx, GPoint(cx - a, cy), GPoint(cx - b, cy));
-  graphics_draw_line(ctx, GPoint(cx + a, cy), GPoint(cx + b, cy));
+  if (!rays || r.size.w < 16) return;
+  const int16_t a = rad + 2, b2 = rad + r.size.w / 5 + 1;
+  graphics_draw_line(ctx, GPoint(cx, cy - a), GPoint(cx, cy - b2));
+  graphics_draw_line(ctx, GPoint(cx, cy + a), GPoint(cx, cy + b2));
+  graphics_draw_line(ctx, GPoint(cx - a, cy), GPoint(cx - b2, cy));
+  graphics_draw_line(ctx, GPoint(cx + a, cy), GPoint(cx + b2, cy));
 }
 
-// WMO codes, as Open-Meteo reports them.
-static void icon_weather(GContext *ctx, GRect r, int code) {
+#define WX_SUN    0
+#define WX_PARTLY 1
+#define WX_CLOUD  2
+#define WX_FOG    3
+#define WX_RAIN   4
+#define WX_SNOW   5
+#define WX_STORM  6
+
+// WMO codes, as Open-Meteo reports them. Overcast is a cloud and nothing
+// more: adding precipitation to it would make it indistinguishable from rain.
+static int wx_kind(int code) {
+  if (code <= 1) return WX_SUN;
+  if (code == 2) return WX_PARTLY;
+  if (code == 3) return WX_CLOUD;
+  if (code == 45 || code == 48) return WX_FOG;
+  if (code >= 95) return WX_STORM;
+  if ((code >= 71 && code <= 77) || code == 85 || code == 86) return WX_SNOW;
+  if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) return WX_RAIN;
+  return WX_CLOUD;
+}
+
+static void icon_weather(GContext *ctx, GRect r, int code, GColor ink, GColor ground) {
   const int16_t w = r.size.w, h = r.size.h;
-  if (code == 0 || code == 1) { icon_sun(ctx, r, true); return; }
-  if (code == 2) {                                   // partly cloudy
-    GRect sr = GRect(r.origin.x, r.origin.y, w * 3 / 5, h * 3 / 5);
-    icon_sun(ctx, sr, true);
-    icon_cloud(ctx, GRect(r.origin.x + w / 4, r.origin.y, w * 3 / 4, h), h / 3);
-    return;
-  }
-  if (code == 45 || code == 48) {                    // fog
+  const int kind = wx_kind(code);
+
+  if (kind == WX_SUN) { icon_sun(ctx, r, true); return; }
+
+  if (kind == WX_FOG) {
     for (int16_t i = 0; i < 3; i++) {
       const int16_t y = r.origin.y + h / 4 + i * (h / 4);
       graphics_draw_line(ctx, GPoint(r.origin.x + (i & 1 ? 2 : 0), y),
-                              GPoint(r.origin.x + w - (i & 1 ? 0 : 2), y));
+                              GPoint(r.origin.x + w - 1 - (i & 1 ? 0 : 2), y));
     }
     return;
   }
-  icon_cloud(ctx, r, 0);
-  const int16_t base = r.origin.y + h * 3 / 5;
-  if (code == 95 || code == 96 || code == 99) {      // thunder
-    graphics_draw_line(ctx, GPoint(r.origin.x + w / 2 + 1, base),
-                            GPoint(r.origin.x + w / 2 - 2, base + h / 4));
-    graphics_draw_line(ctx, GPoint(r.origin.x + w / 2 - 2, base + h / 4),
-                            GPoint(r.origin.x + w / 2 + 2, base + h / 4));
-    graphics_draw_line(ctx, GPoint(r.origin.x + w / 2 + 2, base + h / 4),
-                            GPoint(r.origin.x + w / 2 - 1, base + h / 2));
+
+  if (kind == WX_PARTLY) {
+    // Sun behind, then the cloud punched out of it so the two stay legible
+    // instead of merging into one blob.
+    icon_sun(ctx, GRect(r.origin.x, r.origin.y, w * 2 / 3, h * 2 / 3), true);
+    const GRect cloud = GRect(r.origin.x + w / 4, r.origin.y + h / 3,
+                              w - w / 4, h - h / 3);
+    graphics_context_set_fill_color(ctx, ground);
+    cloud_body(ctx, GRect(cloud.origin.x - 1, cloud.origin.y - 1,
+                          cloud.size.w + 2, cloud.size.h + 1));
+    graphics_context_set_fill_color(ctx, ink);
+    cloud_body(ctx, cloud);
     return;
   }
-  const bool snow = (code >= 71 && code <= 77) || code == 85 || code == 86;
+
+  const bool precip = (kind == WX_RAIN || kind == WX_SNOW || kind == WX_STORM);
+  const int16_t body_h = precip ? h * 3 / 5 : h * 4 / 5;
+  const GRect body = GRect(r.origin.x, r.origin.y + (precip ? 0 : h / 8), w, body_h);
+  cloud_body(ctx, body);
+  if (!precip) return;
+
+  const int16_t base = body.origin.y + body_h + 1;
+  if (kind == WX_STORM) {
+    // A drawn zigzag disappears at this size; two offset blocks keep the
+    // diagonal of a bolt and stay distinct from rain's streaks.
+    const int16_t cx = r.origin.x + w / 2;
+    const int16_t t = (h - body_h) / 2 > 1 ? (h - body_h) / 2 : 2;
+    graphics_fill_rect(ctx, GRect(cx, base, t, t), 0, GCornerNone);
+    graphics_fill_rect(ctx, GRect(cx - t, base + t, t, t), 0, GCornerNone);
+    return;
+  }
   for (int16_t i = 0; i < 3; i++) {
-    const int16_t x = r.origin.x + 2 + i * ((w - 4) / 2);
-    if (snow) graphics_fill_rect(ctx, GRect(x, base + h / 5, 2, 2), 0, GCornerNone);
-    else graphics_draw_line(ctx, GPoint(x, base), GPoint(x - 1, base + h / 3));
+    const int16_t x = r.origin.x + 1 + i * ((w - 2) / 2);
+    if (kind == WX_SNOW) graphics_fill_rect(ctx, GRect(x, base + 1, 2, 2), 0, GCornerNone);
+    else graphics_draw_line(ctx, GPoint(x + 1, base), GPoint(x, base + (h - body_h) - 1));
   }
 }
 
@@ -505,7 +548,7 @@ static bool module_uses_icon(const Module *m) {
 static int module_icon_w(const Module *m, int icon) {
   switch (m->kind) {
     case MODULE_BATTERY: return icon * 8 / 5;
-    case MODULE_STEPS:   return icon * 8 / 5;
+    case MODULE_STEPS:   return icon;
     default:             return icon;
   }
 }
@@ -515,7 +558,7 @@ static void module_draw_icon(GContext *ctx, const Module *m, GRect box) {
     case MODULE_HR:      icon_heart(ctx, box); break;
     case MODULE_STEPS:   icon_steps(ctx, box); break;
     case MODULE_BATTERY: icon_battery(ctx, box, m->extra); break;
-    case MODULE_WEATHER: icon_weather(ctx, box, m->extra); break;
+    case MODULE_WEATHER: icon_weather(ctx, box, m->extra, s_dim, s_ground); break;
     default: break;
   }
 }
@@ -534,7 +577,7 @@ static void draw_modules(GContext *ctx, GFont f_val, GFont f_cap,
 
   const GSize z_cap = measure("BPM", f_cap);
   const GSize z_val = measure("88", f_val);
-  const Metrics m_val = barlow_metrics(z_val.h);
+  const Metrics m_val = gothic_metrics(z_val.h);
   const int icon = m_val.cap;                 // an icon reads as one cap tall
   // Captions are laid out from the measured box, not an estimated cap: the
   // box bounds the glyph whatever the font's metrics turn out to be. The row
@@ -629,11 +672,16 @@ static void face_update(Layer *layer, GContext *ctx) {
 #ifdef PBL_PLATFORM_EMERY
   GFont f_label = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
   GFont f_caption = fonts_get_system_font(FONT_KEY_GOTHIC_14);
+  GFont f_mod = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
 #else
   GFont f_label = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
   // The module caption is 7px at design scale, where a hand-tuned bitmap
   // face beats anything a TTF rasterises.
   GFont f_caption = fonts_get_system_font(FONT_KEY_GOTHIC_09);
+  // Module values are ~15px at design scale. Barlow rasterises unevenly that
+  // small; the hand-tuned bitmap Gothic stays crisp, so the bundled face is
+  // kept for the hero numerals where it has room to render properly.
+  GFont f_mod = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
 #endif
 
   // ---- zone 03/04: the time, flush to the outer edge so the minute
@@ -761,7 +809,7 @@ static void face_update(Layer *layer, GContext *ctx) {
   graphics_context_set_text_color(ctx, s_dim);
   draw_at(ctx, date, f_label, c_start, date_y - m_date.bearing, z_date);
 
-  draw_modules(ctx, s_f_mod, f_caption, c_start, c_end - c_start, band_top, dow_y - sc(4));
+  draw_modules(ctx, f_mod, f_caption, c_start, c_end - c_start, band_top, dow_y - sc(4));
 
   // ---- boarding buzz, once on the transition into the solid block.
   if (s_set.buzz && sch.remaining == THRESHOLD && s_last_remaining != THRESHOLD
@@ -896,7 +944,6 @@ static void init(void) {
   weather_load();
   s_f_time = fonts_load_custom_font(resource_get_handle(RES_TIME));
   s_f_count = fonts_load_custom_font(resource_get_handle(RES_COUNT));
-  s_f_mod = fonts_load_custom_font(resource_get_handle(RES_MOD));
 
   s_window = window_create();
   window_set_window_handlers(s_window, (WindowHandlers){
@@ -914,7 +961,6 @@ static void init(void) {
 static void deinit(void) {
   fonts_unload_custom_font(s_f_time);
   fonts_unload_custom_font(s_f_count);
-  fonts_unload_custom_font(s_f_mod);
   tick_timer_service_unsubscribe();
   window_destroy(s_window);
 }
