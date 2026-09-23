@@ -24,11 +24,15 @@ face ranks its information by edge:
 
 ## Modules
 
-Up to three, in the band the design leaves open, drawn as a caption over a
-value — `BPM 72`, `STEPS 4.8K`, `BATT 64%`. Each slot takes heart rate, steps,
-battery, weather or nothing, and the captions can be swapped for icons.
+Off by default: out of the box the face is the plain digital watch the design
+describes. Up to three can be switched on from the settings page, in the band
+the design leaves open, drawn as a caption over a value — `BPM 72`,
+`STEPS 4.8K`, `BATT 64%`. Each slot takes heart rate, steps, battery, weather
+or nothing, and the captions can be swapped for icons.
 
-![modules with icons](screenshots/modules-icons.png)
+| Captions | Icons |
+|---|---|
+| ![modules](screenshots/modules.png) | ![modules with icons](screenshots/modules-icons.png) |
 
 They sit on the wrist side, below the date, so a sleeve covers them before the
 countdown or the rail — the design's zone ranking is preserved.
@@ -74,8 +78,8 @@ are not targeted.
 | ![aplite](screenshots/aplite.png) | ![diorite](screenshots/diorite.png) | ![flint](screenshots/flint.png) | ![emery](screenshots/emery.png) |
 
 On one-bit watches the accent becomes ink and the quarter-hour ticks dither,
-as the design's mono note asks. Modules whose sensor the watch lacks remove
-themselves — which is why aplite shows only battery and weather.
+as the design's mono note asks. A module whose sensor the watch lacks — heart
+rate on aplite, say — removes itself rather than showing a blank.
 
 Light mode, with the accent set to red:
 

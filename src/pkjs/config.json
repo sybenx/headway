@@ -169,7 +169,7 @@
         "type": "select",
         "messageKey": "MOD1",
         "label": "First",
-        "defaultValue": "1",
+        "defaultValue": "0",
         "options": [
           {
             "label": "Nothing",
@@ -197,7 +197,7 @@
         "type": "select",
         "messageKey": "MOD2",
         "label": "Second",
-        "defaultValue": "2",
+        "defaultValue": "0",
         "options": [
           {
             "label": "Nothing",
@@ -225,7 +225,7 @@
         "type": "select",
         "messageKey": "MOD3",
         "label": "Third",
-        "defaultValue": "3",
+        "defaultValue": "0",
         "options": [
           {
             "label": "Nothing",

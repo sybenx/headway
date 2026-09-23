@@ -72,9 +72,11 @@ static void settings_defaults(void) {
   s_set.night_start = 19;
   s_set.night_end = 7;
   s_set.accent = 0x0055AA;   // Cobalt Blue, the design's one accent
-  s_set.mod[0] = MODULE_HR;
-  s_set.mod[1] = MODULE_STEPS;
-  s_set.mod[2] = MODULE_BATTERY;
+  // Off duty it is a plain digital watch, as the design says: the modules
+  // are opt-in from the settings page.
+  s_set.mod[0] = MODULE_NONE;
+  s_set.mod[1] = MODULE_NONE;
+  s_set.mod[2] = MODULE_NONE;
   s_set.mod_icons = false;
   s_set.final_seconds = true;
   s_set.imperial = false;
