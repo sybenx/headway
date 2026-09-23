@@ -130,7 +130,8 @@ static void weather_load(void) {
 #define DOW_GAP       3
 #define ROW_GAP       2
 #define MOD_GAP       9
-#define MOD_LABEL_GAP 1
+#define MOD_LABEL_GAP 3
+#define MOD_ICON_GAP  4
 #define BLOCK_PAD_MIN 3
 #define TIME_MARGIN_TOP 3
 #define COLON_GAP     1
@@ -206,11 +207,22 @@ static void icon_heart(GContext *ctx, GRect r) {
   }
 }
 
+// A footprint is a ball with the heel set off below it, not one blob: the
+// break between them is what makes it a foot and not a raindrop. Two of them,
+// offset, read as a stride.
 static void icon_steps(GContext *ctx, GRect r) {
-  const int16_t fw = r.size.w * 2 / 5, fh = r.size.h * 3 / 5;
-  graphics_fill_rect(ctx, GRect(r.origin.x, r.origin.y, fw, fh), fw / 2, GCornersAll);
-  graphics_fill_rect(ctx, GRect(r.origin.x + r.size.w - fw, r.origin.y + r.size.h - fh, fw, fh),
-                     fw / 2, GCornersAll);
+  const int16_t fw = r.size.w * 3 / 8;          // one print
+  const int16_t ball_h = r.size.h * 13 / 20;
+  const int16_t heel_w = fw / 2 > 1 ? fw / 2 : 1;
+  const int16_t heel_h = r.size.h - ball_h - 1 > 1 ? r.size.h - ball_h - 1 : 1;
+
+  for (int i = 0; i < 2; i++) {
+    const int16_t x = r.origin.x + (i ? r.size.w - fw : 0);
+    const int16_t y = r.origin.y + (i ? 0 : r.size.h - (ball_h + 1 + heel_h));
+    graphics_fill_rect(ctx, GRect(x, y, fw, ball_h), fw / 2, GCornersAll);
+    graphics_fill_rect(ctx, GRect(x + (fw - heel_w) / 2, y + ball_h + 1, heel_w, heel_h),
+                       heel_w / 2, GCornersAll);
+  }
 }
 
 static void icon_battery(GContext *ctx, GRect r, int pct) {
@@ -471,7 +483,11 @@ static bool module_uses_icon(const Module *m) {
 }
 
 static int module_icon_w(const Module *m, int icon) {
-  return m->kind == MODULE_BATTERY ? icon * 8 / 5 : icon;
+  switch (m->kind) {
+    case MODULE_BATTERY: return icon * 8 / 5;
+    case MODULE_STEPS:   return icon * 8 / 5;
+    default:             return icon;
+  }
 }
 
 static void module_draw_icon(GContext *ctx, const Module *m, GRect box) {
@@ -501,9 +517,19 @@ static void draw_modules(GContext *ctx, GFont f_val, GFont f_cap,
   const Metrics m_val = barlow_metrics(z_val.h);
   const int icon = m_val.cap;                 // an icon reads as one cap tall
   // Captions are laid out from the measured box, not an estimated cap: the
-  // box bounds the glyph whatever the font's metrics turn out to be, so the
-  // value underneath can never ride up into it.
-  const int label_h = module_uses_icon(&mods[0]) ? icon : z_cap.h;
+  // box bounds the glyph whatever the font's metrics turn out to be. The row
+  // takes one label height and one baseline across every module, so a mixed
+  // row — caption mode with a weather module, which always draws an icon —
+  // still lines its values up.
+  int label_h = 0;
+  bool any_icon = false;
+  for (int i = 0; i < n; i++) {
+    const bool ic = module_uses_icon(&mods[i]);
+    any_icon |= ic;
+    const int h = ic ? icon : z_cap.h;
+    if (h > label_h) label_h = h;
+  }
+  const int lgap = any_icon ? sc(MOD_ICON_GAP) : sc(MOD_LABEL_GAP);
   const int gap = sc(MOD_GAP);
 
   // Widths first: the row is dropped whole if it cannot fit the band.
@@ -522,7 +548,7 @@ static void draw_modules(GContext *ctx, GFont f_val, GFont f_cap,
   while (n > 1 && total > avail_w) { n--; total -= widths[n] + gap; }
   if (total > avail_w) return;
 
-  const int row_h = label_h + sc(MOD_LABEL_GAP) + m_val.cap;
+  const int row_h = label_h + lgap + m_val.cap;
   int y = (band_top + band_bot) / 2 - row_h / 2;
   if (y < band_top) y = band_top;
 
@@ -532,16 +558,15 @@ static void draw_modules(GContext *ctx, GFont f_val, GFont f_cap,
       graphics_context_set_fill_color(ctx, s_dim);
       graphics_context_set_stroke_color(ctx, s_dim);
       const int iw = module_icon_w(&mods[i], icon);
-      module_draw_icon(ctx, &mods[i], GRect(mapx(x, iw), y, iw, icon));
+      module_draw_icon(ctx, &mods[i], GRect(mapx(x, iw), y + label_h - icon, iw, icon));
     } else {
       graphics_context_set_text_color(ctx, s_dim);
       const GSize zc = measure(mods[i].caption, f_cap);
-      draw_at(ctx, mods[i].caption, f_cap, x, y, zc);
+      draw_at(ctx, mods[i].caption, f_cap, x, y + label_h - zc.h, zc);
     }
     graphics_context_set_text_color(ctx, s_ink);
     const GSize zv = measure(mods[i].value, f_val);
-    draw_at(ctx, mods[i].value, f_val, x,
-            y + label_h + sc(MOD_LABEL_GAP) - m_val.bearing, zv);
+    draw_at(ctx, mods[i].value, f_val, x, y + label_h + lgap - m_val.bearing, zv);
     x += widths[i] + gap;
   }
 }
