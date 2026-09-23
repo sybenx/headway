@@ -231,6 +231,7 @@ static int transit_next(const uint16_t *list, int now_min) {
 #define MOD_LABEL_GAP 4
 #define MOD_ICON_GAP  4
 #define BLOCK_PAD_MIN 3
+#define BLOCK_ROW_GAP_S 4   // the flick view's block, a size down
 #define TIME_MARGIN_TOP 10
 #define COLON_GAP     0   // the design's 2px margin, less its tracking
 
@@ -245,6 +246,8 @@ static int transit_next(const uint16_t *list, int now_min) {
   #define RES_DATE  RESOURCE_ID_FONT_DATE_17
   #define RES_CAP   RESOURCE_ID_FONT_CAP_12
   #define RES_BIGDATE RESOURCE_ID_FONT_DATE_25
+  #define RES_TIME_S  RESOURCE_ID_FONT_TIME_67
+  #define RES_COUNT_S RESOURCE_ID_FONT_COUNT_42
 #else
   #define RES_TIME  RESOURCE_ID_FONT_TIME_60
   #define RES_COUNT RESOURCE_ID_FONT_COUNT_44
@@ -253,9 +256,12 @@ static int transit_next(const uint16_t *list, int now_min) {
   #define RES_DATE  RESOURCE_ID_FONT_DATE_12
   #define RES_CAP   RESOURCE_ID_FONT_CAP_9
   #define RES_BIGDATE RESOURCE_ID_FONT_DATE_18
+  #define RES_TIME_S  RESOURCE_ID_FONT_TIME_48
+  #define RES_COUNT_S RESOURCE_ID_FONT_COUNT_30
 #endif
 
 static GFont s_f_time, s_f_count, s_f_mod, s_f_label, s_f_date, s_f_cap, s_f_bigdate;
+static GFont s_f_time_s, s_f_count_s;   // the flick view's sizes
 static Window *s_window;
 static Layer *s_face;
 static int s_last_remaining = -1;
@@ -979,15 +985,13 @@ static void paint_idle(int fr_start) {
 // for the stop, then a row a departure — the route in its own colour, where
 // it is going, and when. The rail stays; it is the one thing the design
 // never covers.
-#define SV_ROW_H 24
-#define SV_HEAD_GAP 18
-#define SV_ROW_H_COMPACT 16
-#define SV_ROWS_COMPACT 2
+#define SV_ROW_H 15
+#define SV_LINE_GAP 3      // the stop line's air below the time
+#define SV_ROWS_GAP 3      // between the stop line and the first row
 static struct {
   int top, head_y, dist_x, dist_w, n;
-  bool compact;
   char dist[10], note[20], stop[24];
-  struct { int y, badge_x, badge_w, badge_h, text_x, text_y, head_x, head_y, when_x, when_y, unit_x, unit_y; char head[20]; } r[SV_ROWS];
+  struct { int y, badge_x, badge_w, badge_h, text_x, text_y, head_x, head_y, when_x, when_y, when_w, unit_w, unit_y; char head[20]; } r[SV_ROWS];
   Metrics m_lab, m_val, m_cap;
 } s_svl;
 
@@ -1002,16 +1006,17 @@ static void format_dist(char *out, size_t n, int metres) {
   }
 }
 
-static void layout_stopview(const Frame *fr, int band_top, bool compact) __attribute__((noinline));
-static void layout_stopview(const Frame *fr, int band_top, bool compact) {
+// Laid out between the time's band and the block: a line for the stop, then
+// as many rows as fit above the block, at most three.
+static void layout_stopview(const Frame *fr, int band_top, int band_bot) __attribute__((noinline));
+static void layout_stopview(const Frame *fr, int band_top, int band_bot) {
   s_svl.m_lab = barlow_metrics(measure("B", s_f_label).h);
   s_svl.m_val = barlow_metrics(measure("8", s_f_mod).h);
   s_svl.m_cap = barlow_metrics(measure("M", s_f_cap).h);
   s_svl.top = band_top;
-  s_svl.compact = compact;
-  s_svl.head_y = band_top + sc(4) - s_svl.m_lab.bearing;
+  s_svl.head_y = band_top + sc(SV_LINE_GAP) - s_svl.m_lab.bearing;
   s_svl.dist_w = 0;
-  if (s_sv.dist > 60 && !compact) {
+  if (s_sv.dist > 60) {
     format_dist(s_svl.dist, sizeof(s_svl.dist), s_sv.dist);
     s_svl.dist_w = run_w(s_svl.dist, s_f_label, false, TRACK);
     s_svl.dist_x = fr->end - s_svl.dist_w;
@@ -1027,25 +1032,25 @@ static void layout_stopview(const Frame *fr, int band_top, bool compact) {
   }
   s_svl.note[0] = 0;
   if (s_sv.n == 0) strncpy(s_svl.note, s_sv.stop[0] ? "NO MORE TODAY" : "NO STOPS NEARBY", sizeof(s_svl.note));
-  // Compact, the stop line goes and two rows sit in the band: the solid
-  // block below stays where it is.
-  s_svl.n = compact && s_sv.n > SV_ROWS_COMPACT ? SV_ROWS_COMPACT : s_sv.n;
-  int y = band_top + (compact ? sc(3) : sc(SV_HEAD_GAP));
-  for (int i = 0; i < s_svl.n; i++) {
+  int y = band_top + sc(SV_LINE_GAP) + s_svl.m_lab.cap + sc(SV_ROWS_GAP);
+  const int badge_h = s_svl.m_val.cap + 2 * sc(2);
+  s_svl.n = 0;
+  for (int i = 0; i < s_sv.n && i < SV_ROWS; i++) {
+    if (y + badge_h > band_bot - sc(2)) break;   // no room above the block for this row
     const SvRow *row = &s_sv.row[i];
     const int pad = sc(3);
     s_svl.r[i].y = y;
     s_svl.r[i].badge_w = run_w(row->route, s_f_mod, false, 0) + 2 * pad;
-    s_svl.r[i].badge_h = s_svl.m_val.cap + 2 * sc(2);
+    s_svl.r[i].badge_h = badge_h;
     s_svl.r[i].badge_x = fr->start;
     s_svl.r[i].text_x = fr->start + pad;
     s_svl.r[i].text_y = y + sc(2) - s_svl.m_val.bearing;
     // when: minutes in the value font with a small MIN, or a clock time
     const int w_w = run_w(row->when, s_f_mod, row->mins, 0);
     const int u_w = row->mins ? sc(2) + run_w("MIN", s_f_cap, false, TRACK) : 0;
-    s_svl.r[i].when_x = fr->end - w_w - u_w;
+    s_svl.r[i].when_x = fr->end - w_w - u_w;   // logical; the pair is one row, mirrored whole
+    s_svl.r[i].when_w = w_w; s_svl.r[i].unit_w = u_w;
     s_svl.r[i].when_y = y + sc(2) - s_svl.m_val.bearing;
-    s_svl.r[i].unit_x = fr->end - u_w + sc(2);
     s_svl.r[i].unit_y = y + sc(2) + s_svl.m_val.cap - s_svl.m_cap.cap - s_svl.m_cap.bearing;
     // the headsign takes what is left, a glyph at a time
     s_svl.r[i].head_x = fr->start + s_svl.r[i].badge_w + sc(4);
@@ -1059,23 +1064,22 @@ static void layout_stopview(const Frame *fr, int band_top, bool compact) {
       *e = 0;
       while (e > s_svl.r[i].head && e[-1] == ' ') *--e = 0;
     }
-    y += sc(compact ? SV_ROW_H_COMPACT : SV_ROW_H);
+    s_svl.n = i + 1;
+    y += sc(SV_ROW_H);
   }
 }
 
 static void paint_stopview(int fr_start) __attribute__((noinline));
 static void paint_stopview(int fr_start) {
-  if (!s_svl.compact) {
-    graphics_context_set_text_color(s_ctx, s_dim);
-    draw_run(s_svl.stop, s_f_label, fr_start, s_svl.head_y, false, TRACK);
-  }
+  graphics_context_set_text_color(s_ctx, s_dim);
+  draw_run(s_svl.stop, s_f_label, fr_start, s_svl.head_y, false, TRACK);
   if (s_svl.dist_w) {
     graphics_context_set_text_color(s_ctx, s_ink);
     draw_run(s_svl.dist, s_f_label, s_svl.dist_x, s_svl.head_y, false, TRACK);
   }
   if (s_svl.note[0]) {
     graphics_context_set_text_color(s_ctx, s_ink);
-    draw_run(s_svl.note, s_f_label, fr_start, s_svl.top + (s_svl.compact ? sc(6) : sc(SV_HEAD_GAP) + sc(2)) - s_svl.m_lab.bearing, false, TRACK);
+    draw_run(s_svl.note, s_f_label, fr_start, s_svl.top + sc(SV_LINE_GAP) + s_svl.m_lab.cap + sc(SV_ROWS_GAP) + sc(2) - s_svl.m_lab.bearing, false, TRACK);
   }
   for (int i = 0; i < s_svl.n; i++) {
     const SvRow *row = &s_sv.row[i];
@@ -1087,10 +1091,12 @@ static void paint_stopview(int fr_start) {
     draw_run(row->route, s_f_mod, s_svl.r[i].text_x, s_svl.r[i].text_y, false, 0);
     graphics_context_set_text_color(s_ctx, s_ink);
     draw_run(s_svl.r[i].head, s_f_label, s_svl.r[i].head_x, s_svl.r[i].head_y, false, TRACK);
-    draw_run(row->when, s_f_mod, s_svl.r[i].when_x, s_svl.r[i].when_y, row->mins, 0);
+    // The minutes and their MIN are one row: placed once, then read rightwards.
+    const int wx = mapx(s_svl.r[i].when_x, s_svl.r[i].when_w + s_svl.r[i].unit_w);
+    draw_run_s(row->when, s_f_mod, wx, s_svl.r[i].when_y, row->mins, 0);
     if (row->mins) {
       graphics_context_set_text_color(s_ctx, s_dim);
-      draw_run("MIN", s_f_cap, s_svl.r[i].unit_x, s_svl.r[i].unit_y, false, TRACK);
+      draw_run_s("MIN", s_f_cap, wx + s_svl.r[i].when_w + sc(2), s_svl.r[i].unit_y, false, TRACK);
     }
   }
 }
@@ -1108,13 +1114,14 @@ static struct {
   char hh[4], mm[4];
   int x, y, w, hh_w, colon_w, cgap, band_top;
   GSize z_colon;
+  GFont f;
 } s_tm;
 
-static void layout_time(const struct tm *t, const Frame *fr) __attribute__((noinline));
-static void layout_time(const struct tm *t, const Frame *fr) {
+static void layout_time(const struct tm *t, const Frame *fr, GFont f) __attribute__((noinline));
+static void layout_time(const struct tm *t, const Frame *fr, GFont f) {
   snprintf(s_tm.hh, sizeof(s_tm.hh), "%02d", display_hour(t->tm_hour));
   snprintf(s_tm.mm, sizeof(s_tm.mm), "%02d", t->tm_min);
-  const GFont f = s_f_time;
+  s_tm.f = f;
   const Metrics m = barlow_metrics(measure("0", f).h);
   s_tm.z_colon = measure(":", f);
   s_tm.cgap = sc(COLON_GAP);
@@ -1135,11 +1142,11 @@ static void paint_time(void) {
   // The row is mirrored as a whole; hour, colon and minute keep their order.
   const int x = mapx(s_tm.x, s_tm.w);
   graphics_context_set_text_color(s_ctx, s_ink);
-  draw_run_s(s_tm.hh, s_f_time, x, s_tm.y, true, 0);
-  draw_run_s(s_tm.mm, s_f_time, x + s_tm.hh_w + s_tm.colon_w, s_tm.y, true, 0);
+  draw_run_s(s_tm.hh, s_tm.f, x, s_tm.y, true, 0);
+  draw_run_s(s_tm.mm, s_tm.f, x + s_tm.hh_w + s_tm.colon_w, s_tm.y, true, 0);
   // The one accent in the time: the design's colon.
   graphics_context_set_text_color(s_ctx, accent());
-  s_tx.t = ":"; s_tx.f = s_f_time; s_tx.mode = GTextOverflowModeWordWrap;
+  s_tx.t = ":"; s_tx.f = s_tm.f; s_tx.mode = GTextOverflowModeWordWrap;
   s_tx.r = GRect(x + s_tm.hh_w + s_tm.cgap, s_tm.y, s_tm.z_colon.w, s_tm.z_colon.h);
   tx_draw();
 }
@@ -1153,10 +1160,12 @@ static struct {
   Metrics m_lab, m_min, m_num, m_dow, m_date;
   int label_w, num_w, num_row_w, inner_w, inner_x, label_y, num_y;
   int block_x, block_y, block_w, block_h, date_y, dow_y;
+  GFont f_num;
+  bool show_date;
 } s_bk;
 
-static void layout_block(const struct tm *t, const Schedule *sch, const Frame *fr) __attribute__((noinline));
-static void layout_block(const struct tm *t, const Schedule *sch, const Frame *fr) {
+static void layout_block(const struct tm *t, const Schedule *sch, const Frame *fr, GFont f_num, int row_gap, bool date) __attribute__((noinline));
+static void layout_block(const struct tm *t, const Schedule *sch, const Frame *fr, GFont f_num, int row_gap, bool date) {
   strftime(s_bk.dow, sizeof(s_bk.dow), "%a", t);
   strftime(s_bk.date, sizeof(s_bk.date), "%d %b", t);
   for (char *p = s_bk.dow; *p; p++) *p = toupper((int)*p);
@@ -1177,7 +1186,8 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
   }
 
   // NOW is set in the countdown face itself, as the design draws it.
-  const GFont f_label = s_f_label, f_date = s_f_date, f_num = s_f_count;
+  const GFont f_label = s_f_label, f_date = s_f_date;
+  s_bk.f_num = f_num; s_bk.show_date = date;
   s_bk.z_num = measure(s_bk.num, f_num);
   s_bk.label_w = run_w(s_bk.label, f_label, false, TRACK);
   const int min_w = sch->is_now ? 0 : run_w(s_bk.unit, f_label, false, TRACK);
@@ -1198,7 +1208,7 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
   // The bottom row is a space-between pair and the block must not grow into
   // the weekday/date column. Should a label outgrow the row, the block's own
   // padding gives way first and the normal state keeps the design's spacing.
-  const int date_w = dow_w > date_w2 ? dow_w : date_w2;
+  const int date_w = date ? (dow_w > date_w2 ? dow_w : date_w2) : 0;
   const int avail = fr->end - fr->start - date_w - sc(ROW_GAP);
   int pad_in = sc(BLOCK_PAD_IN), pad_out = sc(BLOCK_PAD_OUT);
   int over = inner_w + pad_in + pad_out - avail;
@@ -1216,7 +1226,7 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
 
   s_bk.inner_w = inner_w;
   s_bk.block_w = inner_w + pad_in + pad_out;
-  s_bk.block_h = s_bk.m_lab.cap + sc(BLOCK_ROW_GAP) + s_bk.m_num.cap + sc(BLOCK_PAD_T) + sc(BLOCK_PAD_B);
+  s_bk.block_h = s_bk.m_lab.cap + sc(row_gap) + s_bk.m_num.cap + sc(BLOCK_PAD_T) + sc(BLOCK_PAD_B);
   s_bk.block_x = fr->end - s_bk.block_w;
   s_bk.block_y = fr->bot - s_bk.block_h;
   // Label and number are end-aligned within the block. The design puts a
@@ -1226,7 +1236,7 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
   // the constant.
   s_bk.inner_x = s_bk.block_x + pad_in;
   s_bk.label_y = s_bk.block_y + sc(BLOCK_PAD_T);
-  s_bk.num_y = s_bk.label_y + s_bk.m_lab.cap + sc(BLOCK_ROW_GAP);
+  s_bk.num_y = s_bk.label_y + s_bk.m_lab.cap + sc(row_gap);
   // Weekday and date sit on the wrist side: first to disappear.
   s_bk.date_y = fr->bot - sc(DATE_PAD_BOT) - s_bk.m_date.cap;
   s_bk.dow_y = s_bk.date_y - sc(DOW_GAP) - s_bk.m_dow.cap;
@@ -1247,14 +1257,15 @@ static void paint_block(int fr_start) {
            s_bk.label_y - s_bk.m_lab.bearing, false, TRACK);
   const int num_x = s_bk.inner_x + s_bk.inner_w - s_bk.num_row_w;
   if (s_bk.now) {
-    draw_at(s_bk.num, s_f_count, num_x, s_bk.num_y - s_bk.m_num.bearing, s_bk.z_num);
+    draw_at(s_bk.num, s_bk.f_num, num_x, s_bk.num_y - s_bk.m_num.bearing, s_bk.z_num);
   } else {
     // One row, mirrored as a whole: the number, then MIN on its baseline.
     const int x = mapx(num_x, s_bk.num_row_w);
-    draw_run_s(s_bk.num, s_f_count, x, s_bk.num_y - s_bk.m_num.bearing, true, 0);
+    draw_run_s(s_bk.num, s_bk.f_num, x, s_bk.num_y - s_bk.m_num.bearing, true, 0);
     draw_run_s(s_bk.unit, s_f_label, x + s_bk.num_w + sc(LABEL_GAP),
                s_bk.num_y + s_bk.m_num.cap - s_bk.m_min.cap - s_bk.m_min.bearing, false, TRACK);
   }
+  if (!s_bk.show_date) return;
   graphics_context_set_text_color(s_ctx, s_ink);
   draw_run(s_bk.dow, s_f_date, fr_start, s_bk.dow_y - s_bk.m_dow.bearing, false, TRACK);
   graphics_context_set_text_color(s_ctx, s_dim);
@@ -1297,23 +1308,22 @@ static void face_update(Layer *layer, GContext *ctx) {
   fr.top = sc(PAD_TOP);
   fr.bot = b.size.h - sc(PAD_BOTTOM);
 
-  layout_time(t, &fr);
-  paint_time();
-  // The answer to a flick stands in for everything below the time, unless
-  // the block is solid: a bus is boarding, or leaving, and nothing covers
-  // that. Then the answer keeps to the band above the block, two rows.
-  const bool solid = !quiet && (sch.is_boarding || sch.is_final || sch.is_now);
-  if (s_sv.valid && !solid) {
-    layout_stopview(&fr, s_tm.band_top, false);
-    paint_stopview(fr.start);
-  } else if (s_sv.valid) {
-    layout_block(t, &sch, &fr);
-    layout_stopview(&fr, s_tm.band_top, true);
+  // The answer to a flick: the time a size smaller, the stop and its rows
+  // in the room that makes, and the countdown still at the foot, the largest
+  // number on the face. Nothing is lost to a flick, least of all a bus
+  // boarding. Date and modules sit it out.
+  if (s_sv.valid) {
+    layout_time(t, &fr, s_f_time_s);
+    paint_time();
+    layout_block(t, &sch, &fr, s_f_count_s, BLOCK_ROW_GAP_S, false);
+    layout_stopview(&fr, s_tm.band_top, s_bk.block_y);
     paint_block(fr.start);
     paint_stopview(fr.start);
   } else {
+    layout_time(t, &fr, s_f_time);
+    paint_time();
     if (quiet) layout_idle(t, &fr);
-    else layout_block(t, &sch, &fr);
+    else layout_block(t, &sch, &fr, s_f_count, BLOCK_ROW_GAP, true);
     const int band_bot = quiet ? s_id.top : s_bk.block_y;
     if (at_hub) layout_gb(fr.start, fr.end - fr.start, s_tm.band_top, band_bot, t->tm_hour * 60 + t->tm_min);
     else s_gb.show = false;
@@ -1550,6 +1560,8 @@ static void init(void) {
   s_f_date = fonts_load_custom_font(resource_get_handle(RES_DATE));
   s_f_cap = fonts_load_custom_font(resource_get_handle(RES_CAP));
   s_f_bigdate = fonts_load_custom_font(resource_get_handle(RES_BIGDATE));
+  s_f_time_s = fonts_load_custom_font(resource_get_handle(RES_TIME_S));
+  s_f_count_s = fonts_load_custom_font(resource_get_handle(RES_COUNT_S));
 
   s_window = window_create();
   window_set_window_handlers(s_window, (WindowHandlers){
@@ -1573,6 +1585,8 @@ static void deinit(void) {
   fonts_unload_custom_font(s_f_date);
   fonts_unload_custom_font(s_f_cap);
   fonts_unload_custom_font(s_f_bigdate);
+  fonts_unload_custom_font(s_f_time_s);
+  fonts_unload_custom_font(s_f_count_s);
   tick_timer_service_unsubscribe();
   accel_tap_service_unsubscribe();
   window_destroy(s_window);

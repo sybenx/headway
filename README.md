@@ -95,18 +95,16 @@ Off, and the countdown runs everywhere, as it always has.
 ### A flick for the nearest stop
 
 With the hub known, a flick of the wrist asks the phone where you are, this
-time precisely, and the face shows the nearest stop and what leaves it next
-for a few seconds, with the light on: a line for the stop, then a row a
-departure — the route in the agency's own colour, where it is going, and the
-minutes, or the clock time once it is more than an hour out. Stood at the
-stop, the line is just its name; further off, it says how far. Twin stops
-across a road are read as one. Nothing within a mile and a half, and it says
-so. The rail stays.
-
-It never covers a solid block. A bus boarding, the final minute, or NOW is
-the one thing on the face that must not be lost to a flick, least of all an
-accidental one, so then the answer keeps to the band above the block, two
-rows, and the block stays. A setting turns the flick off altogether.
+time precisely, and for twelve seconds, lit, the face shows the nearest stop
+and what leaves it next. The time steps down a size to make the room; the
+stop's line and its rows take it — the route in the agency's own colour,
+where it is going, and the minutes, or the clock time once it is more than an
+hour out; and the countdown stays at the foot, a size down but still the
+largest number on the face. Nothing is lost to a flick, least of all a bus
+boarding, its final minute, or NOW. Date and modules sit it out. Stood at
+the stop, the line is just its name; further off, it says how far. Twin
+stops across a road, and a hub's bays, are read as one. Nothing within a
+mile and a half, and it says so. A setting turns the flick off altogether.
 
 | at a stop | near one |
 |---|---|
