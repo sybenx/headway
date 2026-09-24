@@ -47,13 +47,17 @@ typedef struct {
   uint8_t night_end;   // hour it closes
   uint32_t accent;     // 0xRRGGBB, snapped to the Pebble 64 at use
   uint8_t mod[3];      // MODULE_*, left to right from the wrist edge
-  bool mod_icons;      // icons in place of the captions
+  uint8_t mod_icons;   // MOD_ICONS_*: captions, icons, or icons in colour
   bool final_seconds;  // count the last minute down in seconds
   bool imperial;
   uint8_t transit;     // TRANSIT_*: what knowing the hub changes
   uint16_t radius;     // metres around the hub that count as near
   bool flick;          // a flick asks for the nearest stop
 } Settings;
+
+#define MOD_ICONS_OFF    0
+#define MOD_ICONS_ON     1
+#define MOD_ICONS_COLOUR 2
 
 #define SETTINGS_KEY 1
 #define SETTINGS_VERSION 4
@@ -116,7 +120,7 @@ static void settings_defaults(void) {
   s_set.mod[0] = MODULE_NONE;
   s_set.mod[1] = MODULE_NONE;
   s_set.mod[2] = MODULE_NONE;
-  s_set.mod_icons = false;
+  s_set.mod_icons = MOD_ICONS_OFF;
   s_set.final_seconds = true;
   s_set.imperial = false;
   s_set.transit = TRANSIT_AUTO;
@@ -398,10 +402,10 @@ void draw_run(const char *t, GFont f, int lx, int y, bool tabular, int track) {
 // shape at ten pixels; placing the pixels by hand can, and a pattern still
 // scales up for emery and inverts with the theme.
 static void draw_bits(GContext *ctx, GRect r, const char *const *rows,
-                      int rw, int rh) {
+                      int rw, int rh, char mark) {
   for (int y = 0; y < rh; y++) {
     for (int x = 0; x < rw; x++) {
-      if (rows[y][x] != '#') continue;
+      if (rows[y][x] != mark) continue;
       // Rounded, not floored: rounding keeps the stretched columns
       // symmetric, so a symmetric glyph stays symmetric at emery's size.
       const int16_t x0 = r.origin.x + (2 * x * r.size.w + rw) / (2 * rw);
@@ -432,10 +436,10 @@ static const char *const FOOTPRINTS[10] = {
 };
 
 static void icon_steps(GContext *ctx, GRect r) {
-  draw_bits(ctx, r, FOOTPRINTS, 10, 10);
+  draw_bits(ctx, r, FOOTPRINTS, 10, 10, '#');
 }
 
-static void icon_battery(GContext *ctx, GRect r, int pct) {
+static void icon_battery(GContext *ctx, GRect r, int pct, GColor tint) {
   const int16_t h = r.size.h * 3 / 4;
   const int16_t y = r.origin.y + (r.size.h - h) / 2;
   const int16_t bw = r.size.w - 2;
@@ -446,6 +450,7 @@ static void icon_battery(GContext *ctx, GRect r, int pct) {
   const int16_t inner = bw - 4;
   int16_t fill = (inner * pct + 50) / 100;
   if (fill <= 0 && pct > 0) fill = 1;
+  graphics_context_set_fill_color(ctx, tint);
   if (fill > 0) graphics_fill_rect(ctx, GRect(r.origin.x + 2, y + 2, fill, h - 4), 0, GCornerNone);
 }
 
@@ -463,7 +468,7 @@ static const char *const HEART[10] = {
 };
 
 static void icon_heart(GContext *ctx, GRect r) {
-  draw_bits(ctx, r, HEART, 10, 10);
+  draw_bits(ctx, r, HEART, 10, 10, '#');
 }
 
 #define WX_SUN    0
@@ -504,9 +509,9 @@ static const char *const SKY[7][10] = {
     "....##....",
   },
   { // partly: the sun's disc high on the outer side, two rays, the cloud in front
-    "....#.##.#",
-    ".....####.",
-    "....#####.",
+    "....@.@@.@",
+    ".....@@@@.",
+    "....@@@@@.",
     "...#####..",
     "..######..",
     ".#########",
@@ -569,16 +574,23 @@ static const char *const SKY[7][10] = {
     ".#########",
     "##########",
     ".########.",
-    ".....##...",
-    "....##....",
-    "...####...",
-    "....##....",
-    "...##.....",
+    ".....@@...",
+    "....@@....",
+    "...@@@@...",
+    "....@@....",
+    "...@@.....",
   },
 };
 
-static void icon_weather(GContext *ctx, GRect r, int code) {
-  draw_bits(ctx, r, SKY[wx_kind(code)], 10, 10);
+// Whole-sky kinds take the tint entire; a cloud is never coloured, so
+// partly and storm colour only what is marked: the sun, the bolt.
+static void icon_weather(GContext *ctx, GRect r, int code, GColor base, GColor tint) {
+  const int k = wx_kind(code);
+  const bool whole = (k == WX_SUN || k == WX_RAIN || k == WX_SNOW);
+  graphics_context_set_fill_color(ctx, whole ? tint : base);
+  draw_bits(ctx, r, SKY[k], 10, 10, '#');
+  graphics_context_set_fill_color(ctx, tint);
+  draw_bits(ctx, r, SKY[k], 10, 10, '@');
 }
 
 // The caption for the same sky, when the modules are captioned.
@@ -785,7 +797,7 @@ static bool module_read(uint8_t kind, Module *m) {
 
 static bool module_uses_icon(const Module *m) {
   (void)m;
-  return s_set.mod_icons;
+  return s_set.mod_icons != MOD_ICONS_OFF;
 }
 
 static int module_icon_w(const Module *m, int icon) {
@@ -796,12 +808,37 @@ static int module_icon_w(const Module *m, int icon) {
   }
 }
 
-static void module_draw_icon(GContext *ctx, const Module *m, GRect box) {
+// Colour where it says something: the heart red, the battery by its charge,
+// the sky in its own colour. Steps stay in the caption grey, and so does
+// every cloud. One-bit watches have only the grey.
+static GColor module_tint(const Module *m) {
+#ifdef PBL_COLOR
+  if (s_set.mod_icons != MOD_ICONS_COLOUR) return s_dim;
   switch (m->kind) {
-    case MODULE_HR:      icon_heart(ctx, box); break;
+    case MODULE_HR:      return GColorFromHEX(0xFF0055);
+    case MODULE_BATTERY: return GColorFromHEX(m->extra > 50 ? 0x00AA55 : m->extra > 20 ? 0xFFAA00 : 0xFF0000);
+    case MODULE_WEATHER:
+      switch (wx_kind(m->extra)) {
+        case WX_SUN: case WX_PARTLY: case WX_STORM: return GColorFromHEX(0xFF5500);
+        case WX_RAIN: return GColorFromHEX(0x55AAFF);
+        case WX_SNOW: return GColorFromHEX(0x00AAFF);
+        default: return s_dim;
+      }
+    default: return s_dim;
+  }
+#else
+  (void)m;
+  return s_dim;
+#endif
+}
+
+static void module_draw_icon(GContext *ctx, const Module *m, GRect box) {
+  const GColor tint = module_tint(m);
+  switch (m->kind) {
+    case MODULE_HR:      graphics_context_set_fill_color(ctx, tint); icon_heart(ctx, box); break;
     case MODULE_STEPS:   icon_steps(ctx, box); break;
-    case MODULE_BATTERY: icon_battery(ctx, box, m->extra); break;
-    case MODULE_WEATHER: icon_weather(ctx, box, m->extra); break;
+    case MODULE_BATTERY: icon_battery(ctx, box, m->extra, tint); break;
+    case MODULE_WEATHER: icon_weather(ctx, box, m->extra, s_dim, tint); break;
     default: break;
   }
 }
@@ -834,7 +871,7 @@ static void layout_modules(GFont f_val, GFont f_cap, int c_start, int avail_w,
   // box bounds the glyph whatever the font's metrics turn out to be. An icon
   // fills its box where a caption's box carries slack, so it gets a wider
   // gap to the value.
-  const bool icons = s_set.mod_icons;
+  const bool icons = s_set.mod_icons != MOD_ICONS_OFF;
   s_md.m_cap = barlow_metrics(measure("BPM", f_cap).h);
   // The value line sits where the captions put it whichever labels are on:
   // an icon is taller than a caption and stands up into the band's air
@@ -1502,7 +1539,8 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
     s_set.mod[2] = (uint8_t)tuple_int(tp);
   }
   if ((tp = dict_find(iter, MESSAGE_KEY_MOD_ICONS))) {
-    s_set.mod_icons = tp->value->int32 != 0;
+    s_set.mod_icons = (uint8_t)tuple_int(tp);
+    if (s_set.mod_icons > MOD_ICONS_COLOUR) s_set.mod_icons = MOD_ICONS_ON;
   }
   if ((tp = dict_find(iter, MESSAGE_KEY_SECONDS))) {
     s_set.final_seconds = tp->value->int32 != 0;

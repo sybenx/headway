@@ -28,11 +28,14 @@ Off by default: out of the box the face is the plain digital watch the design
 describes. Up to three can be switched on from the settings page, in the band
 the design leaves open, drawn as a caption over a value — `BPM 72`,
 `STEPS 4.8K`, `BATT 64%`. Each slot takes heart rate, steps, battery, weather
-or nothing, and the captions can be swapped for icons.
+or nothing, and the captions can be swapped for icons, grey or in colour.
+In colour, the heart is red, the battery shows its charge, and the sky comes
+in its own colour: the sun and a bolt orange, rain blue. Steps and every
+cloud keep the caption grey, so colour only ever says something.
 
-| Captions | Icons |
-|---|---|
-| ![modules](screenshots/modules.png) | ![modules with icons](screenshots/modules-icons.png) |
+| Captions | Icons | In colour |
+|---|---|---|
+| ![modules](screenshots/modules.png) | ![modules with icons](screenshots/modules-icons.png) | ![modules with coloured icons](screenshots/modules-colour.png) |
 
 They sit on the wrist side, below the date, so a sleeve covers them before the
 countdown or the rail — the design's zone ranking is preserved.
@@ -66,7 +69,7 @@ Reachable from the Pebble app.
 - **Wrist** — mirrors the whole layout so the sleeve comes from the other side
 - **Time format** — system, 12h or 24h
 - **Modules** — three slots: heart rate, steps, battery, weather or nothing
-- **Icons instead of captions**
+- **Captions or icons** — captions, icons, or icons in colour
 - **Units** — °C or °F
 - **Knowing a system** — see below; automatic by default, with the hub radius and a switch for the flick
 
@@ -113,15 +116,15 @@ the feed.
 With the hub known, a flick of the wrist asks the phone where you are, this
 time precisely, and for twelve seconds, lit, the face shows the nearest stop
 and what leaves it next. The time steps down a size to make the room; the
-stop's line and its rows take it — the route in the agency's own colour,
-where it is going, and the minutes, or the clock time once it is more than an
-hour out; and the countdown stays at the foot, a size down but still the
-largest number on the face, and for those seconds it runs in seconds,
-minutes and seconds together. Nothing is lost to a flick, least of all a bus
-boarding or NOW. Date and modules sit it out. Stood at
-the stop, the line is just its name; further off, it says how far. Twin
-stops across a road, and a hub's bays, are read as one. Nothing within a
-mile and a half, and it says so. A setting turns the flick off altogether.
+stop's line and its rows take it — the route in the agency's own colour, where
+it is going, and the minutes, or the clock time once it is more than an hour
+out; and the countdown stays at the foot, a size down but still the largest
+number on the face, and for those seconds it runs in seconds, minutes and
+seconds together. Nothing is lost to a flick, least of all a bus boarding or
+NOW. Date and modules sit it out. Stood at the stop, the line is just its
+name; further off, it says how far. Twin stops across a road are read as one,
+and at the hub every bay is, under the hub's own name: TRANSIT. Nothing within
+a mile and a half, and it says so. A setting turns the flick off altogether.
 
 | at a stop | near one |
 |---|---|

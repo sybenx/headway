@@ -250,11 +250,16 @@
         ]
       },
       {
-        "type": "toggle",
+        "type": "select",
         "messageKey": "MOD_ICONS",
-        "label": "Icons instead of captions",
-        "description": "Captions name the sky for weather: SUNNY, CLOUDY, RAIN. Icons draw it.",
-        "defaultValue": false
+        "label": "Captions or icons",
+        "description": "Captions name the sky for weather: SUNNY, CLOUDY, RAIN. Icons draw it. In colour, the heart is red, the battery shows its charge, and the sky comes in its own colour.",
+        "defaultValue": "0",
+        "options": [
+          { "label": "Captions", "value": "0" },
+          { "label": "Icons", "value": "1" },
+          { "label": "Icons, in colour", "value": "2" }
+        ]
       },
       {
         "type": "select",
