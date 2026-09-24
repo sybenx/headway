@@ -9,7 +9,7 @@ phone side does, and sends the watch what is next.
   python3 tools/transit.py gtfs.zip --hub 41.7406,-111.8309 --routes G,B \
       --agency CVTD --name ITC
 """
-import argparse, csv, io, json, math, os, sys, zipfile
+import argparse, csv, io, json, math, os, re, sys, zipfile
 
 ap = argparse.ArgumentParser()
 ap.add_argument('gtfs', help='path to a GTFS zip')
@@ -71,7 +71,8 @@ for st in table('stop_times.txt'):
 def short(text, table):
     for k, v in table.items():
         text = text.replace(k, v)
-    return text.strip().upper()
+    text = re.sub(r'\s*\([^)]*\)', '', text)   # a stop code in brackets says nothing on a watch
+    return re.sub(r'\s+', ' ', text).strip().upper()
 
 if a.stops_out:
     os.makedirs(os.path.join(a.stops_out, 'stops'), exist_ok=True)

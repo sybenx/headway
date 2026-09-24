@@ -12,8 +12,9 @@
     "Southbound": "SOUTH"
   },
   "stops": {
-    "150 East 500 North": "TRANSIT CTR",
-    " - Route ": " R",
+    "150 East 500 North - Route ": "ITC RT ",
+    "150 East 500 North": "ITC",
+    "150 East 442 North": "ITC",
     " (Temp Stop)": ""
   },
   "loops": [
