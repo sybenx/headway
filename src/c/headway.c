@@ -1051,6 +1051,14 @@ static void paint_idle(void) {
 #define SV_ROW_H 15
 #define SV_LINE_GAP 3      // the stop line's air below the time
 #define SV_ROWS_GAP 5      // between the stop line and the first row
+// A departure comes as minutes past midnight and is written the way the
+// watch tells time: 5:13P, or 17:13 on a 24-hour watch.
+static void sv_clock(char *out, size_t n, const char *tok) {
+  const int m = atoi(tok), h = (m / 60) % 24, mm = m % 60;
+  if (use_24h()) snprintf(out, n, "%d:%02d", h, mm);
+  else snprintf(out, n, "%d:%02d%c", display_hour(h), mm, h < 12 ? 'A' : 'P');
+}
+
 static struct {
   int head_y, dist_w, stop_x, note_x, note_y, n;
   char dist[10], note[20], stop[24];
@@ -1132,17 +1140,20 @@ static void layout_stopview(const Frame *fr, int band_top, int band_bot) {
     s_svl.r[i].glyph_y = y + (badge_h - s_svl.m_bad.cap) / 2 - s_svl.m_bad.bearing;
     // The times sit on the badge's baseline: cap bottoms level.
     s_svl.r[i].text_y = y + (badge_h + s_svl.m_bad.cap) / 2 - s_svl.m_val.cap - s_svl.m_val.bearing;
-    // The times come as one string, a space between; two at most.
+    // The row comes as two tokens, a space between: minutes past midnight,
+    // then either a second time or a word — a day, TOMORROW or MON, or the
+    // direction where the route runs both ways from here.
     const char *sp = strchr(row->when, ' ');
-    const size_t l1 = sp ? (size_t)(sp - row->when) : strlen(row->when);
-    memcpy(s_svl.r[i].t1, row->when, l1 < sizeof(s_svl.r[i].t1) - 1 ? l1 : sizeof(s_svl.r[i].t1) - 1);
-    s_svl.r[i].t1[l1 < sizeof(s_svl.r[i].t1) - 1 ? l1 : sizeof(s_svl.r[i].t1) - 1] = 0;
+    sv_clock(s_svl.r[i].t1, sizeof(s_svl.r[i].t1), row->when);
     s_svl.r[i].t2[0] = 0;
-    if (sp) { strncpy(s_svl.r[i].t2, sp + 1, sizeof(s_svl.r[i].t2) - 1); s_svl.r[i].t2[sizeof(s_svl.r[i].t2) - 1] = 0; }
+    s_svl.r[i].t2_day = false;
+    if (sp && isdigit((int)sp[1])) sv_clock(s_svl.r[i].t2, sizeof(s_svl.r[i].t2), sp + 1);
+    else if (sp && sp[1]) {
+      strncpy(s_svl.r[i].t2, sp + 1, sizeof(s_svl.r[i].t2) - 1); s_svl.r[i].t2[sizeof(s_svl.r[i].t2) - 1] = 0;
+      s_svl.r[i].t2_day = true;
+    }
     // Proportional, as the design sets them: the colon takes its own width.
-    // A second column that is a word — TOMORROW, MON — is a day, not a
-    // time, and takes the caption font on the same baseline.
-    s_svl.r[i].t2_day = s_svl.r[i].t2[0] && !isdigit((int)s_svl.r[i].t2[0]);
+    // A word in the second column takes the caption font on the baseline.
     s_svl.r[i].t2_y = s_svl.r[i].t2_day ? s_svl.r[i].text_y + s_svl.m_val.bearing + s_svl.m_val.cap - s_svl.m_lab.cap - s_svl.m_lab.bearing : s_svl.r[i].text_y;
     const int w1 = run_w(s_svl.r[i].t1, f_time, false, 0);
     const int w2 = s_svl.r[i].t2[0] ? run_w(s_svl.r[i].t2, s_svl.r[i].t2_day ? f_line : f_time, false, s_svl.r[i].t2_day ? TRACK : 0) : 0;

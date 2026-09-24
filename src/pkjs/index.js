@@ -171,7 +171,7 @@ function checkTransit(force) {
 var INDEX_TTL = 24 * 60 * 60 * 1000, STOP_TTL = 6 * 60 * 60 * 1000;
 // At a stop, the board; a short walk from one, the board with its distance;
 // further, just the stop, how far, and its next bus; further still, nothing.
-var AT_STOP = 60, TWIN = 45, HUB = 100, BOARD = 400, FAR = 2000;
+var AT_STOP = 60, TWIN = 80, HUB = 100, BOARD = 400, FAR = 2000;
 
 function cached(key, ttl) {
   try {
@@ -200,13 +200,8 @@ function getJSON(url, key, ttl, cb) {
 
 function dayKind(d) { var wd = d.getDay(); return wd === 0 ? 'sunday' : wd === 6 ? 'saturday' : 'weekday'; }
 
-// A departure as a clock time, as the design's board reads: 11:01, or
-// 23:01 on a 24-hour watch. No AM or PM; the board is the next hour or two.
-function clockText(dep, h24) {
-  var h = Math.floor(dep / 60) % 24, mm = dep % 60;
-  var hh = h24 ? h : ((h + 11) % 12) + 1;
-  return hh + ':' + (mm < 10 ? '0' : '') + mm;
-}
+// Times go to the watch as minutes past midnight; the watch writes them in
+// its own clock style, 12-hour with A or P, or 24-hour.
 
 function sendStopView(name, dist, rows) {
   console.log('headway: stop view ' + (name || '(none)') + ' ' + rows.length + ' rows');
@@ -223,8 +218,6 @@ function sendStopView(name, dist, rows) {
 
 function onFlick() {
   // The watch only asks when its own setting allows, so no gate here.
-  var s = settings();
-  var h24 = String(s.H24) === '2';
   navigator.geolocation.getCurrentPosition(function (pos) {
     var lat = pos.coords.latitude, lon = pos.coords.longitude;
     console.log('headway: fix ' + lat.toFixed(4) + ',' + lon.toFixed(4) + ' +-' + Math.round(pos.coords.accuracy) + 'm');
@@ -267,18 +260,23 @@ function onFlick() {
           }
           deps.sort(function (a, b) { return a.t - b.t; });
           // A row a route and direction, in order of its next departure,
-          // with its next two times, or its next time and the day.
-          var groups = [], byKey = {};
+          // with its next two times, or its next time and the day. Where a
+          // route runs both ways from here — twin stops across a road — the
+          // second column is the direction instead, since two identical
+          // badges would say nothing.
+          var groups = [], byKey = {}, perRoute = {};
           deps.forEach(function (dep) {
             var key = dep.route + '|' + dep.head, g = byKey[key];
-            if (!g) { g = byKey[key] = { route: dep.route, head: dep.head, times: [] }; groups.push(g); }
-            if (g.times.length < (dayWord ? 1 : 2)) g.times.push(clockText(dep.t, h24));
+            if (!g) { g = byKey[key] = { route: dep.route, head: dep.head, times: [] }; groups.push(g); perRoute[dep.route] = (perRoute[dep.route] || 0) + 1; }
+            if (g.times.length < 2) g.times.push(dep.t);
           });
           // Further than a walk, the stop, how far, and its next bus alone.
           var far = best.d > BOARD;
           var rows = groups.slice(0, far ? 1 : 3).map(function (g) {
             var col = (index.routes[g.route] || ['888888'])[0];
-            return { route: g.route, head: g.head, when: g.times.concat(dayWord ? [dayWord] : []).join(' '), color: parseInt(col, 16) };
+            var word = perRoute[g.route] > 1 ? g.head.replace(/\s+$/, '').slice(0, 8) : dayWord;
+            var when = word ? [g.times[0], word] : g.times;
+            return { route: g.route, head: g.head, when: when.join(' '), color: parseInt(col, 16) };
           });
           sendStopView(name, best.d <= AT_STOP ? 0 : best.d, rows);
         });
