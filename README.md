@@ -116,8 +116,9 @@ and what leaves it next. The time steps down a size to make the room; the
 stop's line and its rows take it — the route in the agency's own colour,
 where it is going, and the minutes, or the clock time once it is more than an
 hour out; and the countdown stays at the foot, a size down but still the
-largest number on the face. Nothing is lost to a flick, least of all a bus
-boarding, its final minute, or NOW. Date and modules sit it out. Stood at
+largest number on the face, and for those seconds it runs in seconds,
+minutes and seconds together. Nothing is lost to a flick, least of all a bus
+boarding or NOW. Date and modules sit it out. Stood at
 the stop, the line is just its name; further off, it says how far. Twin
 stops across a road, and a hub's bays, are read as one. Nothing within a
 mile and a half, and it says so. A setting turns the flick off altogether.

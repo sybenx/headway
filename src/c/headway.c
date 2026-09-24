@@ -1171,7 +1171,7 @@ static void paint_time(void) {
 static struct {
   char dow[8], date[12], label[20], num[8];
   const char *unit;
-  bool now, solid;
+  bool now, solid, bare;
   GSize z_num;
   Metrics m_lab, m_min, m_num, m_dow, m_date;
   int label_w, num_w, num_row_w, inner_w, inner_x, label_y, num_y;
@@ -1197,8 +1197,15 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
     snprintf(s_bk.label, sizeof(s_bk.label), "%s %d:%02d",
              sch->is_boarding ? "LEAVES" : "NEXT",
              display_hour(sch->next_h), sch->next_m);
-    snprintf(s_bk.num, sizeof(s_bk.num), "%d", sch->is_final ? sch->secs : sch->remaining);
-    if (sch->is_final) s_bk.unit = "SEC";
+    if (s_sv.valid) {
+      // Through a flick the countdown runs in seconds, M:SS as the design
+      // draws it, so the glance that asked about the stop sees the bus move.
+      const int left = sch->remaining * 60 - (60 - sch->secs);
+      snprintf(s_bk.num, sizeof(s_bk.num), "%d:%02d", left / 60, left % 60);
+    } else {
+      snprintf(s_bk.num, sizeof(s_bk.num), "%d", sch->is_final ? sch->secs : sch->remaining);
+      if (sch->is_final) s_bk.unit = "SEC";
+    }
   }
 
   // NOW is set in the countdown face itself, as the design draws it.
@@ -1206,9 +1213,10 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
   s_bk.f_num = f_num; s_bk.show_date = date;
   s_bk.z_num = measure(s_bk.num, f_num);
   s_bk.label_w = run_w(s_bk.label, f_label, false, TRACK);
-  const int min_w = sch->is_now ? 0 : run_w(s_bk.unit, f_label, false, TRACK);
+  const bool bare = sch->is_now || s_sv.valid;   // NOW and M:SS carry no unit
+  const int min_w = bare ? 0 : run_w(s_bk.unit, f_label, false, TRACK);
   s_bk.m_lab = barlow_metrics(measure(s_bk.label, f_label).h);
-  s_bk.m_min = barlow_metrics(sch->is_now ? 0 : measure(s_bk.unit, f_label).h);
+  s_bk.m_min = barlow_metrics(bare ? 0 : measure(s_bk.unit, f_label).h);
   s_bk.m_num = barlow_metrics(s_bk.z_num.h);
   s_bk.m_dow = barlow_metrics(measure(s_bk.dow, f_date).h);
   s_bk.m_date = barlow_metrics(measure(s_bk.date, f_date).h);
@@ -1216,7 +1224,8 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
   const int date_w2 = run_w(s_bk.date, f_date, false, TRACK);
 
   s_bk.num_w = sch->is_now ? s_bk.z_num.w : run_w(s_bk.num, f_num, true, 0);
-  s_bk.num_row_w = s_bk.num_w + (sch->is_now ? 0 : sc(LABEL_GAP) + min_w);
+  s_bk.num_row_w = s_bk.num_w + (bare ? 0 : sc(LABEL_GAP) + min_w);
+  s_bk.bare = bare;
   int inner_w = s_bk.num_row_w > s_bk.label_w ? s_bk.num_row_w : s_bk.label_w;
   const int min_inner = sc(BLOCK_MIN_W) - sc(BLOCK_PAD_IN) - sc(BLOCK_PAD_OUT);
   if (inner_w < min_inner) inner_w = min_inner;
@@ -1278,8 +1287,9 @@ static void paint_block(int fr_start) {
     // One row, mirrored as a whole: the number, then MIN on its baseline.
     const int x = mapx(num_x, s_bk.num_row_w);
     draw_run_s(s_bk.num, s_bk.f_num, x, s_bk.num_y - s_bk.m_num.bearing, true, 0);
-    draw_run_s(s_bk.unit, s_f_label, x + s_bk.num_w + sc(LABEL_GAP),
-               s_bk.num_y + s_bk.m_num.cap - s_bk.m_min.cap - s_bk.m_min.bearing, false, TRACK);
+    if (!s_bk.bare)
+      draw_run_s(s_bk.unit, s_f_label, x + s_bk.num_w + sc(LABEL_GAP),
+                 s_bk.num_y + s_bk.m_num.cap - s_bk.m_min.cap - s_bk.m_min.bearing, false, TRACK);
   }
   if (!s_bk.show_date) return;
   graphics_context_set_text_color(s_ctx, s_ink);
@@ -1376,10 +1386,11 @@ static void retune_tick(void) {
   const time_t now = time(NULL);
   struct tm *t = localtime(&now);
   const Schedule s = schedule_for(t->tm_hour, t->tm_min, t->tm_sec);
-  if (s.is_final == s_ticking_seconds) return;
+  const bool want = s.is_final || s_sv.valid;
+  if (want == s_ticking_seconds) return;
   tick_timer_service_unsubscribe();
-  tick_timer_service_subscribe(s.is_final ? SECOND_UNIT : MINUTE_UNIT, tick_handler);
-  s_ticking_seconds = s.is_final;
+  tick_timer_service_subscribe(want ? SECOND_UNIT : MINUTE_UNIT, tick_handler);
+  s_ticking_seconds = want;
 }
 
 static void tick_handler(struct tm *tick_time, TimeUnits units) {
@@ -1399,6 +1410,7 @@ static void stopview_done(void *data) {
   s_sv.timer = NULL;
   s_sv.valid = false;
   s_sv.pending = false;
+  retune_tick();
   layer_mark_dirty(s_face);
 }
 static void stopview_hold(uint32_t ms) {
@@ -1449,6 +1461,7 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
     s_sv.pending = false;
     light_enable_interaction();
     stopview_hold(SV_SHOW_MS);
+    retune_tick();
     layer_mark_dirty(s_face);
     return;
   }
