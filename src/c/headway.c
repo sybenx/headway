@@ -851,7 +851,7 @@ static void module_draw_icon(GContext *ctx, const Module *m, GRect box) {
 // storage, then painted from it.
 static struct {
   Module m[MODULE_COUNT];
-  int n, widths[MODULE_COUNT], x0, y, label_h, lgap, gap, icon;
+  int n, widths[MODULE_COUNT], x0, y, label_h, lgap, gap, icon, total;
   Metrics m_cap, m_val;
   GFont f_val, f_cap;
 } s_md;
@@ -908,6 +908,7 @@ static void layout_modules(GFont f_val, GFont f_cap, int c_start, int avail_w,
   // Centred, then the design's 4px padding-top nudges it down by half that.
   s_md.y = (band_top + band_bot) / 2 - row_h / 2 + sc(1);
   s_md.x0 = c_start;
+  s_md.total = total;
 }
 
 static void paint_modules(void) __attribute__((noinline));
@@ -1016,24 +1017,30 @@ static void paint_gb(void) {
 // nothing to count down to, so the block goes and the date grows into the
 // room it leaves. Still on the wrist side: it is the part you already know.
 #define IDLE_DOW_GAP 6
-static struct { char dow[8], date[12]; int dow_y, date_y, top; Metrics m; } s_id;
+static struct { char dow[8], date[12]; int dow_x, date_x, dow_y, date_y, top; Metrics m; } s_id;
 static void layout_idle(const struct tm *t, const Frame *fr) __attribute__((noinline));
 static void layout_idle(const struct tm *t, const Frame *fr) {
+  // Hung from the outer edge, the number takes the edge: SEP 22, where the
+  // normal face's 22 SEP puts it on the wrist edge it hangs from.
   strftime(s_id.dow, sizeof(s_id.dow), "%a", t);
-  strftime(s_id.date, sizeof(s_id.date), "%d %b", t);
+  strftime(s_id.date, sizeof(s_id.date), "%b %d", t);
   for (char *p = s_id.dow; *p; p++) *p = toupper((int)*p);
   for (char *p = s_id.date; *p; p++) *p = toupper((int)*p);
   s_id.m = barlow_metrics(measure("22 SEP", s_f_bigdate).h);
   s_id.date_y = fr->bot - sc(DATE_PAD_BOT) - s_id.m.cap;
   s_id.dow_y = s_id.date_y - sc(IDLE_DOW_GAP) - s_id.m.cap;
   s_id.top = s_id.dow_y - sc(IDLE_DOW_GAP);   // where the band above ends
+  // With no countdown to hold the outer end, the date takes it: the face
+  // is read past a sleeve, and the sleeve comes from the wrist side.
+  s_id.dow_x = fr->end - run_w(s_id.dow, s_f_bigdate, false, TRACK);
+  s_id.date_x = fr->end - run_w(s_id.date, s_f_bigdate, false, TRACK);
 }
-static void paint_idle(int fr_start) __attribute__((noinline));
-static void paint_idle(int fr_start) {
+static void paint_idle(void) __attribute__((noinline));
+static void paint_idle(void) {
   graphics_context_set_text_color(s_ctx, s_ink);
-  draw_run(s_id.dow, s_f_bigdate, fr_start, s_id.dow_y - s_id.m.bearing, false, TRACK);
+  draw_run(s_id.dow, s_f_bigdate, s_id.dow_x, s_id.dow_y - s_id.m.bearing, false, TRACK);
   graphics_context_set_text_color(s_ctx, s_dim);
-  draw_run(s_id.date, s_f_bigdate, fr_start, s_id.date_y - s_id.m.bearing, false, TRACK);
+  draw_run(s_id.date, s_f_bigdate, s_id.date_x, s_id.date_y - s_id.m.bearing, false, TRACK);
 }
 
 // ---- the stop view: on a flick, the nearest stop and what leaves it next.
@@ -1400,7 +1407,10 @@ static void face_update(Layer *layer, GContext *ctx) {
     else s_gb.show = false;
     layout_modules(s_f_mod, s_f_cap, fr.start, fr.end - fr.start - (s_gb.show ? s_gb.w + s_gb.gap : 0),
                    s_tm.band_top, band_bot);
-    if (quiet) paint_idle(fr.start);
+    // The quiet face has nothing at the outer end: the modules go there too,
+    // in their order, out from under the sleeve.
+    if (quiet && s_md.n) s_md.x0 = fr.end - s_md.total;
+    if (quiet) paint_idle();
     else paint_block(fr.start);
     paint_modules();
     if (s_gb.show) paint_gb();

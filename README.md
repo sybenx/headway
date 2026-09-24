@@ -95,7 +95,8 @@ Two always-on choices in settings replace the automatic one: the second
 countdown near the hub with the half-hour countdown everywhere, wherever you
 are — set the radius wide and it is there for the drive in — or both only
 near the hub, with the face quiet anywhere else or after hours: no countdown,
-a larger date. And off.
+a larger date, and the date and modules moved to the outer end, out from
+under a sleeve. And off.
 
 | at the hub | quiet, away from it |
 |---|---|
@@ -123,8 +124,9 @@ number on the face, and for those seconds it runs in seconds, minutes and
 seconds together. Nothing is lost to a flick, least of all a bus boarding or
 NOW. Date and modules sit it out. Stood at the stop, the line is just its
 name; further off, it says how far. Twin stops across a road are read as one,
-and at the hub every bay is, under the hub's own name: TRANSIT. Nothing within
-a mile and a half, and it says so. A setting turns the flick off altogether.
+and at the hub every bay is, under the hub's own name: TRANSIT CTR. Nothing
+within a mile and a half, and it says so. A setting turns the flick off
+altogether.
 
 | at a stop | near one |
 |---|---|
