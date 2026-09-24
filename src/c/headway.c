@@ -949,20 +949,29 @@ typedef struct { int start, end, top, bot; } Frame;   // the content box, in log
 #define CHIP 10
 static struct {
   bool show; int w, gap;
-  char min[6]; int later;                  // later: 0 both, 1 G leaves later, 2 B leaves later
-  int cx, cy, sq, gx, bx, ty, vx, vy, mx, my;
+  char min[6], at[8]; const char *unit; int later;   // later: 0 both, 1 G leaves later, 2 B leaves later
+  int cx, cy, sq, gx, bx, ty, vx, vy, mx, my, ax, ay;
   bool now;
 } s_gb;
 
-static void layout_gb(int c_start, int avail_w, int band_top, int band_bot, int now_min) __attribute__((noinline));
-static void layout_gb(int c_start, int avail_w, int band_top, int band_bot, int now_min) {
+// The departure's clock time, without its A or P: the next half hour needs
+// no telling which.
+static void gb_clock(char *out, size_t n, int minute) {
+  const int h = (minute / 60) % 24, mm = minute % 60;
+  snprintf(out, n, "%d:%02d", use_24h() ? h : display_hour(h), mm);
+}
+
+static void layout_gb(int c_start, int avail_w, int band_top, int band_bot, int now_min, int now_sec) __attribute__((noinline));
+static void layout_gb(int c_start, int avail_w, int band_top, int band_bot, int now_min, int now_sec) {
   s_gb.show = false;
   const int g = transit_next(s_tr.g, now_min), b = transit_next(s_tr.b, now_min);
   if (g < 0 && b < 0) return;
   const int next = g < 0 ? b : b < 0 ? g : g < b ? g : b;
   s_gb.later = (g < 0 || g > next + 1) ? 1 : (b < 0 || b > next + 1) ? 2 : 0;
   s_gb.now = next == 0;
+  s_gb.unit = "MIN";
   if (s_gb.now) strcpy(s_gb.min, "NOW");
+  else if (next == 1 && s_set.final_seconds) { snprintf(s_gb.min, sizeof(s_gb.min), "%d", 60 - now_sec); s_gb.unit = "SEC"; }   // the last minute, in seconds
   else snprintf(s_gb.min, sizeof(s_gb.min), "%d", next);
 
   const Metrics m_val = barlow_metrics(measure("88", s_f_mod).h);
@@ -975,15 +984,25 @@ static void layout_gb(int c_start, int avail_w, int band_top, int band_bot, int 
   const int sq = sc(CHIP), sqg = sc(1), chips = 2 * sq + sqg;
   const GFont f_min = s_gb.now ? s_f_label : s_f_mod;
   const int min_w = run_w(s_gb.min, f_min, !s_gb.now, 0);
-  const int unit_w = s_gb.now ? 0 : run_w("MIN", s_f_cap, false, TRACK);
+  // The clock time of that departure, beside the chips or in place of MIN.
+  s_gb.at[0] = 0;
+  if (!s_gb.now) gb_clock(s_gb.at, sizeof(s_gb.at), now_min + next);
+  const Metrics m_at = barlow_metrics(measure("8", s_f_cap).h);
+  const int at_w = s_gb.at[0] ? run_w(s_gb.at, s_f_cap, false, TRACK) : 0;
+  const int unit_w = s_gb.now ? 0 : run_w(s_gb.unit, s_f_cap, false, TRACK);
   const int v_w = s_gb.now ? min_w : min_w + sc(2) + unit_w;
-  s_gb.w = v_w > chips ? v_w : chips;
+  const int top_w = at_w ? at_w + sc(3) + chips : chips;
+  s_gb.w = v_w > top_w ? v_w : top_w;
   s_gb.gap = sc(MOD_GAP);
   if (s_gb.w > avail_w) return;
   const int x = c_start + avail_w - s_gb.w;
   s_gb.sq = sq;
-  s_gb.cx = mapx(x + s_gb.w - chips, chips);
+  // The caption line is one unit, the time then the chips, mirrored whole.
+  const int rx = mapx(x + s_gb.w - top_w, top_w);
+  s_gb.ax = rx;
+  s_gb.cx = rx + (top_w - chips);
   s_gb.cy = y + label_h - sq + (sq > label_h ? (sq - label_h) / 2 : 0);
+  s_gb.ay = s_gb.cy + (sq - m_chip.cap) / 2 + m_chip.cap - m_at.cap - m_at.bearing;
   s_gb.gx = s_gb.cx + (sq - run_w("G", s_f_label, false, 0)) / 2;
   s_gb.bx = s_gb.cx + sq + sqg + (sq - run_w("B", s_f_label, false, 0)) / 2;
   s_gb.ty = s_gb.cy + (sq - m_chip.cap) / 2 - m_chip.bearing;
@@ -1017,7 +1036,11 @@ static void paint_gb(void) {
   } else {
     draw_run_s(s_gb.min, s_f_mod, s_gb.vx, s_gb.vy, true, 0);
     graphics_context_set_text_color(s_ctx, s_dim);
-    draw_run_s("MIN", s_f_cap, s_gb.mx, s_gb.my, false, TRACK);
+    draw_run_s(s_gb.unit, s_f_cap, s_gb.mx, s_gb.my, false, TRACK);
+  }
+  if (s_gb.at[0]) {
+    graphics_context_set_text_color(s_ctx, s_dim);
+    draw_run_s(s_gb.at, s_f_cap, s_gb.ax, s_gb.ay, false, TRACK);
   }
 }
 
@@ -1083,8 +1106,8 @@ static void draw_stop_rule(int x0, int x1, int y) {
 static bool light_theme(void) { return gcolor_equal(s_ground, GColorWhite); }
 
 static struct {
-  int head_y, dist_w, stop_x, note_x, note_y, n, rule_y, date_x, date_y;
-  char date[16];
+  int head_y, dist_w, stop_x, note_x, note_y, n, rule_y, date_x, date_y, secs_x;
+  char date[16], secs[12];
   Metrics m_date;
   char dist[10], note[20], stop[24];
   struct { int y, badge_w, badge_h, glyph_dx, glyph_y, text_y, t1_dx, t2_dx, t2_y, row_x, row_w; bool t2_day; char t1[8], t2[10]; } r[SV_ROWS];
@@ -1117,6 +1140,10 @@ static void layout_stopview(const struct tm *t, const Frame *fr, int band_top) {
   s_svl.m_date = barlow_metrics(measure(s_svl.date, s_f_date).h);
   s_svl.date_y = fr->bot - sc(DATE_PAD_BOT) - s_svl.m_date.cap;
   s_svl.date_x = fr->start;
+  // The clock with its seconds at the outer end of the same line: a board
+  // read against a timetable wants to know where in the minute it is.
+  snprintf(s_svl.secs, sizeof(s_svl.secs), "%d:%02d:%02d", display_hour(t->tm_hour), t->tm_min, t->tm_sec);
+  s_svl.secs_x = fr->end - run_w(s_svl.secs, s_f_date, false, TRACK);
   const int band_bot = s_svl.date_y - sc(4);
   // The stop line and the badges in the caption font, the times in the
   // board font: the board is a small thing under a full-size time.
@@ -1216,6 +1243,8 @@ static void paint_stopview(int fr_start) {
   }
   graphics_context_set_text_color(s_ctx, s_ink);
   draw_run(s_svl.date, s_f_date, s_svl.date_x, s_svl.date_y - s_svl.m_date.bearing, false, TRACK);
+  graphics_context_set_text_color(s_ctx, s_dim);
+  draw_run(s_svl.secs, s_f_date, s_svl.secs_x, s_svl.date_y - s_svl.m_date.bearing, false, TRACK);
   if (s_svl.dist_w) {
     graphics_context_set_text_color(s_ctx, s_ink);
     draw_run(s_svl.dist, s_f_cap, fr_start, s_svl.head_y, false, TRACK);
@@ -1252,9 +1281,9 @@ static void paint_stopview(int fr_start) {
 // modules end on that side, so the block can decline if it would overlap.
 #define SB_GAP 3
 static struct {
-  bool show, q_day;
-  int stop_x, stop_y, rule_y, row_x, row_w, badge_w, badge_h, glyph_dx, glyph_y, t_dx, t_y, q_x, q_y;
-  char stop[24], t1[8], q[10];
+  bool show, q_day, secs_show;
+  int stop_x, stop_y, rule_y, row_x, row_w, badge_w, badge_h, glyph_dx, glyph_y, t_dx, t_y, q_x, q_y, secs_y;
+  char stop[24], t1[8], q[10], secs[12];
   Metrics m_lab, m_val, m_bad;
 } s_sb;
 
@@ -1328,6 +1357,10 @@ static void paint_sideblock(void) {
   if (s_sb.q[0]) {
     graphics_context_set_text_color(s_ctx, s_sb.q_day ? s_dim : s_ink);
     draw_run(s_sb.q, s_sb.q_day ? s_f_cap : s_f_board, s_sb.q_x, s_sb.q_y, false, s_sb.q_day ? TRACK : 0);
+  }
+  if (s_sb.secs_show) {
+    graphics_context_set_text_color(s_ctx, s_dim);
+    draw_run(s_sb.secs, s_f_date, sc(PAD_WRIST), s_sb.secs_y, false, TRACK);
   }
 }
 
@@ -1419,10 +1452,13 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
   const GFont f_label = s_f_label, f_date = s_f_date;
   s_bk.f_num = f_num; s_bk.show_date = date;
   s_bk.z_num = measure(s_bk.num, f_num);
-  s_bk.label_w = run_w(s_bk.label, f_label, false, TRACK);
+  // The block is the number and its unit; the departure's clock time is
+  // the chips' to say, and the face at the hub is busy enough.
+  s_bk.label[0] = 0;
+  s_bk.label_w = 0;
   const bool bare = sch->is_now;   // NOW carries no unit
   const int min_w = bare ? 0 : run_w(s_bk.unit, f_label, false, TRACK);
-  s_bk.m_lab = barlow_metrics(measure(s_bk.label, f_label).h);
+  s_bk.m_lab = barlow_metrics(0);
   s_bk.m_min = barlow_metrics(bare ? 0 : measure(s_bk.unit, f_label).h);
   s_bk.m_num = barlow_metrics(s_bk.z_num.h);
   s_bk.m_dow = barlow_metrics(measure(s_bk.dow, f_date).h);
@@ -1458,7 +1494,8 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
 
   s_bk.inner_w = inner_w;
   s_bk.block_w = inner_w + pad_in + pad_out;
-  s_bk.block_h = s_bk.m_lab.cap + sc(row_gap) + s_bk.m_num.cap + sc(BLOCK_PAD_T) + sc(BLOCK_PAD_B);
+  (void)row_gap;
+  s_bk.block_h = s_bk.m_num.cap + sc(BLOCK_PAD_T) + sc(BLOCK_PAD_B);
   s_bk.block_x = fr->end - s_bk.block_w;
   s_bk.block_y = fr->bot - s_bk.block_h;
   // Label and number are end-aligned within the block. The design puts a
@@ -1468,7 +1505,7 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
   // the constant.
   s_bk.inner_x = s_bk.block_x + pad_in;
   s_bk.label_y = s_bk.block_y + sc(BLOCK_PAD_T);
-  s_bk.num_y = s_bk.label_y + s_bk.m_lab.cap + sc(row_gap);
+  s_bk.num_y = s_bk.label_y;
   // Weekday and date sit on the wrist side: first to disappear.
   s_bk.date_y = fr->bot - sc(DATE_PAD_BOT) - s_bk.m_date.cap;
   s_bk.dow_y = s_bk.date_y - sc(DOW_GAP) - s_bk.m_dow.cap;
@@ -1485,8 +1522,6 @@ static void paint_block(int fr_start) {
   } else {
     graphics_context_set_text_color(s_ctx, s_ink);
   }
-  draw_run(s_bk.label, s_f_label, s_bk.inner_x + s_bk.inner_w - s_bk.label_w,
-           s_bk.label_y - s_bk.m_lab.bearing, false, TRACK);
   const int num_x = s_bk.inner_x + s_bk.inner_w - s_bk.num_row_w;
   if (s_bk.now) {
     draw_at(s_bk.num, s_bk.f_num, num_x, s_bk.num_y - s_bk.m_num.bearing, s_bk.z_num);
@@ -1563,7 +1598,7 @@ static void face_update(Layer *layer, GContext *ctx) {
     else if (peek) layout_block(t, &sch, &fr, s_f_count_s, BLOCK_ROW_GAP_P, false);
     else layout_block(t, &sch, &fr, s_f_count, BLOCK_ROW_GAP, true);
     const int band_bot = quiet ? s_id.top : s_bk.block_y;
-    if (at_hub) layout_gb(fr.start, fr.end - fr.start, s_tm.band_top, band_bot, t->tm_hour * 60 + t->tm_min);
+    if (at_hub) layout_gb(fr.start, fr.end - fr.start, s_tm.band_top, band_bot, t->tm_hour * 60 + t->tm_min, t->tm_sec);
     else s_gb.show = false;
     layout_modules(s_f_mod, s_f_cap, fr.start, fr.end - fr.start - (s_gb.show ? s_gb.w + s_gb.gap : 0),
                    s_tm.band_top, band_bot);
@@ -1575,6 +1610,12 @@ static void face_update(Layer *layer, GContext *ctx) {
       // countdown face at the outer end past them.
       if (quiet) layout_sideblock(&fr, s_tm.band_top, band_bot, fr.start - sc(8), s_md.n ? s_md.x0 - sc(8) : fr.end);
       else layout_sideblock(&fr, s_tm.band_top, band_bot, s_md.n ? s_md.x0 + s_md.total : fr.start - sc(8), fr.end);
+      // On the quiet face the seconds sit at the wrist end of the date's line.
+      s_sb.secs_show = s_sb.show && quiet;
+      if (s_sb.secs_show) {
+        snprintf(s_sb.secs, sizeof(s_sb.secs), "%d:%02d:%02d", display_hour(t->tm_hour), t->tm_min, t->tm_sec);
+        s_sb.secs_y = s_id.date_y - barlow_metrics(measure("8", s_f_date).h).bearing;
+      }
     }
   }
   if (s_sv.valid && !s_sb.show) {
@@ -1611,10 +1652,14 @@ static void retune_tick(void) {
   const time_t now = time(NULL);
   struct tm *t = localtime(&now);
   const Schedule s = schedule_for(t->tm_hour, t->tm_min, t->tm_sec);
-  if (s.is_final == s_ticking_seconds) return;
+  const int now_min = t->tm_hour * 60 + t->tm_min;
+  const bool gb_final = s_set.final_seconds && transit_fresh(now) && s_tr.state == 1
+      && (transit_next(s_tr.g, now_min) == 1 || transit_next(s_tr.b, now_min) == 1);
+  const bool want = s.is_final || s_sv.valid || gb_final;
+  if (want == s_ticking_seconds) return;
   tick_timer_service_unsubscribe();
-  tick_timer_service_subscribe(s.is_final ? SECOND_UNIT : MINUTE_UNIT, tick_handler);
-  s_ticking_seconds = s.is_final;
+  tick_timer_service_subscribe(want ? SECOND_UNIT : MINUTE_UNIT, tick_handler);
+  s_ticking_seconds = want;
 }
 
 static void tick_handler(struct tm *tick_time, TimeUnits units) {
@@ -1634,6 +1679,7 @@ static void stopview_done(void *data) {
   s_sv.timer = NULL;
   s_sv.valid = false;
   s_sv.pending = false;
+  retune_tick();
   layer_mark_dirty(s_face);
 }
 static void stopview_hold(uint32_t ms) {
@@ -1692,6 +1738,7 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
     s_sv.valid = true;
     light_enable_interaction();
     stopview_hold(SV_SHOW_MS);
+    retune_tick();
     layer_mark_dirty(s_face);
     return;
   }

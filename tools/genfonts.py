@@ -31,7 +31,7 @@ FONTS = [
     ('label_11', 11, '[A-Z0-9:. ]'), ('label_15', 15, '[A-Z0-9:. ]'),   # the point in a distance
     ('date_12', 12, '[A-Z0-9: ]'), ('date_17', 17, '[A-Z0-9: ]'),   # a colon for the board's clock times
     ('date_18', 18, '[A-Z0-9 ]'), ('date_25', 25, '[A-Z0-9 ]'),   # the idle face's larger date
-    ('cap_9', 9, '[A-Z0-9%°&. ]'), ('cap_12', 12, '[A-Z0-9%°&. ]'),   # digits, & and . for the board's stop line and badges
+    ('cap_9', 9, '[A-Z0-9%°&.: ]'), ('cap_12', 12, '[A-Z0-9%°&.: ]'),   # digits, & and . for the board's stop line and badges
     ('board_12', 12, '[0-9:AP]', 'semi'), ('board_17', 17, '[0-9:AP]', 'semi'),   # the board's clock times, semi-condensed
 ]
 for spec in FONTS:

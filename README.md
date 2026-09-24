@@ -47,10 +47,11 @@ phone checks where it is now and then, coarsely, and the face changes by the
 answer. Outside every known system nothing changes and it asks less often.
 
 **At the hub**, in its hours, the countdown appears: minutes to the next
-departure and its clock time, at the outer edge. Five minutes out the block
-goes solid, with an optional buzz; at zero it reads `NOW` for a minute. The
-last minute counts in seconds. Routes that keep their own timetable get a
-second countdown as colour chips in the module band.
+departure, at the outer edge. Five minutes out the block goes solid, with an
+optional buzz; at zero it reads `NOW` for a minute. The last minute counts
+in seconds. Routes that keep their own timetable get a second countdown as
+colour chips in the module band, with their departure's clock time small
+beside them, and their last minute counts in seconds too.
 
 | waiting | boarding | departing |
 |---|---|---|
@@ -67,7 +68,10 @@ the agency's own colour and two columns, and a small date at the foot. The
 first column is the next time; the second holds one thing: the day when
 today's buses are done (`5:12P TOMORROW`, `5:00A MON`), the direction where a
 route runs both ways from a pair of stops across a road (`NORTH`, `SOUTH`),
-otherwise the time after. Times read in the watch's own clock style.
+otherwise the time after. Times read in the watch's own clock style, and
+while the answer shows, the clock with its seconds sits small at the foot,
+since a board read against a timetable wants to know where in the minute
+it is.
 
 | one row, beside the modules | the board | a pair of stops, light |
 |---|---|---|
