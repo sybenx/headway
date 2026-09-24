@@ -83,7 +83,8 @@ function systemAt(lat, lon) {
 }
 function hubMode() {
   var s = settings();
-  return s.TRANSIT === undefined ? MODE_AUTO : String(s.TRANSIT);
+  var m = s.TRANSIT === undefined ? MODE_AUTO : String(s.TRANSIT);
+  return m === MODE_NEAR ? MODE_AUTO : m;   // an older name for automatic
 }
 
 // The day type in the hub's own week: weekday, saturday, sunday, or none.

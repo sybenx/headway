@@ -1,182 +1,151 @@
 # Headway
 
-A Pebble watchface for riding a fixed-headway service — a train, a ferry, a
-shuttle — where what you actually need to know is *how much of this half hour
-is left*.
+A Pebble watchface that reads past a sleeve, and knows when you are near a
+bus. Most of the day it is a plain watch: the time, your heart rate and the
+weather, the date. Walk into a transit centre it knows and it becomes a
+countdown to the next departure. Flick your wrist at a stop and it tells you
+what leaves from there next.
 
-Built from a [Claude Design](https://claude.ai/design) spec.
-
-| Waiting | Boarding | Departing |
+| the watch | at the transit centre | a flick at a stop |
 |---|---|---|
-| ![waiting](screenshots/waiting.png) | ![boarding](screenshots/boarding.png) | ![departing](screenshots/departing.png) |
+| ![the watch](screenshots/hero.png) | ![at the hub](screenshots/hub.png) | ![the board](screenshots/stop.png) |
 
-## Read it from the cuff in
+## Read past a sleeve
 
-A sleeve slides in from the wrist side and uncovers the far edge first, so the
-face ranks its information by edge:
+A cuff slides in from the wrist side and uncovers the outer edge first, so
+everything on the face hangs from that edge in order of how much you need
+it. The minute digits sit flush to it and survive a cuff that hides the
+hour. The modules and the date hang from it too, the number of the date on
+the edge itself: `SEP 22`. When there is a countdown it takes that edge and
+the date moves to the wrist side, first to go. A rail down the outer edge
+drains as the headway runs out, readable as a shape under any sleeve. On the
+right wrist the whole layout mirrors.
 
-| Zone | | |
+## Out of the box
+
+The time, two modules and the date. The modules are heart rate and the
+weather, drawn as icons in colour: the heart red, the sun yellow by night and
+orange by day, rain blue, clouds grey. A watch without a heart-rate sensor
+shows its battery in that slot. The theme is dark through the night and light
+by day; the night window is yours to set.
+
+| dark | light | captions instead |
 |---|---|---|
-| **01 Rail** | outer edge | A 7px column that drains as the headway runs out. Ticks at ¼, ½ and ¾. Readable as a shape under any cuff, and at arm's length while driving. |
-| **02 Countdown** | | Minutes to the next departure, with its clock time. At five minutes the block fills solid; at zero it reads `NOW` for one minute, then rolls to the next run. |
-| **03 Minute** | | The time sits flush to the outer edge, so the minute digits survive a cuff that hides the hour. |
-| **04 Hour & date** | wrist side | First to disappear. |
+| ![dark](screenshots/hero.png) | ![light](screenshots/hero-light.png) | ![captions](screenshots/captions.png) |
 
-## Modules
-
-Off by default: out of the box the face is the plain digital watch the design
-describes. Up to three can be switched on from the settings page, in the band
-the design leaves open, drawn as a caption over a value — `BPM 72`,
-`STEPS 4.8K`, `BATT 64%`. Each slot takes heart rate, steps, battery, weather
-or nothing, and the captions can be swapped for icons, grey or in colour.
-In colour, the heart is red, the battery shows its charge, and the sky comes
-in its own colour: the sun and a bolt yellow, orange by day, rain blue. Steps and every
-cloud keep the caption grey, so colour only ever says something.
-
-| Captions | Icons | In colour |
-|---|---|---|
-| ![modules](screenshots/modules.png) | ![modules with icons](screenshots/modules-icons.png) | ![modules with coloured icons](screenshots/modules-colour.png) |
-
-They sit on the wrist side, below the date, so a sleeve covers them before the
-countdown or the rail — the design's zone ranking is preserved.
-
-Weather captions with the sky itself — `CLOUDY 12°` — rather than the unit,
-and as an icon draws it: sun, partly cloudy, cloud, fog, rain, snow or
-thunder, from the WMO code. A module whose sensor is unavailable — heart rate
-on a watch without the sensor, weather before the first fetch — simply does
-not appear.
-
-## States
-
-- **Waiting** — more than five minutes out. Quiet.
-- **Boarding** — five minutes out, the block goes solid. Optional single buzz.
-- **Departing** — rail empty, `NOW` for one minute.
-
-When a timeline peek covers the bottom third of the screen, the face reflows
-into what is left, as the design has it: the date goes first, the time and
-the countdown step down a size, and the modules and the second countdown keep
-their band. The rail draws to the visible height, so its fill still reads.
-
-## Settings
-
-Reachable from the Pebble app.
-
-- **Headway** — 30 / 20 / 15 minutes between runs
-- **Departure offset** — minutes past the hour of the first run
-- **Boarding buzz** — a single pulse at T-5, off by default
-- **Theme** — dark at night and light by day (default), with a configurable night window; or dark, or light
-- **Accent** — any colour; drives the rail, the colon and the boarding block
-- **Wrist** — mirrors the whole layout so the sleeve comes from the other side
-- **Time format** — system, 12h or 24h
-- **Modules** — three slots: heart rate, steps, battery, weather or nothing
-- **Captions or icons** — captions, icons, or icons in colour
-- **Units** — °C or °F
-- **Knowing a system** — see below; automatic by default, with the hub radius and a switch for the flick
-
-Weather comes from [Open-Meteo](https://open-meteo.com), which needs no API key
-and no account.
+Three module slots take heart rate, steps, battery, weather or nothing, as
+captions (`BPM 72`, `PARTLY 12°`), as grey icons, or as icons in colour. A
+module with nothing to show — the weather before its first fetch — simply
+does not appear. Weather comes from [Open-Meteo](https://open-meteo.com),
+which needs no key.
 
 ## Near a system it knows
 
 The face knows some transit systems: each one's hub, its hours, the routes
-that leave the hub together on their own timetable, and every stop. By
-default it is automatic: the phone asks where it is now and then, coarsely,
-and inside a known system's area the face changes by the answer. Outside
-every known system it is the plain watch, and it asks less often.
+that leave the hub on their own timetable, and every stop. By default the
+phone checks where it is now and then, coarsely, and the face changes by the
+answer. Outside every known system nothing changes and it asks less often.
 
-- **At the hub, in its hours** — the countdown runs as ever, and the routes
-  on their own timetable get a second one, in the module band, at the end
-  furthest from the cuff: a chip per route and the minutes to the next
-  departure. If the two have parted, the later one's chip goes dim.
-- **Elsewhere in the system** — the countdown runs as ever, and a flick shows
-  the nearest stop.
+**At the hub**, in its hours, the countdown appears: minutes to the next
+departure and its clock time, at the outer edge. Five minutes out the block
+goes solid, with an optional buzz; at zero it reads `NOW` for a minute. The
+last minute counts in seconds. Routes that keep their own timetable get a
+second countdown as colour chips in the module band.
 
-Two always-on choices in settings replace the automatic one: the second
-countdown near the hub with the half-hour countdown everywhere, wherever you
-are — set the radius wide and it is there for the drive in — or both only
-near the hub, with the face quiet anywhere else or after hours: no countdown,
-a larger date, and the date and modules moved to the outer end, out from
-under a sleeve. And off.
+| waiting | boarding | departing |
+|---|---|---|
+| ![waiting](screenshots/hub.png) | ![boarding](screenshots/boarding.png) | ![departing](screenshots/departing.png) |
 
-| at the hub | quiet, away from it |
-|---|---|
-| ![at the hub](screenshots/hub.png) | ![away](screenshots/away.png) |
-
-The phone's word holds for three hours; if it goes quiet longer than that, the
-face falls back to the plain countdown rather than stay quiet on a stale fix.
-
-The face knows one system so far: the Cache Valley Transit District in Logan,
-Utah, whose routes leave the transit center on the half hour and whose G and
-B keep their own timetable. `tools/transit.py` reduces an agency's GTFS to
-what the phone needs — the hub, its hours, those departures, the area its
-stops cover — and adds it to `src/pkjs/transit.json`; the watch never reads
-the feed.
-
-### A flick for the nearest stop
-
-With the hub known, a flick of the wrist asks the phone where you are, this
-time precisely, and for twelve seconds, lit, the face answers with the nearest
+**A flick of the wrist** anywhere inside the system asks the phone for a
+precise fix and, for twelve seconds, lit, the face answers with the nearest
 stop. The answer is counted in rows, not metres. One row — one route, one
 direction — sits in the band beside the modules as three short lines: the
-stop, the badge and its next time, then how far, or the time after when stood
-at the stop; the date and modules stay. Two or three rows take the board, as
-the design draws it: the time full size, the stop's name, then a row a route —
-its badge in the agency's own colour and two columns, the next time and one
-qualifier: the day when today's buses are done (5:12P TOMORROW, 5:00A MON),
-the direction where a route runs both ways from a merged pair, else the second
-time — and a small date at the foot. The countdown steps aside for the board;
-the hub's pulse is for being at the hub. Times read in the watch's own clock
-style. Twin stops across a road are read as one, and at the hub every bay is,
-under the hub's own name: TRANSIT CTR. Off the stop, the line says how far.
-Further than two kilometres from any stop a flick only lights the face:
-nothing is taken away to say there is nothing. On the light theme the stop
-line is ink with a hairline beneath it, since grey at that size loses its
-strokes. A setting turns the flick off altogether.
+stop, the badge and its next time, then how far, or the time after when you
+are standing there. The rest of the face stays. Two or three rows take the
+board: the time full size, the stop's name, a row a route with its badge in
+the agency's own colour and two columns, and a small date at the foot. The
+first column is the next time; the second holds one thing: the day when
+today's buses are done (`5:12P TOMORROW`, `5:00A MON`), the direction where a
+route runs both ways from a pair of stops across a road (`NORTH`, `SOUTH`),
+otherwise the time after. Times read in the watch's own clock style.
 
-| one row, beside the modules | the board | a twin pair, light |
+| one row, beside the modules | the board | a pair of stops, light |
 |---|---|---|
-| ![one row](screenshots/stop-one.png) | ![the board](screenshots/stop.png) | ![a twin pair on the light theme](screenshots/stop-twin.png) |
+| ![one row](screenshots/stop-one.png) | ![the board](screenshots/stop.png) | ![twins](screenshots/stop-twin.png) |
 
-The departures come from a small file a stop, served from this repository's
-pages and rewritten every night from the agency's feed by a workflow, so the
-watchface never needs a release for a timetable change. The phone caches what
-it fetches.
+Stops across a road from each other are read as one, and at the hub every
+bay is, under the hub's own name. Off the stop, the line says how far.
+Further than two kilometres from any stop a flick only lights the face:
+nothing is taken away to say there is nothing. The countdown steps aside for
+a board and is back the moment it goes.
 
-The face knows one hub so far: the Cache Valley Transit District's transit
-center in Logan, Utah, where most routes leave on the half hour and routes
-G and B keep their own timetable. `tools/transit.py` reduces an agency's GTFS
-to what the phone needs — the hub, its hours, those departures — and writes
-`src/pkjs/transit.json`; the watch never reads the feed.
+The face knows one system so far: Connect, the Cache Valley Transit District
+in Logan, Utah, whose routes leave the transit centre on the half hour and
+whose G and B loops keep their own timetable. Adding another is a GTFS feed
+and a hub; see Data below.
+
+## Countdown everywhere
+
+The face began as a countdown for any fixed-headway service — a train every
+half hour, a shuttle every twenty minutes — and that is still here as a
+setting. Choose it and the countdown runs wherever you are, from a headway
+and a departure offset you set, with the hub's extras when you are at one.
+
+![countdown everywhere](screenshots/everywhere.png)
+
+## Settings
+
+From the Pebble app.
+
+- **Transit** — automatic (default), countdown everywhere, or off. With it:
+  how near the hub counts as at it, and a switch for the flick.
+- **Headway** and **departure offset** — for the countdown: 30, 20 or 15
+  minutes, and minutes past the hour.
+- **Boarding buzz** — one pulse at five minutes, off by default.
+- **Theme** — dark at night and light by day, with the night window; or
+  dark; or light.
+- **Accent** — any colour; the rail, the colon and the boarding block.
+- **Wrist** — left or right.
+- **Time format** — the system's, 12-hour or 24-hour.
+- **Modules** — three slots, and captions, icons or icons in colour.
+- **Units** — °C or °F, metres or feet.
+
+## Data
+
+The watch never reads a feed. `tools/transit.py` reduces an agency's GTFS to
+what the phone needs — the hub, its hours, the departures of the routes on
+their own timetable, and a file per stop with its scheduled departures by
+day — and writes `src/pkjs/transit.json` for the app and `docs/data/` for
+GitHub Pages, where the phone fetches stop files on a flick and caches them.
+A nightly workflow refetches the feed and commits what changed. Everything
+shown is a schedule; there is no live data yet.
+
+To add a system: run `tools/transit.py` with the feed, the hub's position and
+name, and the routes that keep their own timetable, and add the same line to
+`.github/workflows/transit.yml`.
 
 ## Platforms
 
-Rectangular displays only: `aplite`, `basalt`, `diorite` and `flint` (144×168)
-and `emery` (200×228). The layout is an edge-flush rail on a rectangle, which a round
-screen cannot carry without a different design, so `chalk` and `gabbro` are
-not targeted.
+Rectangular displays: `aplite`, `basalt`, `diorite` and `flint` (144×168) and
+`emery` (200×228). The layout is an edge-flush rail on a rectangle, so the
+round `chalk` and `gabbro` are not targeted.
 
-Every watch gives a face about 2KB of stack, and the firmware's text renderer
-wants well over half of it for each call. So the face keeps almost nothing of
-its own beneath that call: each zone is laid out into static storage, and the
-painters hand their text to one small leaf. Measured with the stack painted
-and read back, a full frame with three modules peaks at 1752 bytes on
-`basalt` and 1776 on `flint`, which is what lets `flint` (Core 2 Duo) ship
-again after 1.0.3 and 1.0.4 left it out.
-
-| aplite | diorite | flint | emery |
+| aplite | diorite | emery | flint |
 |---|---|---|---|
-| ![aplite](screenshots/aplite.png) | ![diorite](screenshots/diorite.png) | ![flint](screenshots/flint.png) | ![emery](screenshots/emery.png) |
+| ![aplite](screenshots/aplite.png) | ![diorite](screenshots/diorite.png) | ![emery](screenshots/emery.png) | ![flint](screenshots/flint.png) |
 
-On one-bit watches the accent becomes ink and the quarter-hour ticks dither,
-as the design's mono note asks. A module whose sensor the watch lacks — heart
-rate on aplite, say — removes itself rather than showing a blank.
+On one-bit watches the accent becomes ink, the badges go solid, and the
+hairline under a stop name dots.
 
-Light mode with the accent set to red, and the right-wrist layout, mirrored
-so the sleeve comes from the other side:
+Every watch gives a face about 2 KB of stack, and the firmware's text
+renderer wants well over half of it for each call. So the face keeps almost
+nothing of its own beneath that call: each zone is laid out into static
+storage and its painter hands one run of text at a time to a single small
+leaf. Measured with the stack painted and read back, the deepest frame is
+1800 bytes on `basalt` and on `flint`. Any new painter is written the same
+way and measured before it ships.
 
-| Light | Right wrist |
-|---|---|
-| ![light](screenshots/light.png) | ![right wrist](screenshots/wrist-right.png) |
+![right wrist](screenshots/wrist-right.png)
 
 ## Building
 
@@ -195,22 +164,21 @@ character set in `tools/genfonts.py`:
 
 ## Type
 
-Everything is [Barlow Condensed](https://github.com/jpt/barlow) SemiBold, as
-the design draws it, at the design's sizes: 60px numerals (83px on emery),
-44px countdown, 11px labels, 12px date and 9px module captions. Digits are
-set tabular and the labels tracked, as the design's CSS has them, by drawing
-a glyph at a time.
+[Barlow Condensed](https://github.com/jpt/barlow) SemiBold at fixed pixel
+sizes: 60px time (83 on emery), 44px countdown, 15px module values, 11px
+labels, 12px date, 9px captions. Digits are set tabular and labels tracked
+by drawing a glyph at a time. The board's clock times are the one exception:
+Barlow Semi Condensed, the wider cut.
 
 The SDK's font generator rasterises through the font's own hints, which
 scatter one- and two-pixel stems across the small sizes. `tools/fontgen.py`
-is that generator, vendored from the SDK with FreeType's auto-hinter forced,
-and the `.pfo` blobs it writes ship as raw resources, which
-`fonts_load_custom_font` takes as it would any font. The board's clock times
-are the one exception to the condensed cut: they are set in Barlow Semi
-Condensed, as the design draws them.
+is that generator, vendored with FreeType's auto-hinter forced, and the
+`.pfo` blobs it writes ship as raw resources. Icons are hand-placed 10×10
+pixel patterns, scaled by nearest neighbour, so they invert with the theme
+and hold their shape on emery.
 
-Module icons are hand-placed pixel patterns, scaled by nearest neighbour, so
-they invert with the theme and hold their shape on emery at no resource cost.
+The face was designed with [Claude Design](https://claude.ai/design) and
+built with Claude Code.
 
 ## Licence
 

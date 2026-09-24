@@ -169,7 +169,7 @@
         "type": "select",
         "messageKey": "MOD1",
         "label": "First",
-        "defaultValue": "0",
+        "defaultValue": "1",
         "options": [
           {
             "label": "Nothing",
@@ -197,7 +197,7 @@
         "type": "select",
         "messageKey": "MOD2",
         "label": "Second",
-        "defaultValue": "0",
+        "defaultValue": "4",
         "options": [
           {
             "label": "Nothing",
@@ -254,11 +254,20 @@
         "messageKey": "MOD_ICONS",
         "label": "Captions or icons",
         "description": "Captions name the sky for weather: SUNNY, CLOUDY, RAIN. Icons draw it. In colour, the heart is red, the battery shows its charge, and the sky comes in its own colour.",
-        "defaultValue": "0",
+        "defaultValue": "2",
         "options": [
-          { "label": "Captions", "value": "0" },
-          { "label": "Icons", "value": "1" },
-          { "label": "Icons, in colour", "value": "2" }
+          {
+            "label": "Captions",
+            "value": "0"
+          },
+          {
+            "label": "Icons",
+            "value": "1"
+          },
+          {
+            "label": "Icons, in colour",
+            "value": "2"
+          }
         ]
       },
       {
@@ -293,26 +302,23 @@
       {
         "type": "select",
         "messageKey": "TRANSIT",
-        "label": "Knowing a system",
+        "label": "Transit",
         "defaultValue": "3",
         "options": [
           {
-            "label": "Automatic: near a system the face knows",
+            "label": "Automatic",
             "value": "3"
+          },
+          {
+            "label": "Countdown everywhere",
+            "value": "1"
           },
           {
             "label": "Off",
             "value": "0"
-          },
-          {
-            "label": "Always: second countdown near the hub",
-            "value": "1"
-          },
-          {
-            "label": "Always: both only near the hub",
-            "value": "2"
           }
-        ]
+        ],
+        "description": "Automatic: a plain watch, until the phone finds you near a transit centre the face knows; then the countdown to its next departure, and a flick of the wrist for the nearest stop. Countdown everywhere: the fixed-headway countdown wherever you are, set with the two sliders above. Off: a plain watch, and nothing is asked of the phone."
       },
       {
         "type": "slider",

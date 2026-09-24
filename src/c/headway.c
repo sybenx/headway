@@ -30,10 +30,10 @@
 #define MODULE_WEATHER 4
 #define MODULE_COUNT   3
 
-#define TRANSIT_OFF   0   // the hub is not consulted
-#define TRANSIT_CHIPS 1   // countdown everywhere; the second one near the hub
-#define TRANSIT_NEAR  2   // both only near the hub, in its hours
-#define TRANSIT_AUTO  3   // as CHIPS, but only inside a system the face knows
+#define TRANSIT_OFF   0   // no system: a plain watch, nothing asked of the phone
+#define TRANSIT_CHIPS 1   // the countdown everywhere, and the hub's chips at the hub
+#define TRANSIT_NEAR  2   // an older name for AUTO, kept for saved settings
+#define TRANSIT_AUTO  3   // a plain watch until a hub it knows is near
 
 typedef struct {
   uint8_t version;     // bumped whenever the fields below change
@@ -115,12 +115,13 @@ static void settings_defaults(void) {
   s_set.night_start = 19;
   s_set.night_end = 7;
   s_set.accent = 0x0055AA;   // Cobalt Blue, the design's one accent
-  // Off duty it is a plain digital watch, as the design says: the modules
-  // are opt-in from the settings page.
-  s_set.mod[0] = MODULE_NONE;
-  s_set.mod[1] = MODULE_NONE;
+  // Out of the box: heart rate and the weather as coloured icons, hung from
+  // the outer edge over the date. A watch without a heart-rate sensor shows
+  // its battery in that slot instead.
+  s_set.mod[0] = MODULE_HR;
+  s_set.mod[1] = MODULE_WEATHER;
   s_set.mod[2] = MODULE_NONE;
-  s_set.mod_icons = MOD_ICONS_OFF;
+  s_set.mod_icons = MOD_ICONS_COLOUR;
   s_set.final_seconds = true;
   s_set.imperial = false;
   s_set.transit = TRANSIT_AUTO;
@@ -199,7 +200,7 @@ static void transit_save(void) {
 // What the setting comes to right now: automatic is the second countdown
 // and the flick inside a known system, and nothing outside one.
 static uint8_t transit_mode(void) {
-  if (s_set.transit == TRANSIT_AUTO) return s_tr.area ? TRANSIT_CHIPS : TRANSIT_OFF;
+  if (s_set.transit == TRANSIT_AUTO || s_set.transit == TRANSIT_NEAR) return s_tr.area ? TRANSIT_CHIPS : TRANSIT_OFF;
   return s_set.transit;
 }
 // The phone's word holds for a few hours, then the face falls back to the
@@ -862,8 +863,15 @@ static void layout_modules(GFont f_val, GFont f_cap, int c_start, int avail_w,
                            int band_top, int band_bot) {
   s_md.n = 0;
   for (int i = 0; i < MODULE_COUNT; i++) {
-    if (s_set.mod[i] == MODULE_NONE) continue;
-    if (module_read(s_set.mod[i], &s_md.m[s_md.n])) s_md.n++;
+    uint8_t kind = s_set.mod[i];
+    if (kind == MODULE_NONE) continue;
+    if (module_read(kind, &s_md.m[s_md.n])) { s_md.n++; continue; }
+    // No heart-rate sensor, or no reading yet: the slot shows the battery,
+    // or steps if the battery already has a slot of its own.
+    if (kind != MODULE_HR) continue;
+    kind = MODULE_BATTERY;
+    for (int j = 0; j < MODULE_COUNT; j++) if (s_set.mod[j] == MODULE_BATTERY) kind = MODULE_STEPS;
+    if (module_read(kind, &s_md.m[s_md.n])) s_md.n++;
   }
   if (s_md.n == 0) return;
 
@@ -1520,7 +1528,9 @@ static void face_update(Layer *layer, GContext *ctx) {
   // With the hub known, the countdown is for the hub: at it in its hours the
   // face runs as ever, with the second countdown; anywhere else it is quiet.
   at_hub = transit_fresh(now) && s_tr.state == 1;
-  quiet = transit_fresh(now) && s_tr.state == 0 && transit_mode() == TRANSIT_NEAR;
+  // The countdown is earned by being at the hub. Anywhere else the face is
+  // a plain watch — unless the countdown is asked for everywhere.
+  quiet = !at_hub && s_set.transit != TRANSIT_CHIPS;
 
   theme_apply(t->tm_hour);
   graphics_context_set_fill_color(ctx, s_ground);
