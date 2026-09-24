@@ -169,9 +169,9 @@ function checkTransit(force) {
 // written nightly by tools/transit.py. A precise fix picks the stop; twin
 // stops across a road are merged, since the headsign tells them apart.
 var INDEX_TTL = 24 * 60 * 60 * 1000, STOP_TTL = 6 * 60 * 60 * 1000;
-// At a stop, the board; a short walk from one, the board with its distance;
-// further, just the stop, how far, and its next bus; further still, nothing.
-var AT_STOP = 60, TWIN = 80, HUB = 100, BOARD = 400, FAR = 2000;
+// At a stop, the board; off it, the board with its distance; further than
+// two kilometres from any stop, nothing.
+var AT_STOP = 60, TWIN = 80, HUB = 100, FAR = 2000;
 
 function cached(key, ttl) {
   try {
@@ -196,6 +196,14 @@ function getJSON(url, key, ttl, cb) {
   req.timeout = 8000;
   req.ontimeout = function () { cb(null); };
   req.send();
+}
+
+// A direction word that fits the board's second column: the compass word
+// when the headsign has one, else the headsign cut to eight.
+function dirWord(head) {
+  var m = /\b(NORTH|SOUTH|EAST|WEST|IN|OUT)BOUND\b/.exec(head || '');
+  if (m) return m[1].length <= 2 ? m[1] + 'BOUND' : m[1];
+  return (head || '').replace(/\s+$/, '').slice(0, 8);
 }
 
 function dayKind(d) { var wd = d.getDay(); return wd === 0 ? 'sunday' : wd === 6 ? 'saturday' : 'weekday'; }
@@ -270,11 +278,14 @@ function onFlick() {
             if (!g) { g = byKey[key] = { route: dep.route, head: dep.head, times: [] }; groups.push(g); perRoute[dep.route] = (perRoute[dep.route] || 0) + 1; }
             if (g.times.length < 2) g.times.push(dep.t);
           });
-          // Further than a walk, the stop, how far, and its next bus alone.
-          var far = best.d > BOARD;
-          var rows = groups.slice(0, far ? 1 : 3).map(function (g) {
+          // Every row, near or far: the watch counts rows, not metres, and
+          // seats one row beside the modules and more on the board. The
+          // second column holds one qualifier: the day first, since a bus
+          // you can't catch today is the costliest thing to misread; then
+          // the direction at a merged pair; else the second time.
+          var rows = groups.slice(0, 3).map(function (g) {
             var col = (index.routes[g.route] || ['888888'])[0];
-            var word = perRoute[g.route] > 1 ? g.head.replace(/\s+$/, '').slice(0, 8) : dayWord;
+            var word = dayWord || (perRoute[g.route] > 1 ? dirWord(g.head) : '');
             var when = word ? [g.times[0], word] : g.times;
             return { route: g.route, head: g.head, when: when.join(' '), color: parseInt(col, 16) };
           });

@@ -1059,8 +1059,25 @@ static void sv_clock(char *out, size_t n, const char *tok) {
   else snprintf(out, n, "%d:%02d%c", display_hour(h), mm, h < 12 ? 'A' : 'P');
 }
 
+// On the light theme grey text at this size loses its strokes, so the stop
+// line is ink with a hairline of light grey beneath it; on one-bit watches
+// the hairline is dotted. On the dark theme light grey reads as it is.
+static void draw_stop_rule(int x0, int x1, int y) {
+  if (x1 <= x0) return;
+#ifdef PBL_COLOR
+  graphics_context_set_fill_color(s_ctx, GColorLightGray);
+  graphics_fill_rect(s_ctx, GRect(x0, y, x1 - x0, 1), 0, GCornerNone);
+#else
+  graphics_context_set_fill_color(s_ctx, s_ink);
+  for (int x = x0; x < x1; x += 2) graphics_fill_rect(s_ctx, GRect(x, y, 1, 1), 0, GCornerNone);
+#endif
+}
+static bool light_theme(void) { return gcolor_equal(s_ground, GColorWhite); }
+
 static struct {
-  int head_y, dist_w, stop_x, note_x, note_y, n;
+  int head_y, dist_w, stop_x, note_x, note_y, n, rule_y, date_x, date_y;
+  char date[16];
+  Metrics m_date;
   char dist[10], note[20], stop[24];
   struct { int y, badge_w, badge_h, glyph_dx, glyph_y, text_y, t1_dx, t2_dx, t2_y, row_x, row_w; bool t2_day; char t1[8], t2[10]; } r[SV_ROWS];
   Metrics m_lab, m_val, m_bad;
@@ -1084,8 +1101,15 @@ static void format_dist(char *out, size_t n, int metres) {
 #define SV_BADGE_GAP 5     // badge to the first time
 #define SV_TIME_GAP  7     // between the times
 // The badges are the chips' size, with the chips' glyph: one badge on the face.
-static void layout_stopview(const Frame *fr, int band_top, int band_bot) __attribute__((noinline));
-static void layout_stopview(const Frame *fr, int band_top, int band_bot) {
+static void layout_stopview(const struct tm *t, const Frame *fr, int band_top) __attribute__((noinline));
+static void layout_stopview(const struct tm *t, const Frame *fr, int band_top) {
+  // The flick may have been for the date: a small one keeps the foot.
+  strftime(s_svl.date, sizeof(s_svl.date), "%a %d %b", t);
+  for (char *c = s_svl.date; *c; c++) *c = toupper((int)*c);
+  s_svl.m_date = barlow_metrics(measure(s_svl.date, s_f_date).h);
+  s_svl.date_y = fr->bot - sc(DATE_PAD_BOT) - s_svl.m_date.cap;
+  s_svl.date_x = fr->start;
+  const int band_bot = s_svl.date_y - sc(4);
   // The stop line and the badges in the caption font, the times in the
   // board font: the board is a small thing under a full-size time.
   const GFont f_line = s_f_cap, f_time = s_f_board, f_badge = s_f_label;
@@ -1119,6 +1143,7 @@ static void layout_stopview(const Frame *fr, int band_top, int band_bot) {
   const int used = sc(SV_LINE_GAP) + line_h + (rows ? (rows - 1) * sc(SV_ROW_H) + badge_h : 0);
   const int top = band_top + (band_bot - band_top - used) / 2;
   s_svl.head_y = top + sc(SV_LINE_GAP) - s_svl.m_lab.bearing;
+  s_svl.rule_y = top + sc(SV_LINE_GAP) + s_svl.m_lab.cap + sc(2);
   int y = top + sc(SV_LINE_GAP) + line_h;
   s_svl.note_y = y + sc(2) - s_svl.m_lab.bearing;
   s_svl.n = 0;
@@ -1175,8 +1200,14 @@ static void layout_stopview(const Frame *fr, int band_top, int band_bot) {
 
 static void paint_stopview(int fr_start) __attribute__((noinline));
 static void paint_stopview(int fr_start) {
-  graphics_context_set_text_color(s_ctx, s_dim);
+  graphics_context_set_text_color(s_ctx, light_theme() ? s_ink : s_dim);
   draw_run(s_svl.stop, s_f_cap, s_svl.stop_x, s_svl.head_y, false, TRACK);
+  if (light_theme()) {
+    const int w = run_w(s_svl.stop, s_f_cap, false, TRACK);
+    draw_stop_rule(mapx(s_svl.stop_x, w), mapx(s_svl.stop_x, w) + w, s_svl.rule_y);
+  }
+  graphics_context_set_text_color(s_ctx, s_ink);
+  draw_run(s_svl.date, s_f_date, s_svl.date_x, s_svl.date_y - s_svl.m_date.bearing, false, TRACK);
   if (s_svl.dist_w) {
     graphics_context_set_text_color(s_ctx, s_ink);
     draw_run(s_svl.dist, s_f_cap, fr_start, s_svl.head_y, false, TRACK);
@@ -1202,6 +1233,93 @@ static void paint_stopview(int fr_start) {
     } else if (s_svl.r[i].t2[0]) {
       draw_run_s(s_svl.r[i].t2, s_f_board, rx + s_svl.r[i].t2_dx, s_svl.r[i].text_y, false, 0);
     }
+  }
+}
+
+// ---- the side block: one row never takes the face. The answer sits in the
+// band beside the modules, three short lines hung from one edge: the stop,
+// the badge and its time, then the distance, or the row's second column
+// when stood at the stop. Date and modules stay; twelve seconds later the
+// block is gone. Right-aligned to `right` in logical x; `left` is where the
+// modules end on that side, so the block can decline if it would overlap.
+#define SB_GAP 3
+static struct {
+  bool show, q_day;
+  int stop_x, stop_y, rule_y, row_x, row_w, badge_w, badge_h, glyph_dx, glyph_y, t_dx, t_y, q_x, q_y;
+  char stop[24], t1[8], q[10];
+  Metrics m_lab, m_val, m_bad;
+} s_sb;
+
+static void layout_sideblock(const Frame *fr, int band_top, int band_bot, int left, int right) __attribute__((noinline));
+static void layout_sideblock(const Frame *fr, int band_top, int band_bot, int left, int right) {
+  s_sb.show = false;
+  if (s_sv.n != 1) return;
+  const SvRow *row = &s_sv.row[0];
+  s_sb.m_lab = barlow_metrics(measure("B", s_f_cap).h);
+  s_sb.m_val = barlow_metrics(measure("8", s_f_board).h);
+  s_sb.m_bad = barlow_metrics(measure("8", s_f_label).h);
+  const int room = right - left - sc(8);
+  // The stop's name, a glyph at a time down to the room there is.
+  strncpy(s_sb.stop, s_sv.stop, sizeof(s_sb.stop) - 1); s_sb.stop[sizeof(s_sb.stop) - 1] = 0;
+  while (s_sb.stop[0] && run_w(s_sb.stop, s_f_cap, false, TRACK) > room) {
+    char *e = s_sb.stop + strlen(s_sb.stop) - 1;
+    while (e > s_sb.stop && ((unsigned char)*e & 0xC0) == 0x80) e--;
+    *e = 0;
+    while (e > s_sb.stop && e[-1] == ' ') *--e = 0;
+  }
+  // The row: badge and the next time, as on the board.
+  const char *sp = strchr(row->when, ' ');
+  sv_clock(s_sb.t1, sizeof(s_sb.t1), row->when);
+  const int pad = sc(2), badge_h = sc(CHIP);
+  const int gw = run_w(row->route, s_f_label, false, 0);
+  s_sb.badge_w = gw + 2 * pad < badge_h ? badge_h : gw + 2 * pad + 1;
+  s_sb.badge_h = badge_h;
+  s_sb.glyph_dx = (s_sb.badge_w - gw + 1) / 2;
+  s_sb.t_dx = s_sb.badge_w + sc(SV_BADGE_GAP);
+  s_sb.row_w = s_sb.t_dx + run_w(s_sb.t1, s_f_board, false, 0);
+  // The qualifier: how far, or, stood at the stop, the row's second column.
+  s_sb.q[0] = 0; s_sb.q_day = false;
+  if (s_sv.dist > 60) { format_dist(s_sb.q, sizeof(s_sb.q), s_sv.dist); s_sb.q_day = true; }
+  else if (sp && isdigit((int)sp[1])) sv_clock(s_sb.q, sizeof(s_sb.q), sp + 1);
+  else if (sp && sp[1]) { strncpy(s_sb.q, sp + 1, sizeof(s_sb.q) - 1); s_sb.q[sizeof(s_sb.q) - 1] = 0; s_sb.q_day = true; }
+  const int q_w = s_sb.q[0] ? run_w(s_sb.q, s_sb.q_day ? s_f_cap : s_f_board, false, s_sb.q_day ? TRACK : 0) : 0;
+  if (s_sb.row_w > room || q_w > room) return;   // no room beside the modules: the board it is
+  // Three lines, centred in the band.
+  const int h = s_sb.m_lab.cap + sc(SB_GAP) + badge_h + (s_sb.q[0] ? sc(SB_GAP) + (s_sb.q_day ? s_sb.m_lab.cap : s_sb.m_val.cap) : 0);
+  if (h > band_bot - band_top) return;
+  const int top = band_top + (band_bot - band_top - h) / 2;
+  s_sb.stop_x = right - run_w(s_sb.stop, s_f_cap, false, TRACK);
+  s_sb.stop_y = top - s_sb.m_lab.bearing;
+  s_sb.rule_y = top + s_sb.m_lab.cap + sc(2);
+  const int by = top + s_sb.m_lab.cap + sc(SB_GAP);
+  s_sb.row_x = right - s_sb.row_w;
+  s_sb.glyph_y = by + (badge_h - s_sb.m_bad.cap) / 2 - s_sb.m_bad.bearing;
+  s_sb.t_y = by + (badge_h + s_sb.m_bad.cap) / 2 - s_sb.m_val.cap - s_sb.m_val.bearing;
+  s_sb.q_x = right - q_w;
+  s_sb.q_y = by + badge_h + sc(SB_GAP) - (s_sb.q_day ? s_sb.m_lab.bearing : s_sb.m_val.bearing);
+  s_sb.show = true;
+}
+
+static void paint_sideblock(void) __attribute__((noinline));
+static void paint_sideblock(void) {
+  const SvRow *row = &s_sv.row[0];
+  graphics_context_set_text_color(s_ctx, light_theme() ? s_ink : s_dim);
+  draw_run(s_sb.stop, s_f_cap, s_sb.stop_x, s_sb.stop_y, false, TRACK);
+  if (light_theme()) {
+    const int w = run_w(s_sb.stop, s_f_cap, false, TRACK);
+    draw_stop_rule(mapx(s_sb.stop_x, w), mapx(s_sb.stop_x, w) + w, s_sb.rule_y);
+  }
+  const int rx = mapx(s_sb.row_x, s_sb.row_w);
+  const GColor fill = PBL_IF_COLOR_ELSE(GColorFromHEX(row->color), s_ink);
+  graphics_context_set_fill_color(s_ctx, fill);
+  graphics_fill_rect(s_ctx, GRect(rx, s_sb.glyph_y + s_sb.m_bad.bearing - (s_sb.badge_h - s_sb.m_bad.cap) / 2, s_sb.badge_w, s_sb.badge_h), sc(2), GCornersAll);
+  graphics_context_set_text_color(s_ctx, on_fill(fill));
+  draw_run_s(row->route, s_f_label, rx + s_sb.glyph_dx, s_sb.glyph_y, false, 0);
+  graphics_context_set_text_color(s_ctx, s_ink);
+  draw_run_s(s_sb.t1, s_f_board, rx + s_sb.t_dx, s_sb.t_y, false, 0);
+  if (s_sb.q[0]) {
+    graphics_context_set_text_color(s_ctx, s_sb.q_day ? s_dim : s_ink);
+    draw_run(s_sb.q, s_sb.q_day ? s_f_cap : s_f_board, s_sb.q_x, s_sb.q_y, false, s_sb.q_day ? TRACK : 0);
   }
 }
 
@@ -1420,21 +1538,17 @@ static void face_update(Layer *layer, GContext *ctx) {
   // in the room that makes, and the countdown still at the foot, the largest
   // number on the face. Nothing is lost to a flick, least of all a bus
   // boarding. Date and modules sit it out.
-  if (s_sv.valid) {
-    // A flick asks about one stop, and for those seconds the countdown
-    // steps aside: the time stays full size and the board takes the room
-    // beneath it, as the design's frame has it. The hub's pulse is for
-    // being at the hub; it is back the moment the board goes.
-    layout_time(t, &fr, s_f_time, TIME_MARGIN_TOP);
-    paint_time();
-    layout_stopview(&fr, s_tm.band_top, fr.bot);
-    paint_stopview(fr.start);
-  } else {
+  // The answer to a flick is counted in rows, not metres. One row sits in
+  // the band beside the modules and the face keeps everything else. Two or
+  // three take the board: the time full size, the countdown stepped aside,
+  // a small date at the foot. Laid out first, so a one-row answer with no
+  // room beside the modules can still take the board.
+  s_sb.show = false;
+  if (!s_sv.valid || s_sv.n == 1) {
     // A timeline peek covers the bottom third. The date goes first, the time
     // and the countdown step down, and the modules and the second countdown
     // keep their band, as the design reflows it.
     layout_time(t, &fr, peek ? s_f_time_p : s_f_time, peek ? TIME_MARGIN_TOP_P : TIME_MARGIN_TOP);
-    paint_time();
     if (quiet) layout_idle(t, &fr);
     else if (peek) layout_block(t, &sch, &fr, s_f_count_s, BLOCK_ROW_GAP_P, false);
     else layout_block(t, &sch, &fr, s_f_count, BLOCK_ROW_GAP, true);
@@ -1446,10 +1560,25 @@ static void face_update(Layer *layer, GContext *ctx) {
     // The quiet face has nothing at the outer end: the modules go there too,
     // in their order, out from under the sleeve.
     if (quiet && s_md.n) s_md.x0 = fr.end - s_md.total;
+    if (s_sv.valid && !s_gb.show) {
+      // Beside the modules: on the quiet face to their wrist side, on the
+      // countdown face at the outer end past them.
+      if (quiet) layout_sideblock(&fr, s_tm.band_top, band_bot, fr.start - sc(8), s_md.n ? s_md.x0 - sc(8) : fr.end);
+      else layout_sideblock(&fr, s_tm.band_top, band_bot, s_md.n ? s_md.x0 + s_md.total : fr.start - sc(8), fr.end);
+    }
+  }
+  if (s_sv.valid && !s_sb.show) {
+    layout_time(t, &fr, s_f_time, TIME_MARGIN_TOP);
+    paint_time();
+    layout_stopview(t, &fr, s_tm.band_top);
+    paint_stopview(fr.start);
+  } else {
+    paint_time();
     if (quiet) paint_idle();
     else paint_block(fr.start);
     paint_modules();
     if (s_gb.show) paint_gb();
+    if (s_sb.show) paint_sideblock();
   }
 
   // ---- boarding buzz, once on the transition into the solid block.

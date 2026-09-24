@@ -115,23 +115,27 @@ the feed.
 ### A flick for the nearest stop
 
 With the hub known, a flick of the wrist asks the phone where you are, this
-time precisely, and for twelve seconds, lit, the face shows the nearest stop's
-board, as the design draws it: the stop's name, then a row a route — its badge
-in the agency's own colour and its next two times, in the watch's own clock
-style; where a route runs both ways from the stop, the direction instead of
-the second time. For those seconds the countdown steps aside; the hub's pulse
-is for being at the hub, and it is back the moment the board goes. Twin stops
-across a road are read as one, and at the hub every bay is, under the hub's
-own name: TRANSIT CTR. Stood at the stop, the line is just its name; a short
-walk off, it says how far; further, to a little over a mile, the board is just
-the stop, how far, and its next bus. When today's buses are done the next one
-shows with its day — 5:12 TOMORROW, or 5:00 MON after the Saturday last bus.
-Further than that from any stop, a flick only lights the face: nothing is
-taken away to say there is nothing. A setting turns the flick off altogether.
+time precisely, and for twelve seconds, lit, the face answers with the nearest
+stop. The answer is counted in rows, not metres. One row — one route, one
+direction — sits in the band beside the modules as three short lines: the
+stop, the badge and its next time, then how far, or the time after when stood
+at the stop; the date and modules stay. Two or three rows take the board, as
+the design draws it: the time full size, the stop's name, then a row a route —
+its badge in the agency's own colour and two columns, the next time and one
+qualifier: the day when today's buses are done (5:12P TOMORROW, 5:00A MON),
+the direction where a route runs both ways from a merged pair, else the second
+time — and a small date at the foot. The countdown steps aside for the board;
+the hub's pulse is for being at the hub. Times read in the watch's own clock
+style. Twin stops across a road are read as one, and at the hub every bay is,
+under the hub's own name: TRANSIT CTR. Off the stop, the line says how far.
+Further than two kilometres from any stop a flick only lights the face:
+nothing is taken away to say there is nothing. On the light theme the stop
+line is ink with a hairline beneath it, since grey at that size loses its
+strokes. A setting turns the flick off altogether.
 
-| at a stop | a walk from one | further off, after hours |
+| one row, beside the modules | the board | a twin pair, light |
 |---|---|---|
-| ![at a stop](screenshots/stop.png) | ![near a stop](screenshots/stop-near.png) | ![further off](screenshots/stop-far.png) |
+| ![one row](screenshots/stop-one.png) | ![the board](screenshots/stop.png) | ![a twin pair on the light theme](screenshots/stop-twin.png) |
 
 The departures come from a small file a stop, served from this repository's
 pages and rewritten every night from the agency's feed by a workflow, so the
