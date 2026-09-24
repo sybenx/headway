@@ -209,5 +209,4 @@ they invert with the theme and hold their shape on emery at no resource cost.
 ## Licence
 
 Code under the MIT licence, see `LICENSE`. Barlow Condensed and Barlow Semi
-Condensed are under the SIL
-Open Font License, see `resources/fonts/OFL.txt`.
+Condensed are under the SIL Open Font License, see `resources/fonts/OFL.txt`.
