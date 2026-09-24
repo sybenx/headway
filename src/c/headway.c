@@ -1079,12 +1079,12 @@ static void format_dist(char *out, size_t n, int metres) {
 // the countdown it is laid from the time down and the block keeps the foot.
 #define SV_BADGE_GAP 5     // badge to the first time
 #define SV_TIME_GAP  7     // between the times
-#define SV_BADGE_H   9     // the badge, a little taller than its glyph
+// The badges are the chips' size, with the chips' glyph: one badge on the face.
 static void layout_stopview(const Frame *fr, int band_top, int band_bot, bool centred) __attribute__((noinline));
 static void layout_stopview(const Frame *fr, int band_top, int band_bot, bool centred) {
   // The stop line and the badges in the caption font, the times in the
   // board font: the board is a small thing under a full-size time.
-  const GFont f_line = s_f_cap, f_time = s_f_board, f_badge = s_f_cap;
+  const GFont f_line = s_f_cap, f_time = s_f_board, f_badge = s_f_label;
   s_svl.m_lab = barlow_metrics(measure("B", f_line).h);
   s_svl.m_val = barlow_metrics(measure("8", f_time).h);
   s_svl.m_bad = barlow_metrics(measure("8", f_badge).h);
@@ -1107,7 +1107,7 @@ static void layout_stopview(const Frame *fr, int band_top, int band_bot, bool ce
   if (s_sv.n == 0) strncpy(s_svl.note, s_sv.stop[0] ? "NO MORE TODAY" : "NO STOPS NEARBY", sizeof(s_svl.note));
   s_svl.note_x = fr->end - run_w(s_svl.note, f_line, false, TRACK);
 
-  const int badge_h = sc(SV_BADGE_H);
+  const int badge_h = sc(CHIP);
   const int line_h = s_svl.m_lab.cap + sc(SV_ROWS_GAP);
   int rows = s_sv.n < SV_ROWS ? s_sv.n : SV_ROWS;
   if (s_sv.n == 0) rows = 1;   // the note takes a row's place
@@ -1119,15 +1119,20 @@ static void layout_stopview(const Frame *fr, int band_top, int band_bot, bool ce
   s_svl.note_y = y + sc(2) - s_svl.m_lab.bearing;
   s_svl.n = 0;
   if (s_sv.n == 0) return;
+  // The board reads in columns, as the design sets it: each time column
+  // starts at one x down the rows, and the badges end at one x before them.
+  int W1 = 0, W2 = 0;
   for (int i = 0; i < rows; i++) {
     const SvRow *row = &s_sv.row[i];
     const int pad = sc(2);
     s_svl.r[i].y = y;
     // A one-glyph route gets a square badge; longer ones grow with the glyphs.
+    // The run's width carries a trailing bearing the ink does not, so the
+    // ink centres on width minus one; a wide badge is sized even for it.
     const int gw = run_w(row->route, f_badge, false, 0);
-    s_svl.r[i].badge_w = gw + 2 * pad < badge_h ? badge_h : gw + 2 * pad;
+    s_svl.r[i].badge_w = gw + 2 * pad < badge_h ? badge_h : gw + 2 * pad + 1;
     s_svl.r[i].badge_h = badge_h;
-    s_svl.r[i].glyph_dx = (s_svl.r[i].badge_w - gw) / 2;
+    s_svl.r[i].glyph_dx = (s_svl.r[i].badge_w - gw + 1) / 2;
     s_svl.r[i].glyph_y = y + (badge_h - s_svl.m_bad.cap) / 2 - s_svl.m_bad.bearing;
     // The times sit on the badge's baseline: cap bottoms level.
     s_svl.r[i].text_y = y + (badge_h + s_svl.m_bad.cap) / 2 - s_svl.m_val.cap - s_svl.m_val.bearing;
@@ -1141,14 +1146,19 @@ static void layout_stopview(const Frame *fr, int band_top, int band_bot, bool ce
     // Proportional, as the design sets them: the colon takes its own width.
     const int w1 = run_w(s_svl.r[i].t1, f_time, false, 0);
     const int w2 = s_svl.r[i].t2[0] ? run_w(s_svl.r[i].t2, f_time, false, 0) : 0;
-    s_svl.r[i].t1_dx = s_svl.r[i].badge_w + sc(SV_BADGE_GAP);
-    s_svl.r[i].t2_dx = s_svl.r[i].t1_dx + w1 + sc(SV_TIME_GAP);
-    s_svl.r[i].row_w = s_svl.r[i].t1_dx + w1 + (w2 ? sc(SV_TIME_GAP) + w2 : 0);
-    // A second time that would push the row past the wrist edge is dropped.
-    if (s_svl.r[i].row_w > fr->end - fr->start && w2) { s_svl.r[i].t2[0] = 0; s_svl.r[i].row_w = s_svl.r[i].t1_dx + w1; }
-    s_svl.r[i].row_x = fr->end - s_svl.r[i].row_w;
+    if (w1 > W1) W1 = w1;
+    if (w2 > W2) W2 = w2;
     s_svl.n = i + 1;
     y += sc(SV_ROW_H);
+  }
+  const int x2 = fr->end - W2;                              // the second column
+  const int x1 = W2 ? x2 - sc(SV_TIME_GAP) - W1 : fr->end - W1;   // the first
+  const int bx = x1 - sc(SV_BADGE_GAP);                     // where the badges end
+  for (int i = 0; i < s_svl.n; i++) {
+    s_svl.r[i].row_x = bx - s_svl.r[i].badge_w;
+    s_svl.r[i].row_w = fr->end - s_svl.r[i].row_x;
+    s_svl.r[i].t1_dx = x1 - s_svl.r[i].row_x;
+    s_svl.r[i].t2_dx = x2 - s_svl.r[i].row_x;
   }
 }
 
@@ -1172,7 +1182,7 @@ static void paint_stopview(int fr_start) {
     graphics_context_set_fill_color(s_ctx, fill);
     graphics_fill_rect(s_ctx, GRect(rx, s_svl.r[i].y, s_svl.r[i].badge_w, s_svl.r[i].badge_h), sc(2), GCornersAll);
     graphics_context_set_text_color(s_ctx, on_fill(fill));
-    draw_run_s(row->route, s_f_cap, rx + s_svl.r[i].glyph_dx, s_svl.r[i].glyph_y, false, 0);
+    draw_run_s(row->route, s_f_label, rx + s_svl.r[i].glyph_dx, s_svl.r[i].glyph_y, false, 0);
     graphics_context_set_text_color(s_ctx, s_ink);
     draw_run_s(s_svl.r[i].t1, s_f_board, rx + s_svl.r[i].t1_dx, s_svl.r[i].text_y, false, 0);
     if (s_svl.r[i].t2[0]) draw_run_s(s_svl.r[i].t2, s_f_board, rx + s_svl.r[i].t2_dx, s_svl.r[i].text_y, false, 0);
