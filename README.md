@@ -30,7 +30,7 @@ the design leaves open, drawn as a caption over a value — `BPM 72`,
 `STEPS 4.8K`, `BATT 64%`. Each slot takes heart rate, steps, battery, weather
 or nothing, and the captions can be swapped for icons, grey or in colour.
 In colour, the heart is red, the battery shows its charge, and the sky comes
-in its own colour: the sun and a bolt orange, rain blue. Steps and every
+in its own colour: the sun and a bolt yellow, orange by day, rain blue. Steps and every
 cloud keep the caption grey, so colour only ever says something.
 
 | Captions | Icons | In colour |

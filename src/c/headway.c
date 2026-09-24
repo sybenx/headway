@@ -819,7 +819,10 @@ static GColor module_tint(const Module *m) {
     case MODULE_BATTERY: return GColorFromHEX(m->extra > 50 ? 0x00AA55 : m->extra > 20 ? 0xFFAA00 : 0xFF0000);
     case MODULE_WEATHER:
       switch (wx_kind(m->extra)) {
-        case WX_SUN: case WX_PARTLY: case WX_STORM: return GColorFromHEX(0xFF5500);
+        // Yellow on the dark ground, where it glows; orange on the light,
+        // where yellow would vanish into the white.
+        case WX_SUN: case WX_PARTLY: case WX_STORM:
+          return gcolor_equal(s_ground, GColorBlack) ? GColorFromHEX(0xFFFF00) : GColorFromHEX(0xFF5500);
         case WX_RAIN: return GColorFromHEX(0x55AAFF);
         case WX_SNOW: return GColorFromHEX(0x00AAFF);
         default: return s_dim;
