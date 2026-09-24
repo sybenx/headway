@@ -1106,8 +1106,8 @@ static void draw_stop_rule(int x0, int x1, int y) {
 static bool light_theme(void) { return gcolor_equal(s_ground, GColorWhite); }
 
 static struct {
-  int head_y, dist_w, stop_x, note_x, note_y, n, rule_y, date_x, date_y, secs_x;
-  char date[16], secs[12];
+  int head_y, dist_w, stop_x, note_x, note_y, n, rule_y, date_x, date_y;
+  char date[16];
   Metrics m_date;
   char dist[10], note[20], stop[24];
   struct { int y, badge_w, badge_h, glyph_dx, glyph_y, text_y, t1_dx, t2_dx, t2_y, row_x, row_w; bool t2_day; char t1[8], t2[10]; } r[SV_ROWS];
@@ -1140,10 +1140,6 @@ static void layout_stopview(const struct tm *t, const Frame *fr, int band_top) {
   s_svl.m_date = barlow_metrics(measure(s_svl.date, s_f_date).h);
   s_svl.date_y = fr->bot - sc(DATE_PAD_BOT) - s_svl.m_date.cap;
   s_svl.date_x = fr->start;
-  // The clock with its seconds at the outer end of the same line: a board
-  // read against a timetable wants to know where in the minute it is.
-  snprintf(s_svl.secs, sizeof(s_svl.secs), "%d:%02d:%02d", display_hour(t->tm_hour), t->tm_min, t->tm_sec);
-  s_svl.secs_x = fr->end - run_w(s_svl.secs, s_f_date, false, TRACK);
   const int band_bot = s_svl.date_y - sc(4);
   // The stop line and the badges in the caption font, the times in the
   // board font: the board is a small thing under a full-size time.
@@ -1243,8 +1239,6 @@ static void paint_stopview(int fr_start) {
   }
   graphics_context_set_text_color(s_ctx, s_ink);
   draw_run(s_svl.date, s_f_date, s_svl.date_x, s_svl.date_y - s_svl.m_date.bearing, false, TRACK);
-  graphics_context_set_text_color(s_ctx, s_dim);
-  draw_run(s_svl.secs, s_f_date, s_svl.secs_x, s_svl.date_y - s_svl.m_date.bearing, false, TRACK);
   if (s_svl.dist_w) {
     graphics_context_set_text_color(s_ctx, s_ink);
     draw_run(s_svl.dist, s_f_cap, fr_start, s_svl.head_y, false, TRACK);
@@ -1281,9 +1275,9 @@ static void paint_stopview(int fr_start) {
 // modules end on that side, so the block can decline if it would overlap.
 #define SB_GAP 3
 static struct {
-  bool show, q_day, secs_show;
-  int stop_x, stop_y, rule_y, row_x, row_w, badge_w, badge_h, glyph_dx, glyph_y, t_dx, t_y, q_x, q_y, secs_y;
-  char stop[24], t1[8], q[10], secs[12];
+  bool show, q_day;
+  int stop_x, stop_y, rule_y, row_x, row_w, badge_w, badge_h, glyph_dx, glyph_y, t_dx, t_y, q_x, q_y;
+  char stop[24], t1[8], q[10];
   Metrics m_lab, m_val, m_bad;
 } s_sb;
 
@@ -1358,10 +1352,25 @@ static void paint_sideblock(void) {
     graphics_context_set_text_color(s_ctx, s_sb.q_day ? s_dim : s_ink);
     draw_run(s_sb.q, s_sb.q_day ? s_f_cap : s_f_board, s_sb.q_x, s_sb.q_y, false, s_sb.q_day ? TRACK : 0);
   }
-  if (s_sb.secs_show) {
-    graphics_context_set_text_color(s_ctx, s_dim);
-    draw_run(s_sb.secs, s_f_date, sc(PAD_WRIST), s_sb.secs_y, false, TRACK);
-  }
+}
+
+// ---- the seconds through a flick: two small dim digits just beneath the
+// time, at its outer edge, where a sleeve uncovers them first. A board read
+// against a timetable wants to know where in the minute it is.
+static struct { bool show; char t[3]; int x, y, h; } s_sec;
+static void layout_secs(const struct tm *t, const Frame *fr, int band_top) __attribute__((noinline));
+static void layout_secs(const struct tm *t, const Frame *fr, int band_top) {
+  const Metrics m = barlow_metrics(measure("8", s_f_cap).h);
+  snprintf(s_sec.t, sizeof(s_sec.t), "%02d", t->tm_sec);
+  s_sec.x = fr->end - run_w(s_sec.t, s_f_cap, false, TRACK);
+  s_sec.y = band_top - m.bearing;
+  s_sec.h = m.cap + sc(3);   // what the band beneath gives up
+  s_sec.show = true;
+}
+static void paint_secs(void) __attribute__((noinline));
+static void paint_secs(void) {
+  graphics_context_set_text_color(s_ctx, s_dim);
+  draw_run(s_sec.t, s_f_cap, s_sec.x, s_sec.y, false, TRACK);
 }
 
 // The content box, inside the rail and the paddings, in logical x.
@@ -1589,6 +1598,7 @@ static void face_update(Layer *layer, GContext *ctx) {
   // a small date at the foot. Laid out first, so a one-row answer with no
   // room beside the modules can still take the board.
   s_sb.show = false;
+  s_sec.show = false;
   if (!s_sv.valid || s_sv.n == 1) {
     // A timeline peek covers the bottom third. The date goes first, the time
     // and the countdown step down, and the modules and the second countdown
@@ -1610,19 +1620,16 @@ static void face_update(Layer *layer, GContext *ctx) {
       // countdown face at the outer end past them.
       if (quiet) layout_sideblock(&fr, s_tm.band_top, band_bot, fr.start - sc(8), s_md.n ? s_md.x0 - sc(8) : fr.end);
       else layout_sideblock(&fr, s_tm.band_top, band_bot, s_md.n ? s_md.x0 + s_md.total : fr.start - sc(8), fr.end);
-      // On the quiet face the seconds sit at the wrist end of the date's line.
-      s_sb.secs_show = s_sb.show && quiet;
-      if (s_sb.secs_show) {
-        snprintf(s_sb.secs, sizeof(s_sb.secs), "%d:%02d:%02d", display_hour(t->tm_hour), t->tm_min, t->tm_sec);
-        s_sb.secs_y = s_id.date_y - barlow_metrics(measure("8", s_f_date).h).bearing;
-      }
+      if (s_sb.show) layout_secs(t, &fr, s_tm.band_top);
     }
   }
   if (s_sv.valid && !s_sb.show) {
     layout_time(t, &fr, s_f_time, TIME_MARGIN_TOP);
     paint_time();
-    layout_stopview(t, &fr, s_tm.band_top);
+    layout_secs(t, &fr, s_tm.band_top);
+    layout_stopview(t, &fr, s_tm.band_top + s_sec.h);
     paint_stopview(fr.start);
+    paint_secs();
   } else {
     paint_time();
     if (quiet) paint_idle();
@@ -1630,6 +1637,7 @@ static void face_update(Layer *layer, GContext *ctx) {
     paint_modules();
     if (s_gb.show) paint_gb();
     if (s_sb.show) paint_sideblock();
+    if (s_sec.show) paint_secs();
   }
 
   // ---- boarding buzz, once on the transition into the solid block.
