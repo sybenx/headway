@@ -169,7 +169,7 @@ function checkTransit(force) {
 // written nightly by tools/transit.py. A precise fix picks the stop; twin
 // stops across a road are merged, since the headsign tells them apart.
 var INDEX_TTL = 24 * 60 * 60 * 1000, STOP_TTL = 6 * 60 * 60 * 1000;
-var AT_STOP = 60, TWIN = 45, NEARBY = 1500;
+var AT_STOP = 60, TWIN = 45, HUB = 100, NEARBY = 1500;
 
 function cached(key, ttl) {
   try {
@@ -235,11 +235,16 @@ function onFlick() {
       }).sort(function (a, b) { return a.d - b.d; });
       if (!ranked.length || ranked[0].d > NEARBY) return sendStopView('', 0, []);
       var best = ranked[0];
-      // Twins across a road, or the bays of a hub: read as one stop.
-      var group = ranked.filter(function (st) { return metres(best.lat, best.lon, st.lat, st.lon) <= TWIN; }).slice(0, 8);
+      // Twins across a road are read as one stop. At the hub, every bay is:
+      // the group is the whole hub, and it goes by the hub's own name rather
+      // than whichever bay happened to be nearest.
+      var atHub = sys.hub && metres(best.lat, best.lon, sys.hub.lat, sys.hub.lon) <= HUB;
+      var group = atHub
+        ? ranked.filter(function (st) { return metres(sys.hub.lat, sys.hub.lon, st.lat, st.lon) <= HUB; }).slice(0, 16)
+        : ranked.filter(function (st) { return metres(best.lat, best.lon, st.lat, st.lon) <= TWIN; }).slice(0, 8);
       var kind = (function (d) { var wd = d.getDay(); return wd === 0 ? 'sunday' : wd === 6 ? 'saturday' : 'weekday'; })(new Date());
       var now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes();
-      var pending = group.length, name = '', deps = [];
+      var pending = group.length, name = atHub ? sys.hub.name : '', deps = [];
       group.forEach(function (st) {
         getJSON(DATA_URL + 'stops/' + st.id + '.json', 'hw-stop-' + tag + '-' + st.id, STOP_TTL, function (stop) {
           if (stop) {
