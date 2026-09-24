@@ -169,7 +169,9 @@ function checkTransit(force) {
 // written nightly by tools/transit.py. A precise fix picks the stop; twin
 // stops across a road are merged, since the headsign tells them apart.
 var INDEX_TTL = 24 * 60 * 60 * 1000, STOP_TTL = 6 * 60 * 60 * 1000;
-var AT_STOP = 60, TWIN = 45, HUB = 100, NEARBY = 1500;
+// At a stop, the board; a short walk from one, the board with its distance;
+// further, just the stop, how far, and its next bus; further still, nothing.
+var AT_STOP = 60, TWIN = 45, HUB = 100, BOARD = 400, FAR = 2000;
 
 function cached(key, ttl) {
   try {
@@ -195,6 +197,8 @@ function getJSON(url, key, ttl, cb) {
   req.ontimeout = function () { cb(null); };
   req.send();
 }
+
+function dayKind(d) { var wd = d.getDay(); return wd === 0 ? 'sunday' : wd === 6 ? 'saturday' : 'weekday'; }
 
 // A departure as a clock time, as the design's board reads: 11:01, or
 // 23:01 on a 24-hour watch. No AM or PM; the board is the next hour or two.
@@ -232,7 +236,7 @@ function onFlick() {
       var ranked = index.stops.map(function (st) {
         return { id: st[0], d: metres(lat, lon, st[1], st[2]), lat: st[1], lon: st[2] };
       }).sort(function (a, b) { return a.d - b.d; });
-      if (!ranked.length || ranked[0].d > NEARBY) return sendStopView('', 0, []);
+      if (!ranked.length || ranked[0].d > FAR) return sendStopView('', 0, []);
       var best = ranked[0];
       // Twins across a road are read as one stop. At the hub, every bay is:
       // the group is the whole hub, and it goes by the hub's own name rather
@@ -241,30 +245,40 @@ function onFlick() {
       var group = atHub
         ? ranked.filter(function (st) { return metres(sys.hub.lat, sys.hub.lon, st.lat, st.lon) <= HUB; }).slice(0, 16)
         : ranked.filter(function (st) { return metres(best.lat, best.lon, st.lat, st.lon) <= TWIN; }).slice(0, 8);
-      var kind = (function (d) { var wd = d.getDay(); return wd === 0 ? 'sunday' : wd === 6 ? 'saturday' : 'weekday'; })(new Date());
       var now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes();
-      var pending = group.length, name = atHub ? sys.hub.name : '', deps = [];
+      var pending = group.length, name = atHub ? sys.hub.name : '', stops = [];
       group.forEach(function (st) {
         getJSON(DATA_URL + 'stops/' + st.id + '.json', 'hw-stop-' + tag + '-' + st.id, STOP_TTL, function (stop) {
-          if (stop) {
-            if (!name) name = stop.name;
-            (stop.days[kind] || []).forEach(function (dep) {
-              if (dep[0] >= nowMin) deps.push({ t: dep[0], route: dep[1], head: dep[2] });
-            });
-          }
+          if (stop) { if (!name) name = stop.name; stops.push(stop); }
           if (--pending) return;
+          // Today's remaining departures; when there are none, the first
+          // day ahead with any — tomorrow, or Monday after a Saturday —
+          // so the answer is the next bus, whenever that is.
+          var deps = [], dayWord = '';
+          for (var ahead = 0; ahead < 8 && !deps.length; ahead++) {
+            var date = new Date(now.getTime() + ahead * 24 * 60 * 60 * 1000);
+            var kind = dayKind(date), from = ahead ? 0 : nowMin;
+            stops.forEach(function (stop) {
+              (stop.days[kind] || []).forEach(function (dep) {
+                if (dep[0] >= from) deps.push({ t: dep[0], route: dep[1], head: dep[2] });
+              });
+            });
+            if (deps.length && ahead) dayWord = ahead === 1 ? 'TOMORROW' : ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'][date.getDay()];
+          }
           deps.sort(function (a, b) { return a.t - b.t; });
           // A row a route and direction, in order of its next departure,
-          // with its next two times. The headsign only tells the rows apart.
+          // with its next two times, or its next time and the day.
           var groups = [], byKey = {};
           deps.forEach(function (dep) {
             var key = dep.route + '|' + dep.head, g = byKey[key];
             if (!g) { g = byKey[key] = { route: dep.route, head: dep.head, times: [] }; groups.push(g); }
-            if (g.times.length < 2) g.times.push(clockText(dep.t, h24));
+            if (g.times.length < (dayWord ? 1 : 2)) g.times.push(clockText(dep.t, h24));
           });
-          var rows = groups.slice(0, 3).map(function (g) {
+          // Further than a walk, the stop, how far, and its next bus alone.
+          var far = best.d > BOARD;
+          var rows = groups.slice(0, far ? 1 : 3).map(function (g) {
             var col = (index.routes[g.route] || ['888888'])[0];
-            return { route: g.route, head: g.head, when: g.times.join(' '), color: parseInt(col, 16) };
+            return { route: g.route, head: g.head, when: g.times.concat(dayWord ? [dayWord] : []).join(' '), color: parseInt(col, 16) };
           });
           sendStopView(name, best.d <= AT_STOP ? 0 : best.d, rows);
         });

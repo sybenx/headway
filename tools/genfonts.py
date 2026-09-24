@@ -25,7 +25,6 @@ DIGITS = '[0-9:]'
 FONTS = [
     ('time_60', 60, DIGITS), ('time_83', 83, DIGITS),
     ('count_44', 44, '[0-9NOW]'), ('count_61', 61, '[0-9NOW]'),
-    ('time_48', 48, DIGITS), ('time_67', 67, DIGITS),         # the flick view's smaller time
     ('time_38', 38, DIGITS), ('time_53', 53, DIGITS),         # the time under a timeline peek
     ('count_30', 30, '[0-9NOW:]'), ('count_42', 42, '[0-9NOW:]'),  # and the flick's M:SS countdown
     ('mod_15', 15, '[0-9.%°KA-Z: ]'), ('mod_21', 21, '[0-9.%°KA-Z: ]'),   # letters and a colon for the stop view's badges and clock times
