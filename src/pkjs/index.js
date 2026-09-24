@@ -196,13 +196,12 @@ function getJSON(url, key, ttl, cb) {
   req.send();
 }
 
-function whenText(dep, nowMin, h24) {
-  var m = dep - nowMin;
-  if (m < 60) return { text: String(m), mins: 1 };
+// A departure as a clock time, as the design's board reads: 11:01, or
+// 23:01 on a 24-hour watch. No AM or PM; the board is the next hour or two.
+function clockText(dep, h24) {
   var h = Math.floor(dep / 60) % 24, mm = dep % 60;
-  if (h24) return { text: h + ':' + (mm < 10 ? '0' : '') + mm, mins: 0 };
-  var hh = ((h + 11) % 12) + 1;
-  return { text: hh + ':' + (mm < 10 ? '0' : '') + mm + (h < 12 ? 'A' : 'P'), mins: 0 };
+  var hh = h24 ? h : ((h + 11) % 12) + 1;
+  return hh + ':' + (mm < 10 ? '0' : '') + mm;
 }
 
 function sendStopView(name, dist, rows) {
@@ -211,8 +210,8 @@ function sendStopView(name, dist, rows) {
   for (var i = 0; i < rows.length && i < 3; i++) {
     msg['SV_R' + (i + 1)] = rows[i].route;
     msg['SV_H' + (i + 1)] = rows[i].head;
-    msg['SV_W' + (i + 1)] = rows[i].when.text;
-    msg['SV_T' + (i + 1)] = rows[i].when.mins;
+    msg['SV_W' + (i + 1)] = rows[i].when;
+    msg['SV_T' + (i + 1)] = 0;
     msg['SV_C' + (i + 1)] = rows[i].color;
   }
   Pebble.sendAppMessage(msg);
@@ -255,9 +254,17 @@ function onFlick() {
           }
           if (--pending) return;
           deps.sort(function (a, b) { return a.t - b.t; });
-          var rows = deps.slice(0, 3).map(function (dep) {
-            var col = (index.routes[dep.route] || ['888888'])[0];
-            return { route: dep.route, head: dep.head, when: whenText(dep.t, nowMin, h24), color: parseInt(col, 16) };
+          // A row a route and direction, in order of its next departure,
+          // with its next two times. The headsign only tells the rows apart.
+          var groups = [], byKey = {};
+          deps.forEach(function (dep) {
+            var key = dep.route + '|' + dep.head, g = byKey[key];
+            if (!g) { g = byKey[key] = { route: dep.route, head: dep.head, times: [] }; groups.push(g); }
+            if (g.times.length < 2) g.times.push(clockText(dep.t, h24));
+          });
+          var rows = groups.slice(0, 3).map(function (g) {
+            var col = (index.routes[g.route] || ['888888'])[0];
+            return { route: g.route, head: g.head, when: g.times.join(' '), color: parseInt(col, 16) };
           });
           sendStopView(name, best.d <= AT_STOP ? 0 : best.d, rows);
         });

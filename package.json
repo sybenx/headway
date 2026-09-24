@@ -1,7 +1,7 @@
 {
   "name": "headway",
   "author": "Aaron Herbst",
-  "version": "1.6.2",
+  "version": "1.7.0",
   "keywords": [
     "pebble-app",
     "watchface",
@@ -265,6 +265,25 @@
           "type": "raw",
           "name": "FONT_TIME_53",
           "file": "fonts/time_53.pfo",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "raw",
+          "name": "FONT_BOARD_12",
+          "file": "fonts/board_12.pfo",
+          "targetPlatforms": [
+            "aplite",
+            "basalt",
+            "diorite",
+            "flint"
+          ]
+        },
+        {
+          "type": "raw",
+          "name": "FONT_BOARD_17",
+          "file": "fonts/board_17.pfo",
           "targetPlatforms": [
             "emery"
           ]

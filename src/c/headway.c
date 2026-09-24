@@ -91,7 +91,7 @@ typedef struct {
 #define SV_ROWS 3
 #define SV_SHOW_MS 12000
 #define SV_WAIT_MS 15000
-typedef struct { char route[8], head[20], when[8]; uint32_t color; bool mins; } SvRow;
+typedef struct { char route[8], head[20], when[24]; uint32_t color; bool mins; } SvRow;
 static struct {
   bool valid, pending;
   char stop[24];
@@ -261,6 +261,7 @@ static int transit_next(const uint16_t *list, int now_min) {
   #define RES_MOD   RESOURCE_ID_FONT_MOD_21
   #define RES_LABEL RESOURCE_ID_FONT_LABEL_15
   #define RES_DATE  RESOURCE_ID_FONT_DATE_17
+  #define RES_BOARD RESOURCE_ID_FONT_BOARD_17
   #define RES_CAP   RESOURCE_ID_FONT_CAP_12
   #define RES_BIGDATE RESOURCE_ID_FONT_DATE_25
   #define RES_TIME_S  RESOURCE_ID_FONT_TIME_67
@@ -272,6 +273,7 @@ static int transit_next(const uint16_t *list, int now_min) {
   #define RES_MOD   RESOURCE_ID_FONT_MOD_15
   #define RES_LABEL RESOURCE_ID_FONT_LABEL_11
   #define RES_DATE  RESOURCE_ID_FONT_DATE_12
+  #define RES_BOARD RESOURCE_ID_FONT_BOARD_12
   #define RES_CAP   RESOURCE_ID_FONT_CAP_9
   #define RES_BIGDATE RESOURCE_ID_FONT_DATE_18
   #define RES_TIME_S  RESOURCE_ID_FONT_TIME_48
@@ -280,6 +282,7 @@ static int transit_next(const uint16_t *list, int now_min) {
 #endif
 
 static GFont s_f_time, s_f_count, s_f_mod, s_f_label, s_f_date, s_f_cap, s_f_bigdate;
+static GFont s_f_board;   // the board's clock times, in the wider cut
 static GFont s_f_time_s, s_f_count_s;   // the flick view's sizes
 static GFont s_f_time_p;                // the time under a timeline peek
 static Window *s_window;
@@ -1050,12 +1053,12 @@ static void paint_idle(void) {
 // never covers.
 #define SV_ROW_H 15
 #define SV_LINE_GAP 3      // the stop line's air below the time
-#define SV_ROWS_GAP 3      // between the stop line and the first row
+#define SV_ROWS_GAP 5      // between the stop line and the first row
 static struct {
-  int top, head_y, dist_x, dist_w, n;
+  int head_y, dist_w, stop_x, note_x, note_y, n;
   char dist[10], note[20], stop[24];
-  struct { int y, badge_x, badge_w, badge_h, text_x, text_y, head_x, head_y, when_x, when_y, when_w, unit_w, unit_y; char head[20]; } r[SV_ROWS];
-  Metrics m_lab, m_val, m_cap;
+  struct { int y, badge_w, badge_h, glyph_dx, glyph_y, text_y, t1_dx, t2_dx, row_x, row_w; char t1[8], t2[8]; } r[SV_ROWS];
+  Metrics m_lab, m_val, m_bad;
 } s_svl;
 
 static void format_dist(char *out, size_t n, int metres) {
@@ -1069,64 +1072,81 @@ static void format_dist(char *out, size_t n, int metres) {
   }
 }
 
-// Laid out between the time's band and the block: a line for the stop, then
-// as many rows as fit above the block, at most three.
-static void layout_stopview(const Frame *fr, int band_top, int band_bot) __attribute__((noinline));
-static void layout_stopview(const Frame *fr, int band_top, int band_bot) {
-  s_svl.m_lab = barlow_metrics(measure("B", s_f_label).h);
-  s_svl.m_val = barlow_metrics(measure("8", s_f_mod).h);
-  s_svl.m_cap = barlow_metrics(measure("M", s_f_cap).h);
-  s_svl.top = band_top;
-  s_svl.head_y = band_top + sc(SV_LINE_GAP) - s_svl.m_lab.bearing;
+// The board, as the design draws it: hung from the outer edge, a line for
+// the stop, then a row a route — its badge and the next clock times, two
+// where they fit. On the quiet face there is no countdown, so the board
+// takes the whole of the room below the time and sits centred in it; with
+// the countdown it is laid from the time down and the block keeps the foot.
+#define SV_BADGE_GAP 5     // badge to the first time
+#define SV_TIME_GAP  7     // between the times
+#define SV_BADGE_H   9     // the badge, a little taller than its glyph
+static void layout_stopview(const Frame *fr, int band_top, int band_bot, bool centred) __attribute__((noinline));
+static void layout_stopview(const Frame *fr, int band_top, int band_bot, bool centred) {
+  // The stop line and the badges in the caption font, the times in the
+  // board font: the board is a small thing under a full-size time.
+  const GFont f_line = s_f_cap, f_time = s_f_board, f_badge = s_f_cap;
+  s_svl.m_lab = barlow_metrics(measure("B", f_line).h);
+  s_svl.m_val = barlow_metrics(measure("8", f_time).h);
+  s_svl.m_bad = barlow_metrics(measure("8", f_badge).h);
   s_svl.dist_w = 0;
   if (s_sv.dist > 60) {
     format_dist(s_svl.dist, sizeof(s_svl.dist), s_sv.dist);
-    s_svl.dist_w = run_w(s_svl.dist, s_f_label, false, TRACK);
-    s_svl.dist_x = fr->end - s_svl.dist_w;
+    s_svl.dist_w = run_w(s_svl.dist, f_line, false, TRACK);
   }
   // The stop's name gives way to the distance, a glyph at a time.
   strncpy(s_svl.stop, s_sv.stop, sizeof(s_svl.stop) - 1); s_svl.stop[sizeof(s_svl.stop) - 1] = 0;
-  const int name_room = (s_svl.dist_w ? s_svl.dist_x - sc(6) : fr->end) - fr->start;
-  while (s_svl.stop[0] && run_w(s_svl.stop, s_f_label, false, TRACK) > name_room) {
+  const int name_room = fr->end - fr->start - (s_svl.dist_w ? s_svl.dist_w + sc(6) : 0);
+  while (s_svl.stop[0] && run_w(s_svl.stop, f_line, false, TRACK) > name_room) {
     char *e = s_svl.stop + strlen(s_svl.stop) - 1;
     while (e > s_svl.stop && ((unsigned char)*e & 0xC0) == 0x80) e--;
     *e = 0;
     while (e > s_svl.stop && e[-1] == ' ') *--e = 0;
   }
+  s_svl.stop_x = fr->end - run_w(s_svl.stop, f_line, false, TRACK);
   s_svl.note[0] = 0;
   if (s_sv.n == 0) strncpy(s_svl.note, s_sv.stop[0] ? "NO MORE TODAY" : "NO STOPS NEARBY", sizeof(s_svl.note));
-  int y = band_top + sc(SV_LINE_GAP) + s_svl.m_lab.cap + sc(SV_ROWS_GAP);
-  const int badge_h = s_svl.m_val.cap + 2 * sc(2);
+  s_svl.note_x = fr->end - run_w(s_svl.note, f_line, false, TRACK);
+
+  const int badge_h = sc(SV_BADGE_H);
+  const int line_h = s_svl.m_lab.cap + sc(SV_ROWS_GAP);
+  int rows = s_sv.n < SV_ROWS ? s_sv.n : SV_ROWS;
+  if (s_sv.n == 0) rows = 1;   // the note takes a row's place
+  while (rows > 0 && sc(SV_LINE_GAP) + line_h + (rows - 1) * sc(SV_ROW_H) + badge_h > band_bot - band_top - sc(2)) rows--;
+  const int used = sc(SV_LINE_GAP) + line_h + (rows ? (rows - 1) * sc(SV_ROW_H) + badge_h : 0);
+  const int top = centred ? band_top + (band_bot - band_top - used) / 2 : band_top;
+  s_svl.head_y = top + sc(SV_LINE_GAP) - s_svl.m_lab.bearing;
+  int y = top + sc(SV_LINE_GAP) + line_h;
+  s_svl.note_y = y + sc(2) - s_svl.m_lab.bearing;
   s_svl.n = 0;
-  for (int i = 0; i < s_sv.n && i < SV_ROWS; i++) {
-    if (y + badge_h > band_bot - sc(2)) break;   // no room above the block for this row
+  if (s_sv.n == 0) return;
+  for (int i = 0; i < rows; i++) {
     const SvRow *row = &s_sv.row[i];
-    const int pad = sc(3);
+    const int pad = sc(2);
     s_svl.r[i].y = y;
-    s_svl.r[i].badge_w = run_w(row->route, s_f_mod, false, 0) + 2 * pad;
+    // A one-glyph route gets a square badge; longer ones grow with the glyphs.
+    const int gw = run_w(row->route, f_badge, false, 0);
+    s_svl.r[i].badge_w = gw + 2 * pad < badge_h ? badge_h : gw + 2 * pad;
     s_svl.r[i].badge_h = badge_h;
-    s_svl.r[i].badge_x = fr->start;
-    s_svl.r[i].text_x = fr->start + pad;
-    s_svl.r[i].text_y = y + sc(2) - s_svl.m_val.bearing;
-    // when: minutes in the value font with a small MIN, or a clock time
-    const int w_w = run_w(row->when, s_f_mod, row->mins, 0);
-    const int u_w = row->mins ? sc(2) + run_w("MIN", s_f_cap, false, TRACK) : 0;
-    s_svl.r[i].when_x = fr->end - w_w - u_w;   // logical; the pair is one row, mirrored whole
-    s_svl.r[i].when_w = w_w; s_svl.r[i].unit_w = u_w;
-    s_svl.r[i].when_y = y + sc(2) - s_svl.m_val.bearing;
-    s_svl.r[i].unit_y = y + sc(2) + s_svl.m_val.cap - s_svl.m_cap.cap - s_svl.m_cap.bearing;
-    // the headsign takes what is left, a glyph at a time
-    s_svl.r[i].head_x = fr->start + s_svl.r[i].badge_w + sc(4);
-    s_svl.r[i].head_y = y + sc(2) + s_svl.m_val.cap - s_svl.m_lab.cap - s_svl.m_lab.bearing;
-    const int room = s_svl.r[i].when_x - sc(4) - s_svl.r[i].head_x;
-    strncpy(s_svl.r[i].head, row->head, sizeof(s_svl.r[i].head) - 1);
-    s_svl.r[i].head[sizeof(s_svl.r[i].head) - 1] = 0;
-    while (s_svl.r[i].head[0] && run_w(s_svl.r[i].head, s_f_label, false, TRACK) > room) {
-      char *e = s_svl.r[i].head + strlen(s_svl.r[i].head) - 1;
-      while (e > s_svl.r[i].head && ((unsigned char)*e & 0xC0) == 0x80) e--;   // a whole UTF-8 sequence
-      *e = 0;
-      while (e > s_svl.r[i].head && e[-1] == ' ') *--e = 0;
-    }
+    s_svl.r[i].glyph_dx = (s_svl.r[i].badge_w - gw) / 2;
+    s_svl.r[i].glyph_y = y + (badge_h - s_svl.m_bad.cap) / 2 - s_svl.m_bad.bearing;
+    // The times sit on the badge's baseline: cap bottoms level.
+    s_svl.r[i].text_y = y + (badge_h + s_svl.m_bad.cap) / 2 - s_svl.m_val.cap - s_svl.m_val.bearing;
+    // The times come as one string, a space between; two at most.
+    const char *sp = strchr(row->when, ' ');
+    const size_t l1 = sp ? (size_t)(sp - row->when) : strlen(row->when);
+    memcpy(s_svl.r[i].t1, row->when, l1 < sizeof(s_svl.r[i].t1) - 1 ? l1 : sizeof(s_svl.r[i].t1) - 1);
+    s_svl.r[i].t1[l1 < sizeof(s_svl.r[i].t1) - 1 ? l1 : sizeof(s_svl.r[i].t1) - 1] = 0;
+    s_svl.r[i].t2[0] = 0;
+    if (sp) { strncpy(s_svl.r[i].t2, sp + 1, sizeof(s_svl.r[i].t2) - 1); s_svl.r[i].t2[sizeof(s_svl.r[i].t2) - 1] = 0; }
+    // Proportional, as the design sets them: the colon takes its own width.
+    const int w1 = run_w(s_svl.r[i].t1, f_time, false, 0);
+    const int w2 = s_svl.r[i].t2[0] ? run_w(s_svl.r[i].t2, f_time, false, 0) : 0;
+    s_svl.r[i].t1_dx = s_svl.r[i].badge_w + sc(SV_BADGE_GAP);
+    s_svl.r[i].t2_dx = s_svl.r[i].t1_dx + w1 + sc(SV_TIME_GAP);
+    s_svl.r[i].row_w = s_svl.r[i].t1_dx + w1 + (w2 ? sc(SV_TIME_GAP) + w2 : 0);
+    // A second time that would push the row past the wrist edge is dropped.
+    if (s_svl.r[i].row_w > fr->end - fr->start && w2) { s_svl.r[i].t2[0] = 0; s_svl.r[i].row_w = s_svl.r[i].t1_dx + w1; }
+    s_svl.r[i].row_x = fr->end - s_svl.r[i].row_w;
     s_svl.n = i + 1;
     y += sc(SV_ROW_H);
   }
@@ -1135,32 +1155,27 @@ static void layout_stopview(const Frame *fr, int band_top, int band_bot) {
 static void paint_stopview(int fr_start) __attribute__((noinline));
 static void paint_stopview(int fr_start) {
   graphics_context_set_text_color(s_ctx, s_dim);
-  draw_run(s_svl.stop, s_f_label, fr_start, s_svl.head_y, false, TRACK);
+  draw_run(s_svl.stop, s_f_cap, s_svl.stop_x, s_svl.head_y, false, TRACK);
   if (s_svl.dist_w) {
     graphics_context_set_text_color(s_ctx, s_ink);
-    draw_run(s_svl.dist, s_f_label, s_svl.dist_x, s_svl.head_y, false, TRACK);
+    draw_run(s_svl.dist, s_f_cap, fr_start, s_svl.head_y, false, TRACK);
   }
   if (s_svl.note[0]) {
     graphics_context_set_text_color(s_ctx, s_ink);
-    draw_run(s_svl.note, s_f_label, fr_start, s_svl.top + sc(SV_LINE_GAP) + s_svl.m_lab.cap + sc(SV_ROWS_GAP) + sc(2) - s_svl.m_lab.bearing, false, TRACK);
+    draw_run(s_svl.note, s_f_cap, s_svl.note_x, s_svl.note_y, false, TRACK);
   }
   for (int i = 0; i < s_svl.n; i++) {
     const SvRow *row = &s_sv.row[i];
+    // The row is one unit, placed once by its logical x, then read rightwards.
+    const int rx = mapx(s_svl.r[i].row_x, s_svl.r[i].row_w);
     const GColor fill = PBL_IF_COLOR_ELSE(GColorFromHEX(row->color), s_ink);
     graphics_context_set_fill_color(s_ctx, fill);
-    graphics_fill_rect(s_ctx, GRect(mapx(s_svl.r[i].badge_x, s_svl.r[i].badge_w), s_svl.r[i].y,
-                                    s_svl.r[i].badge_w, s_svl.r[i].badge_h), sc(3), GCornersAll);
+    graphics_fill_rect(s_ctx, GRect(rx, s_svl.r[i].y, s_svl.r[i].badge_w, s_svl.r[i].badge_h), sc(2), GCornersAll);
     graphics_context_set_text_color(s_ctx, on_fill(fill));
-    draw_run(row->route, s_f_mod, s_svl.r[i].text_x, s_svl.r[i].text_y, false, 0);
+    draw_run_s(row->route, s_f_cap, rx + s_svl.r[i].glyph_dx, s_svl.r[i].glyph_y, false, 0);
     graphics_context_set_text_color(s_ctx, s_ink);
-    draw_run(s_svl.r[i].head, s_f_label, s_svl.r[i].head_x, s_svl.r[i].head_y, false, TRACK);
-    // The minutes and their MIN are one row: placed once, then read rightwards.
-    const int wx = mapx(s_svl.r[i].when_x, s_svl.r[i].when_w + s_svl.r[i].unit_w);
-    draw_run_s(row->when, s_f_mod, wx, s_svl.r[i].when_y, row->mins, 0);
-    if (row->mins) {
-      graphics_context_set_text_color(s_ctx, s_dim);
-      draw_run_s("MIN", s_f_cap, wx + s_svl.r[i].when_w + sc(2), s_svl.r[i].unit_y, false, TRACK);
-    }
+    draw_run_s(s_svl.r[i].t1, s_f_board, rx + s_svl.r[i].t1_dx, s_svl.r[i].text_y, false, 0);
+    if (s_svl.r[i].t2[0]) draw_run_s(s_svl.r[i].t2, s_f_board, rx + s_svl.r[i].t2_dx, s_svl.r[i].text_y, false, 0);
   }
 }
 
@@ -1387,12 +1402,21 @@ static void face_update(Layer *layer, GContext *ctx) {
   // number on the face. Nothing is lost to a flick, least of all a bus
   // boarding. Date and modules sit it out.
   if (s_sv.valid) {
-    layout_time(t, &fr, s_f_time_s, TIME_MARGIN_TOP);
-    paint_time();
-    layout_block(t, &sch, &fr, s_f_count_s, BLOCK_ROW_GAP_S, false);
-    layout_stopview(&fr, s_tm.band_top, s_bk.block_y);
-    paint_block(fr.start);
-    paint_stopview(fr.start);
+    if (quiet) {
+      // The quiet face has no countdown to keep: the time stays full size
+      // and the board takes the room below it.
+      layout_time(t, &fr, s_f_time, TIME_MARGIN_TOP);
+      paint_time();
+      layout_stopview(&fr, s_tm.band_top, fr.bot, true);
+      paint_stopview(fr.start);
+    } else {
+      layout_time(t, &fr, s_f_time_s, TIME_MARGIN_TOP);
+      paint_time();
+      layout_block(t, &sch, &fr, s_f_count_s, BLOCK_ROW_GAP_S, false);
+      layout_stopview(&fr, s_tm.band_top, s_bk.block_y, false);
+      paint_block(fr.start);
+      paint_stopview(fr.start);
+    }
   } else {
     // A timeline peek covers the bottom third. The date goes first, the time
     // and the countdown step down, and the modules and the second countdown
@@ -1645,6 +1669,7 @@ static void init(void) {
   s_f_mod = fonts_load_custom_font(resource_get_handle(RES_MOD));
   s_f_label = fonts_load_custom_font(resource_get_handle(RES_LABEL));
   s_f_date = fonts_load_custom_font(resource_get_handle(RES_DATE));
+  s_f_board = fonts_load_custom_font(resource_get_handle(RES_BOARD));
   s_f_cap = fonts_load_custom_font(resource_get_handle(RES_CAP));
   s_f_bigdate = fonts_load_custom_font(resource_get_handle(RES_BIGDATE));
   s_f_time_s = fonts_load_custom_font(resource_get_handle(RES_TIME_S));
@@ -1671,6 +1696,7 @@ static void deinit(void) {
   fonts_unload_custom_font(s_f_mod);
   fonts_unload_custom_font(s_f_label);
   fonts_unload_custom_font(s_f_date);
+  fonts_unload_custom_font(s_f_board);
   fonts_unload_custom_font(s_f_cap);
   fonts_unload_custom_font(s_f_bigdate);
   fonts_unload_custom_font(s_f_time_s);

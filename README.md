@@ -115,22 +115,21 @@ the feed.
 ### A flick for the nearest stop
 
 With the hub known, a flick of the wrist asks the phone where you are, this
-time precisely, and for twelve seconds, lit, the face shows the nearest stop
-and what leaves it next. The time steps down a size to make the room; the
-stop's line and its rows take it — the route in the agency's own colour, where
-it is going, and the minutes, or the clock time once it is more than an hour
-out; and the countdown stays at the foot, a size down but still the largest
-number on the face, and for those seconds it runs in seconds, minutes and
-seconds together. Nothing is lost to a flick, least of all a bus boarding or
-NOW. Date and modules sit it out. Stood at the stop, the line is just its
-name; further off, it says how far. Twin stops across a road are read as one,
-and at the hub every bay is, under the hub's own name: TRANSIT CTR. Nothing
-within a mile and a half, and it says so. A setting turns the flick off
-altogether.
+time precisely, and for twelve seconds, lit, the face shows the nearest stop's
+board, as the design draws it: the stop's name, then a row a route — its badge
+in the agency's own colour and its next two times. Twin stops across a road
+are read as one, and at the hub every bay is, under the hub's own name:
+TRANSIT CTR. Stood at the stop, the line is just its name; further off, it
+says how far. Where the countdown is running the time steps down a size and
+the board takes the room above the block, which keeps the foot and runs in
+seconds while the board shows; on the quiet face there is no countdown to
+keep, so the time stays full size and the board sits centred beneath it.
+Nothing within a mile and a half, and it says so. A setting turns the flick
+off altogether.
 
-| at a stop | near one |
-|---|---|
-| ![at a stop](screenshots/stop.png) | ![near a stop](screenshots/stop-near.png) |
+| at a stop | near one | on the quiet face |
+|---|---|---|
+| ![at a stop](screenshots/stop.png) | ![near a stop](screenshots/stop-near.png) | ![the board on the quiet face](screenshots/stop-quiet.png) |
 
 The departures come from a small file a stop, served from this repository's
 pages and rewritten every night from the agency's feed by a workflow, so the
@@ -200,12 +199,15 @@ The SDK's font generator rasterises through the font's own hints, which
 scatter one- and two-pixel stems across the small sizes. `tools/fontgen.py`
 is that generator, vendored from the SDK with FreeType's auto-hinter forced,
 and the `.pfo` blobs it writes ship as raw resources, which
-`fonts_load_custom_font` takes as it would any font.
+`fonts_load_custom_font` takes as it would any font. The board's clock times
+are the one exception to the condensed cut: they are set in Barlow Semi
+Condensed, as the design draws them.
 
 Module icons are hand-placed pixel patterns, scaled by nearest neighbour, so
 they invert with the theme and hold their shape on emery at no resource cost.
 
 ## Licence
 
-Code under the MIT licence, see `LICENSE`. Barlow Condensed is under the SIL
+Code under the MIT licence, see `LICENSE`. Barlow Condensed and Barlow Semi
+Condensed are under the SIL
 Open Font License, see `resources/fonts/OFL.txt`.
