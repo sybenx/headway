@@ -325,11 +325,25 @@
         "step": 1
       },
       {
-        "type": "toggle",
-        "messageKey": "BUZZ",
+        "type": "select",
+        "messageKey": "BUZZ_AT",
         "label": "Boarding buzz",
         "description": "One pulse when the block goes solid, five minutes out.",
-        "defaultValue": false
+        "defaultValue": "1",
+        "options": [
+          {
+            "label": "At the transit centre",
+            "value": "1"
+          },
+          {
+            "label": "Wherever the countdown runs",
+            "value": "2"
+          },
+          {
+            "label": "Off",
+            "value": "0"
+          }
+        ]
       },
       {
         "type": "toggle",

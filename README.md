@@ -47,8 +47,8 @@ phone checks where it is now and then, coarsely, and the face changes by the
 answer. Outside every known system nothing changes and it asks less often.
 
 **At the hub**, in its hours, the countdown appears: minutes to the next
-departure, at the outer edge. Five minutes out the block goes solid, with an
-optional buzz; at zero it reads `NOW` for a minute. The last minute counts
+departure, at the outer edge. Five minutes out the block goes solid and the
+watch buzzes once; at zero it reads `NOW` for a minute. The last minute counts
 in seconds. Routes that keep their own timetable get a second countdown as
 colour chips in the module band, with their departure's clock time small
 beside them, and their last minute counts in seconds too.
@@ -109,7 +109,8 @@ From the Pebble app.
   how near the hub counts as at it, and a switch for the flick.
 - **Headway** and **departure offset** — for the countdown: 30, 20 or 15
   minutes, and minutes past the hour.
-- **Boarding buzz** — one pulse at five minutes, off by default.
+- **Boarding buzz** — one pulse at five minutes: at the transit centre
+  (default), wherever the countdown runs, or off.
 - **Theme** — dark at night and light by day, with the night window; or
   dark; or light.
 - **Accent** — any colour; the rail, the colon and the boarding block.

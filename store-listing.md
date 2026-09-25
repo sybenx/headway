@@ -21,8 +21,8 @@ you can still see is the part you need. Dark at night, light by day.
 
 Near a transit centre it knows, it changes. A countdown to the next
 departure takes the outer edge, minutes and the clock time, and goes solid
-at five minutes. Routes with their own timetable get a second countdown as
-colour chips. Away from the centre, it's the plain watch again.
+with a buzz at five minutes. Routes with their own timetable get a second
+countdown as colour chips. Away from the centre, it's the plain watch again.
 
 Flick your wrist at a bus stop and for twelve seconds the face shows what
 leaves from there next: the stop, each route as a coloured badge, and its
@@ -43,6 +43,12 @@ countdown on everywhere for any service that runs on a fixed headway.
 
 Colour watches show the badges and icons in colour; Pebble Classic and Pebble
 2 draw them in black and white. Round watches aren't supported.
+
+## Release notes (1.12.2)
+
+At the transit centre the watch now buzzes once when the next departure is
+five minutes out, on by default. The setting can move the buzz to wherever
+the countdown runs, or turn it off.
 
 ## Release notes (1.12.1)
 

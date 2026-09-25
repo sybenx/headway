@@ -40,7 +40,7 @@ typedef struct {
   bool wrist_right;    // true: rail on the left, sleeve from the right
   uint8_t offset;      // departure, minutes past the hour (0..headway-1)
   uint8_t headway;     // minutes between runs: 30, 20 or 15
-  bool buzz;           // single pulse when the boarding block goes solid
+  uint8_t buzz;        // BUZZ_*: where one pulse marks the block going solid
   uint8_t time_fmt;    // TIME_FMT_*
   uint8_t theme;       // THEME_*
   uint8_t night_start; // hour the night window opens
@@ -59,8 +59,12 @@ typedef struct {
 #define MOD_ICONS_ON     1
 #define MOD_ICONS_COLOUR 2
 
+#define BUZZ_OFF    0
+#define BUZZ_HUB    1   // only at the hub, where a countdown is a bus to catch
+#define BUZZ_ALWAYS 2   // wherever the countdown runs
+
 #define SETTINGS_KEY 1
-#define SETTINGS_VERSION 4
+#define SETTINGS_VERSION 5
 #define WEATHER_KEY  2
 #define TRANSIT_KEY  3
 #define THRESHOLD 5   // minutes; block goes solid at or under this
@@ -109,7 +113,7 @@ static void settings_defaults(void) {
   s_set.wrist_right = false;
   s_set.offset = 0;
   s_set.headway = 30;
-  s_set.buzz = false;
+  s_set.buzz = BUZZ_HUB;
   s_set.time_fmt = TIME_FMT_SYSTEM;
   s_set.theme = THEME_AUTO;   // dark through the night, light by day
   s_set.night_start = 19;
@@ -143,6 +147,7 @@ static void settings_clamp(void) {
     if (s_set.mod[i] > MODULE_WEATHER) s_set.mod[i] = MODULE_NONE;
   }
   if (s_set.transit > TRANSIT_AUTO) s_set.transit = TRANSIT_AUTO;
+  if (s_set.buzz > BUZZ_ALWAYS) s_set.buzz = BUZZ_HUB;
   if (s_set.radius < 50) s_set.radius = 50;
   if (s_set.radius > 2000) s_set.radius = 2000;
 }
@@ -156,18 +161,23 @@ static void settings_load(void) {
   if (persist_exists(SETTINGS_KEY)) {
     const int n = persist_get_size(SETTINGS_KEY);
     Settings stored = s_set;   // the defaults, for whatever the blob lacks
+    bool adopted = false;
     if (n == (int)sizeof(s_set)) {
       persist_read_data(SETTINGS_KEY, &stored, sizeof(stored));
-      if (stored.version == SETTINGS_VERSION) s_set = stored;
+      // Layout 4 is this one byte for byte; only the buzz's meaning moved.
+      if (stored.version == SETTINGS_VERSION || stored.version == 4) { s_set = stored; adopted = true; }
     } else if (n >= (int)offsetof(Settings, transit) && n < (int)sizeof(s_set)) {
       // An older layout: the same fields up to where new ones were appended.
       // Carry it over rather than hand the wearer the defaults again.
       persist_read_data(SETTINGS_KEY, &stored, n);
-      if (stored.version >= 1 && stored.version <= SETTINGS_VERSION) s_set = stored;
+      if (stored.version >= 1 && stored.version <= SETTINGS_VERSION) { s_set = stored; adopted = true; }
       // Before layout 4 the hub was off unless chosen; now it is automatic
       // unless chosen, and an unchosen off reads as automatic.
       if (stored.version < 4 && s_set.transit == TRANSIT_OFF) s_set.transit = TRANSIT_AUTO;
     }
+    // Before layout 5 the buzz was a switch, off unless chosen. A chosen on
+    // meant wherever the countdown ran; an unchosen off reads as the hub.
+    if (adopted && stored.version < 5) s_set.buzz = stored.buzz ? BUZZ_ALWAYS : BUZZ_HUB;
   }
   s_set.version = SETTINGS_VERSION;
   settings_clamp();
@@ -1662,8 +1672,10 @@ static void face_update(Layer *layer, GContext *ctx) {
     if (s_sec.show) paint_secs();
   }
 
-  // ---- boarding buzz, once on the transition into the solid block.
-  if (!quiet && s_set.buzz && sch.remaining == THRESHOLD && s_last_remaining != THRESHOLD
+  // ---- boarding buzz, once on the transition into the solid block: at the
+  // hub by default, or wherever the countdown runs.
+  const bool buzz = s_set.buzz == BUZZ_ALWAYS || (s_set.buzz == BUZZ_HUB && at_hub);
+  if (!quiet && buzz && sch.remaining == THRESHOLD && s_last_remaining != THRESHOLD
       && !quiet_time_is_active()) {
     vibes_short_pulse();
   }
@@ -1790,8 +1802,8 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
   if ((tp = dict_find(iter, MESSAGE_KEY_HEADWAY))) {
     s_set.headway = (uint8_t)tuple_int(tp);
   }
-  if ((tp = dict_find(iter, MESSAGE_KEY_BUZZ))) {
-    s_set.buzz = tp->value->int32 != 0;
+  if ((tp = dict_find(iter, MESSAGE_KEY_BUZZ_AT))) {
+    s_set.buzz = (uint8_t)tuple_int(tp);
   }
   if ((tp = dict_find(iter, MESSAGE_KEY_H24))) {
     s_set.time_fmt = (uint8_t)tuple_int(tp);
