@@ -93,7 +93,7 @@ typedef struct {
 #define SV_WAIT_MS 15000
 typedef struct { char route[8], head[20], when[24]; uint32_t color; bool mins; } SvRow;
 static struct {
-  bool valid, pending;
+  bool valid, pending, lit;   // lit: a flick was heard; the seconds show until the answer's time is up
   char stop[24];
   int dist, n;
   SvRow row[SV_ROWS];
@@ -1630,6 +1630,9 @@ static void face_update(Layer *layer, GContext *ctx) {
       else layout_sideblock(&fr, s_tm.band_top, band_bot, s_md.n ? s_md.x0 + s_md.total : fr.start - sc(8), fr.end);
       if (s_sb.show) layout_secs(t, &fr, s_tm.band_top);
     }
+    // A flick with nothing to show, or one still waiting on the phone: the
+    // seconds alone, under the time, so the gesture is seen to have landed.
+    if (s_sv.lit && !s_sec.show) layout_secs(t, &fr, s_tm.band_top);
   }
   if (s_sv.valid && !s_sb.show) {
     layout_time(t, &fr, s_f_time, TIME_MARGIN_TOP);
@@ -1671,7 +1674,7 @@ static void retune_tick(void) {
   const int now_min = t->tm_hour * 60 + t->tm_min;
   const bool gb_final = s_set.final_seconds && transit_fresh(now) && s_tr.state == 1
       && (transit_next(s_tr.g, now_min) == 1 || transit_next(s_tr.b, now_min) == 1);
-  const bool want = s.is_final || s_sv.valid || gb_final;
+  const bool want = s.is_final || s_sv.lit || gb_final;
   if (want == s_ticking_seconds) return;
   tick_timer_service_unsubscribe();
   tick_timer_service_subscribe(want ? SECOND_UNIT : MINUTE_UNIT, tick_handler);
@@ -1695,6 +1698,7 @@ static void stopview_done(void *data) {
   s_sv.timer = NULL;
   s_sv.valid = false;
   s_sv.pending = false;
+  s_sv.lit = false;
   retune_tick();
   layer_mark_dirty(s_face);
 }
@@ -1714,8 +1718,13 @@ static void tap_handler(AccelAxisType axis, int32_t direction) {
   dict_write_uint8(out, MESSAGE_KEY_FLICK, 1);
   if (app_message_outbox_send() != APP_MSG_OK) return;
   s_sv.pending = true;
+  // The seconds appear under the time at once: the flick was heard, whatever
+  // the answer turns out to be.
+  s_sv.lit = true;
   light_enable_interaction();
   stopview_hold(SV_WAIT_MS);
+  retune_tick();
+  layer_mark_dirty(s_face);
 }
 
 static void take_row(DictionaryIterator *iter, int i, uint32_t kr, uint32_t kh, uint32_t kw, uint32_t kc, uint32_t kt) {
@@ -1744,10 +1753,11 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
     take_row(iter, 2, MESSAGE_KEY_SV_R3, MESSAGE_KEY_SV_H3, MESSAGE_KEY_SV_W3, MESSAGE_KEY_SV_C3, MESSAGE_KEY_SV_T3);
     s_sv.pending = false;
     if (s_sv.n == 0 && !s_sv.stop[0]) {
-      // No stop near enough to speak of: the flick was for the light, and
-      // the face stays as it was. Nothing is taken away to say nothing.
-      if (s_sv.timer) { app_timer_cancel(s_sv.timer); s_sv.timer = NULL; }
+      // No stop near enough to speak of: the face stays as it was, and the
+      // seconds under the time say the flick was heard. Nothing is taken
+      // away to say nothing.
       s_sv.valid = false;
+      stopview_hold(SV_SHOW_MS);
       layer_mark_dirty(s_face);
       return;
     }
