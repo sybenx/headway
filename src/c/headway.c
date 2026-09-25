@@ -1432,7 +1432,7 @@ static void paint_time(void) {
 
 // ---- zone 02: the countdown, and zone 04: weekday and date.
 static struct {
-  char dow[8], date[12], label[20], num[8];
+  char dow[8], date[12], label[20], num[8], secs[5];
   const char *unit;
   bool now, solid, bare;
   GSize z_num;
@@ -1460,8 +1460,19 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
     snprintf(s_bk.label, sizeof(s_bk.label), "%s %d:%02d",
              sch->is_boarding ? "LEAVES" : "NEXT",
              display_hour(sch->next_h), sch->next_m);
-    snprintf(s_bk.num, sizeof(s_bk.num), "%d", sch->is_final ? sch->secs : sch->remaining);
-    if (sch->is_final) s_bk.unit = "SEC";
+    if (sch->is_final) {
+      snprintf(s_bk.num, sizeof(s_bk.num), "%d", sch->secs);
+      s_bk.unit = "SEC";
+    } else if (s_sv.lit) {
+      // Through a flick the countdown shows its seconds where MIN was: what
+      // is truly left, so 19 MIN at eighteen seconds past reads 18:42.
+      const int left = sch->remaining * 60 - (60 - sch->secs);
+      snprintf(s_bk.num, sizeof(s_bk.num), "%d", left / 60);
+      snprintf(s_bk.secs, sizeof(s_bk.secs), ":%02d", left % 60);
+      s_bk.unit = s_bk.secs;
+    } else {
+      snprintf(s_bk.num, sizeof(s_bk.num), "%d", sch->remaining);
+    }
   }
 
   // NOW is set in the countdown face itself, as the design draws it.
@@ -1632,7 +1643,7 @@ static void face_update(Layer *layer, GContext *ctx) {
     }
     // A flick with nothing to show, or one still waiting on the phone: the
     // seconds alone, under the time, so the gesture is seen to have landed.
-    if (s_sv.lit && !s_sec.show) layout_secs(t, &fr, s_tm.band_top);
+    if (s_sv.lit && !s_sec.show && quiet) layout_secs(t, &fr, s_tm.band_top);
   }
   if (s_sv.valid && !s_sb.show) {
     layout_time(t, &fr, s_f_time, TIME_MARGIN_TOP);
@@ -1712,19 +1723,21 @@ static void stopview_hold(uint32_t ms) {
 // read in the same glance.
 static void tap_handler(AccelAxisType axis, int32_t direction) {
   (void)axis; (void)direction;
-  if (transit_mode() == TRANSIT_OFF || !s_set.flick || s_sv.pending) return;
+  // Every flick is heard: the light, and the seconds, at once. The phone is
+  // only asked where a known system makes the answer worth having.
+  if (s_sv.pending) return;
+  s_sv.lit = true;
+  light_enable_interaction();
+  stopview_hold(SV_SHOW_MS);
+  retune_tick();
+  layer_mark_dirty(s_face);
+  if (transit_mode() == TRANSIT_OFF || !s_set.flick) return;
   DictionaryIterator *out;
   if (app_message_outbox_begin(&out) != APP_MSG_OK) return;
   dict_write_uint8(out, MESSAGE_KEY_FLICK, 1);
   if (app_message_outbox_send() != APP_MSG_OK) return;
   s_sv.pending = true;
-  // The seconds appear under the time at once: the flick was heard, whatever
-  // the answer turns out to be.
-  s_sv.lit = true;
-  light_enable_interaction();
   stopview_hold(SV_WAIT_MS);
-  retune_tick();
-  layer_mark_dirty(s_face);
 }
 
 static void take_row(DictionaryIterator *iter, int i, uint32_t kr, uint32_t kh, uint32_t kw, uint32_t kc, uint32_t kt) {

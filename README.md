@@ -80,10 +80,11 @@ minute it is.
 
 Stops across a road from each other are read as one, and at the hub every
 bay is, under the hub's own name. Off the stop, the line says how far.
-Further than two kilometres from any stop a flick lights the face and
-shows the seconds under the time, and that is all: the gesture was heard,
-and nothing is taken away to say there is nothing. The seconds appear the
-moment you flick, before the phone has answered. The countdown steps aside for
+Every flick, anywhere, shows the seconds the moment the watch feels it:
+under the time on the plain face, or, where the countdown is running, in
+the block itself, where `19 MIN` becomes `18:42`, what is truly left. With
+no stop within two kilometres that is all a flick shows: the gesture was
+heard, and nothing is taken away to say there is nothing. The countdown steps aside for
 a board and is back the moment it goes.
 
 The face knows one system so far: Connect, the Cache Valley Transit District
