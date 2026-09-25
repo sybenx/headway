@@ -55,10 +55,20 @@ for c in table('calendar.txt'):
         best[kind] = c
 svc = {c['service_id']: kind for kind, c in best.items()}
 
+# A trip's last stop is where it ends, not somewhere to board: the end of
+# the line lists arrivals, and a rider at Preston must not be shown the bus
+# that has just finished coming in as if it were leaving. The agency marks
+# pickup_type on the rare stop it means to, so both are honoured.
+terminus = {}
+for st in table('stop_times.txt'):
+    terminus[st['trip_id']] = max(terminus.get(st['trip_id'], -1), int(st['stop_sequence']))
+def boards(st):
+    return int(st['stop_sequence']) < terminus[st['trip_id']] and (st.get('pickup_type') or '0') != '1'
+
 first = {}; last = {}; deps = {}
 for st in table('stop_times.txt'):
     t = trips[st['trip_id']]; kind = svc.get(t['service_id'])
-    if not kind: continue
+    if not kind or not boards(st): continue
     m = mins(st['departure_time'])
     first[kind] = min(first.get(kind, 9999), m); last[kind] = max(last.get(kind, 0), m)
     if st['stop_id'] in hub_stops and routes[t['route_id']] in wanted:
@@ -81,7 +91,7 @@ if a.stops_out:
     per_stop = {}
     for st in table('stop_times.txt'):
         t = trips[st['trip_id']]; kind = svc.get(t['service_id'])
-        if not kind: continue
+        if not kind or not boards(st): continue
         r = route_by_id[t['route_id']]
         head = short(t.get('trip_headsign') or '', hints.get('headsigns', {}))
         if not head and r['route_short_name'] in hints.get('loops', []): head = 'LOOP'
