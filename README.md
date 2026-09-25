@@ -68,7 +68,8 @@ the agency's own colour and two columns, and a small date at the foot. The
 first column is the next time; the second holds one thing: the day when
 today's buses are done (`5:12P TOMORROW`, `5:00A MON`), the direction where a
 route runs both ways from a pair of stops across a road (`NORTH`, `SOUTH`),
-otherwise the time after. Times read in the watch's own clock style, and
+otherwise the time after. A bus due this minute, or the minute just gone,
+reads `NOW`. Times read in the watch's own clock style, and
 while the answer shows, the seconds sit small beneath the time at its outer
 edge, since a board read against a timetable wants to know where in the
 minute it is.

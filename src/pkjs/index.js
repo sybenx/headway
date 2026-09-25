@@ -259,7 +259,9 @@ function onFlick() {
           var deps = [], dayWord = '';
           for (var ahead = 0; ahead < 8 && !deps.length; ahead++) {
             var date = new Date(now.getTime() + ahead * 24 * 60 * 60 * 1000);
-            var kind = dayKind(date), from = ahead ? 0 : nowMin;
+            // Today's list keeps the minute just gone: a bus due a minute ago
+            // may still be pulling in, and the watch reads it as NOW.
+            var kind = dayKind(date), from = ahead ? 0 : nowMin - 1;
             stops.forEach(function (stop) {
               (stop.days[kind] || []).forEach(function (dep) {
                 if (dep[0] >= from) deps.push({ t: dep[0], route: dep[1], head: dep[2] });

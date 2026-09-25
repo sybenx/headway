@@ -817,7 +817,7 @@ static GColor module_tint(const Module *m) {
   if (s_set.mod_icons != MOD_ICONS_COLOUR) return s_dim;
   switch (m->kind) {
     case MODULE_HR:      return GColorFromHEX(0xFF0055);
-    case MODULE_BATTERY: return GColorFromHEX(m->extra > 50 ? 0x00AA55 : m->extra > 20 ? 0xFFAA00 : 0xFF0000);
+    case MODULE_BATTERY: return GColorFromHEX(m->extra > 20 ? 0x00AA55 : m->extra > 10 ? 0xFFAA00 : 0xFF0000);   // these watches last: amber at a fifth, red at a tenth
     case MODULE_WEATHER:
       switch (wx_kind(m->extra)) {
         // Yellow on the dark ground, where it glows; orange on the light,
@@ -1084,11 +1084,18 @@ static void paint_idle(void) {
 #define SV_ROWS_GAP 5      // between the stop line and the first row
 // A departure comes as minutes past midnight and is written the way the
 // watch tells time: 5:13P, or 17:13 on a 24-hour watch.
+static int s_now_min;   // set each frame, so a board can tell a due bus
 static void sv_clock(char *out, size_t n, const char *tok) {
   const int m = atoi(tok), h = (m / 60) % 24, mm = m % 60;
+  // The minute a bus is due, and the minute after, read NOW: a bus that
+  // should be here is the one thing a board must not hide.
+  if (m <= s_now_min && m >= s_now_min - 1) { strncpy(out, "NOW", n); out[n - 1] = 0; return; }
   if (use_24h()) snprintf(out, n, "%d:%02d", h, mm);
   else snprintf(out, n, "%d:%02d%c", display_hour(h), mm, h < 12 ? 'A' : 'P');
 }
+static bool sv_is_now(const char *t) { return t[0] == 'N'; }
+// NOW is set in the label font, which has the letters; a time in the board's.
+static GFont sv_font(const char *t) { return sv_is_now(t) ? s_f_label : s_f_board; }
 
 // On the light theme grey text at this size loses its strokes, so the stop
 // line is ink with a hairline of light grey beneath it; on one-bit watches
@@ -1211,7 +1218,7 @@ static void layout_stopview(const struct tm *t, const Frame *fr, int band_top) {
     // Proportional, as the design sets them: the colon takes its own width.
     // A word in the second column takes the caption font on the baseline.
     s_svl.r[i].t2_y = s_svl.r[i].t2_day ? s_svl.r[i].text_y + s_svl.m_val.bearing + s_svl.m_val.cap - s_svl.m_lab.cap - s_svl.m_lab.bearing : s_svl.r[i].text_y;
-    const int w1 = run_w(s_svl.r[i].t1, f_time, false, 0);
+    const int w1 = run_w(s_svl.r[i].t1, sv_font(s_svl.r[i].t1), false, 0);
     const int w2 = s_svl.r[i].t2[0] ? run_w(s_svl.r[i].t2, s_svl.r[i].t2_day ? f_line : f_time, false, s_svl.r[i].t2_day ? TRACK : 0) : 0;
     if (w1 > W1) W1 = w1;
     if (w2 > W2) W2 = w2;
@@ -1257,7 +1264,7 @@ static void paint_stopview(int fr_start) {
     graphics_context_set_text_color(s_ctx, on_fill(fill));
     draw_run_s(row->route, s_f_label, rx + s_svl.r[i].glyph_dx, s_svl.r[i].glyph_y, false, 0);
     graphics_context_set_text_color(s_ctx, s_ink);
-    draw_run_s(s_svl.r[i].t1, s_f_board, rx + s_svl.r[i].t1_dx, s_svl.r[i].text_y, false, 0);
+    draw_run_s(s_svl.r[i].t1, sv_font(s_svl.r[i].t1), rx + s_svl.r[i].t1_dx, s_svl.r[i].text_y, false, 0);
     if (s_svl.r[i].t2_day) {
       graphics_context_set_text_color(s_ctx, s_dim);
       draw_run_s(s_svl.r[i].t2, s_f_cap, rx + s_svl.r[i].t2_dx, s_svl.r[i].t2_y, false, TRACK);
@@ -1307,7 +1314,7 @@ static void layout_sideblock(const Frame *fr, int band_top, int band_bot, int le
   s_sb.badge_h = badge_h;
   s_sb.glyph_dx = (s_sb.badge_w - gw + 1) / 2;
   s_sb.t_dx = s_sb.badge_w + sc(SV_BADGE_GAP);
-  s_sb.row_w = s_sb.t_dx + run_w(s_sb.t1, s_f_board, false, 0);
+  s_sb.row_w = s_sb.t_dx + run_w(s_sb.t1, sv_font(s_sb.t1), false, 0);
   // The qualifier: how far, or, stood at the stop, the row's second column.
   s_sb.q[0] = 0; s_sb.q_day = false;
   if (s_sv.dist > 60) { format_dist(s_sb.q, sizeof(s_sb.q), s_sv.dist); s_sb.q_day = true; }
@@ -1347,7 +1354,7 @@ static void paint_sideblock(void) {
   graphics_context_set_text_color(s_ctx, on_fill(fill));
   draw_run_s(row->route, s_f_label, rx + s_sb.glyph_dx, s_sb.glyph_y, false, 0);
   graphics_context_set_text_color(s_ctx, s_ink);
-  draw_run_s(s_sb.t1, s_f_board, rx + s_sb.t_dx, s_sb.t_y, false, 0);
+  draw_run_s(s_sb.t1, sv_font(s_sb.t1), rx + s_sb.t_dx, s_sb.t_y, false, 0);
   if (s_sb.q[0]) {
     graphics_context_set_text_color(s_ctx, s_sb.q_day ? s_dim : s_ink);
     draw_run(s_sb.q, s_sb.q_day ? s_f_cap : s_f_board, s_sb.q_x, s_sb.q_y, false, s_sb.q_day ? TRACK : 0);
@@ -1569,6 +1576,7 @@ static void face_update(Layer *layer, GContext *ctx) {
   t = localtime(&now);
   sch = schedule_for(t->tm_hour, t->tm_min, t->tm_sec);
 /*DEMO*/
+  s_now_min = t->tm_hour * 60 + t->tm_min;
   // With the hub known, the countdown is for the hub: at it in its hours the
   // face runs as ever, with the second countdown; anywhere else it is quiet.
   at_hub = transit_fresh(now) && s_tr.state == 1;
