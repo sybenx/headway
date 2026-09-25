@@ -43,8 +43,13 @@ countdown on everywhere for any service that runs on a fixed headway.
 Colour watches show the badges and icons in colour; Pebble Classic and Pebble
 2 draw them in black and white. Round watches aren't supported.
 
-## Release notes (1.10.0)
+## Release notes (1.12.1)
 
-The watch out of the box: time, heart rate and weather in colour, the date.
-Near a transit centre it knows, the countdown; a wrist flick at a stop shows
-what leaves next.
+A different watch from 1.0.5. Out of the box it's the time, heart rate and
+the weather as small coloured icons, and the date, everything hung from the
+outer edge so a cuff uncovers what matters first. Near Connect's transit
+centre in Logan the countdown takes over, with the G and B loops as colour
+chips. A flick of the wrist at any Connect stop shows what leaves from it
+next. Every flick shows the seconds, and the last minute counts down in
+them. The small captions are drawn by hand, a pixel at a time. The settings
+page is reordered and reworded to match.

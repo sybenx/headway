@@ -5,61 +5,7 @@
   },
   {
     "type": "text",
-    "defaultValue": "Read it from the cuff in. The rail and the countdown sit on the far edge; the hour, date and extras sit on the wrist side, where a sleeve covers them first."
-  },
-  {
-    "type": "section",
-    "items": [
-      {
-        "type": "heading",
-        "defaultValue": "Schedule"
-      },
-      {
-        "type": "select",
-        "messageKey": "HEADWAY",
-        "label": "Headway",
-        "description": "Minutes between runs.",
-        "defaultValue": "30",
-        "options": [
-          {
-            "label": "Every 30 minutes",
-            "value": "30"
-          },
-          {
-            "label": "Every 20 minutes",
-            "value": "20"
-          },
-          {
-            "label": "Every 15 minutes",
-            "value": "15"
-          }
-        ]
-      },
-      {
-        "type": "slider",
-        "messageKey": "OFFSET",
-        "label": "Departure offset",
-        "description": "Minutes past the hour of the first run. Later runs repeat every headway.",
-        "defaultValue": 0,
-        "min": 0,
-        "max": 29,
-        "step": 1
-      },
-      {
-        "type": "toggle",
-        "messageKey": "BUZZ",
-        "label": "Boarding buzz",
-        "description": "A single pulse when the block goes solid, five minutes out.",
-        "defaultValue": false
-      },
-      {
-        "type": "toggle",
-        "messageKey": "SECONDS",
-        "label": "Seconds in the final minute",
-        "description": "The one place the face moves. Off keeps it to one redraw a minute.",
-        "defaultValue": true
-      }
-    ]
+    "defaultValue": "Everything hangs from the outer edge of the screen, the edge a sleeve uncovers first: the minutes, the number of the date, the modules. When a countdown runs it takes that edge and the rest moves to the wrist side."
   },
   {
     "type": "section",
@@ -92,7 +38,7 @@
         "type": "slider",
         "messageKey": "NIGHT_START",
         "label": "Night starts",
-        "description": "The window the day/night theme calls night.",
+        "description": "The hours the day/night theme calls night.",
         "defaultValue": 19,
         "min": 0,
         "max": 23,
@@ -163,7 +109,7 @@
       },
       {
         "type": "text",
-        "defaultValue": "Up to three, in the band the design leaves open. They sit on the wrist side, so a sleeve covers them before the countdown or the rail."
+        "defaultValue": "Up to three, in the band under the time. On the plain watch they hang from the outer edge with the date. When a countdown runs they move to the wrist side, first under the sleeve."
       },
       {
         "type": "select",
@@ -253,7 +199,7 @@
         "type": "select",
         "messageKey": "MOD_ICONS",
         "label": "Captions or icons",
-        "description": "Captions name the sky for weather: SUNNY, CLOUDY, RAIN. Icons draw it. In colour, the heart is red, the battery shows its charge, and the sky comes in its own colour.",
+        "description": "Captions name the sky: SUNNY, CLOUDY, RAIN. Icons draw it. In colour the heart is red, the sun yellow at night and orange by day, rain blue, and the battery goes amber at 20% and red at 10%. A watch without a heart-rate sensor shows its battery in that slot.",
         "defaultValue": "2",
         "options": [
           {
@@ -274,14 +220,15 @@
         "type": "select",
         "messageKey": "UNITS",
         "label": "Units",
+        "description": "The temperature, and how far a stop is.",
         "defaultValue": "metric",
         "options": [
           {
-            "label": "Celsius",
+            "label": "Metric: °C, metres",
             "value": "metric"
           },
           {
-            "label": "Fahrenheit",
+            "label": "Imperial: °F, feet",
             "value": "imperial"
           }
         ]
@@ -297,7 +244,7 @@
       },
       {
         "type": "text",
-        "defaultValue": "The face knows some transit systems: their hub, its hours, and every stop. Automatic, the default, asks the phone where it is now and then, and near a known system the countdown gets its second count near the hub and a flick shows the nearest stop; elsewhere it is a plain watch. Or keep the countdown everywhere and the second count near the hub always, or have both only near the hub with the face quiet elsewhere. Knows CVTD (Logan, Utah) so far."
+        "defaultValue": "The face knows some transit systems: the transit centre, its hours, the routes on their own timetable, and every stop. So far that is Connect, the Cache Valley Transit District in Logan, Utah."
       },
       {
         "type": "select",
@@ -318,24 +265,78 @@
             "value": "0"
           }
         ],
-        "description": "Automatic: a plain watch, until the phone finds you near a transit centre the face knows; then the countdown to its next departure, and a flick of the wrist for the nearest stop. Countdown everywhere: the fixed-headway countdown wherever you are, set with the two sliders above. Off: a plain watch, and nothing is asked of the phone."
+        "description": "Automatic: a plain watch until the phone finds you near a transit centre the face knows; then the countdown to its next departure, and a flick of the wrist for the nearest stop. Countdown everywhere: the countdown wherever you are, set below. Off: a plain watch, and nothing is asked of the phone."
       },
       {
         "type": "slider",
         "messageKey": "TR_RADIUS",
-        "label": "Radius around the hub",
+        "label": "At the transit centre within",
         "defaultValue": 300,
         "min": 100,
         "max": 1000,
         "step": 50,
-        "description": "Metres."
+        "description": "Metres from the centre that count as being at it."
       },
       {
         "type": "toggle",
         "messageKey": "FLICK_ON",
         "label": "Flick for the nearest stop",
         "defaultValue": true,
-        "description": "A flick of the wrist shows the nearest stop and what leaves it next. It never covers a solid block."
+        "description": "A flick of the wrist shows the nearest stop and what leaves it next, for twelve seconds. Off, a flick still shows the seconds."
+      }
+    ]
+  },
+  {
+    "type": "section",
+    "items": [
+      {
+        "type": "heading",
+        "defaultValue": "Countdown"
+      },
+      {
+        "type": "select",
+        "messageKey": "HEADWAY",
+        "label": "Headway",
+        "description": "Minutes between departures.",
+        "defaultValue": "30",
+        "options": [
+          {
+            "label": "Every 30 minutes",
+            "value": "30"
+          },
+          {
+            "label": "Every 20 minutes",
+            "value": "20"
+          },
+          {
+            "label": "Every 15 minutes",
+            "value": "15"
+          }
+        ]
+      },
+      {
+        "type": "slider",
+        "messageKey": "OFFSET",
+        "label": "Departure offset",
+        "description": "Minutes past the hour of the first departure. The rest follow every headway.",
+        "defaultValue": 0,
+        "min": 0,
+        "max": 29,
+        "step": 1
+      },
+      {
+        "type": "toggle",
+        "messageKey": "BUZZ",
+        "label": "Boarding buzz",
+        "description": "One pulse when the block goes solid, five minutes out.",
+        "defaultValue": false
+      },
+      {
+        "type": "toggle",
+        "messageKey": "SECONDS",
+        "label": "Last minute in seconds",
+        "description": "The countdown, and the second one at the transit centre, count their last minute in seconds. Off, the face redraws once a minute. A flick shows its seconds either way.",
+        "defaultValue": true
       }
     ]
   },
