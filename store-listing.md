@@ -1,7 +1,8 @@
 # Store listing
 
 The text for the Pebble appstore page. Kept here so it changes with the
-face.
+face. `pebble publish` carries the release notes; the title and description
+go up with `tools/store.py push`.
 
 ## Title
 
