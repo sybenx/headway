@@ -181,7 +181,11 @@ Barlow Semi Condensed, the wider cut.
 The SDK's font generator rasterises through the font's own hints, which
 scatter one- and two-pixel stems across the small sizes. `tools/fontgen.py`
 is that generator, vendored with FreeType's auto-hinter forced, and the
-`.pfo` blobs it writes ship as raw resources. Icons are hand-placed 10×10
+`.pfo` blobs it writes ship as raw resources. The 9px caption font is the
+exception: it is drawn by hand, pixel by pixel, in `tools/fonts/cap_9.json`,
+with one-pixel strokes, even bearings and the digits in one cell, and
+`tools/pfo.py` writes it out; a rasterised 9px Barlow scattered two-pixel
+stems where it pleased. Icons are hand-placed 10×10
 pixel patterns, scaled by nearest neighbour, so they invert with the theme
 and hold their shape on emery.
 

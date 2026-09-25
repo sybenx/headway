@@ -31,7 +31,7 @@ FONTS = [
     ('label_11', 11, '[A-Z0-9:. ]'), ('label_15', 15, '[A-Z0-9:. ]'),   # the point in a distance
     ('date_12', 12, '[A-Z0-9: ]'), ('date_17', 17, '[A-Z0-9: ]'),   # a colon for the board's clock times
     ('date_18', 18, '[A-Z0-9 ]'), ('date_25', 25, '[A-Z0-9 ]'),   # the idle face's larger date
-    ('cap_9', 9, '[A-Z0-9%°&.: ]'), ('cap_12', 12, '[A-Z0-9%°&.: ]'),   # digits, & and . for the board's stop line and badges
+    ('cap_12', 12, '[A-Z0-9%°&.: ]'),   # emery's captions, still rasterised; the 144px caption font is drawn by hand, see below
     ('board_12', 12, '[0-9:AP]', 'semi'), ('board_17', 17, '[0-9:AP]', 'semi'),   # the board's clock times, semi-condensed
 ]
 for spec in FONTS:
@@ -43,3 +43,11 @@ for spec in FONTS:
     with open(os.path.join(OUT, name + '.pfo'), 'wb') as out:
         out.write(data)
     print(f'{name}.pfo {len(data)} bytes')
+
+# The 9px caption font is drawn by hand — tools/fonts/cap_9.json, rows of
+# '#' and '.', digits in one cell — and written through tools/pfo.py.
+import json as _json, pfo
+_cap = _json.load(open(os.path.join(os.path.dirname(__file__), 'fonts', 'cap_9.json')))
+with open(os.path.join(OUT, 'cap_9.pfo'), 'wb') as out:
+    data = pfo.encode(_cap); out.write(data)
+print(f'cap_9.pfo {len(data)} bytes (hand-drawn)')
