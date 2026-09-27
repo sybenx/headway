@@ -2034,14 +2034,15 @@ static void stopview_hold(uint32_t ms) {
 static void tap_handler(AccelAxisType axis, int32_t direction) {
   (void)axis; (void)direction;
   // Every flick is heard: the light, and the seconds, at once. The phone is
-  // only asked where a known system makes the answer worth having.
+  // asked unless transit is off: it takes one fix and finds the system, if
+  // any, so the background checks outside every system can be rare.
   if (s_sv.pending) return;
   s_sv.lit = true;
   light_enable_interaction();
   stopview_hold(SV_SHOW_MS);
   retune_tick();
   layer_mark_dirty(s_face);
-  if (transit_mode() == TRANSIT_OFF || !s_set.flick) return;
+  if (s_set.transit == TRANSIT_OFF || !s_set.flick) return;
   DictionaryIterator *out;
   if (app_message_outbox_begin(&out) != APP_MSG_OK) return;
   dict_write_uint8(out, MESSAGE_KEY_FLICK, 1);

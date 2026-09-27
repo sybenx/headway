@@ -261,11 +261,11 @@
             "value": "1"
           },
           {
-            "label": "Off",
+            "label": "Off: no location checks",
             "value": "0"
           }
         ],
-        "description": "Automatic: a plain watch until the phone finds you near a transit centre the face knows; then the countdown to its next departure, and a flick of the wrist for the nearest stop. Countdown everywhere: the countdown wherever you are, set below. Off: a plain watch, and nothing is asked of the phone."
+        "description": "Automatic: a plain watch; a flick of the wrist inside a transit system the face knows shows the nearest stop, and near its transit centre the countdown comes on. Outside every system the phone checks roughly where you are once an hour, and a flick takes one fix to see whether you're in one. Countdown everywhere: the countdown wherever you are, set below. Off: a plain watch, and the phone never checks your location for transit."
       },
       {
         "type": "slider",

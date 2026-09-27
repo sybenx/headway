@@ -129,7 +129,9 @@ function transitMsg(st) {
 
 // Away from every known system the phone asks less often.
 var lastOutside = 0;
-var OUTSIDE_EVERY = 15 * 60 * 1000;
+// Once an hour is enough: a flick asks too, and finds a system the moment
+// the wearer wants one.
+var OUTSIDE_EVERY = 60 * 60 * 1000;
 
 // What the face should know about a position: whether it is in a system it
 // knows, and whether it is at that system's hub in its hours, with the next
@@ -420,6 +422,9 @@ function onFlick() {
     var lat = pos.coords.latitude, lon = pos.coords.longitude;
     console.log('headway: fix ' + lat.toFixed(4) + ',' + lon.toFixed(4) + ' +-' + Math.round(pos.coords.accuracy) + 'm');
     flickTransit = transitState(lat, lon);
+    // The flick's fix answers the background question too: inside a system
+    // the checks go back to every few minutes, outside they wait an hour.
+    lastOutside = systemAt(lat, lon) ? 0 : Date.now();
     var sys = systemAt(lat, lon);
     if (!sys || !sys.data) return sendStopView('', 0, []);
     var DATA_URL = sys.data, tag = sys.agency.toLowerCase();
