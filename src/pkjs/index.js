@@ -125,6 +125,7 @@ function transitMsg(st) {
     TR_B: packMinutes(st.b),
     TR_AT: Math.floor(Date.now() / 1000),
     TR_KM: st.km || 0,
+    TR_NEAR: st.near ? 1 : 0,
   };
 }
 
@@ -180,7 +181,7 @@ function transitState(lat, lon) {
   var active = d <= radius && inHours;
   var routes = sys.routes;
   return {
-    area: 1, state: active ? 1 : 0,
+    area: 1, state: active ? 1 : 0, near: d <= NEAR_HUB,
     g: active ? upcoming(day.dep[routes[0]] || [], nowMin) : [],
     b: active ? upcoming(day.dep[routes[1]] || [], nowMin) : [],
     why: sys.agency + ' ' + Math.round(d) + 'm from the hub, ' + (active ? 'at it' : 'away'),
@@ -188,12 +189,14 @@ function transitState(lat, lon) {
 }
 
 // ---- when the phone looks. One rough fix every half hour serves the weather
-// and transit both. Every five minutes only near a hub while its buses run,
-// so the countdown comes on as the wearer walks up; after the day's last bus
-// transit asks nothing until a quarter hour before the first one next
-// morning. A flick takes its own fix, and counts as a look.
-var LOOK_EVERY = 30 * 60 * 1000, NEAR_EVERY = 5 * 60 * 1000, NEAR_HUB = 1000;   // NEAR_HUB: about a twelve-minute walk
-var lastLook = 0, lastSys = null, nearHub = false;
+// and transit both. Within a walk of a hub (NEAR_HUB, about twelve minutes)
+// the watch asks for more as the wearer walks, by its step count, so the
+// countdown comes on as they arrive; the phone looks for it only while the
+// hub's buses run, and after the day's last bus transit asks nothing until
+// a quarter hour before the first one next morning. A flick takes its own
+// fix, and counts as a look.
+var LOOK_EVERY = 30 * 60 * 1000, NEAR_HUB = 1000;
+var lastLook = 0, lastSys = null;
 
 function hubRunning(sys) {
   var now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes();
@@ -203,15 +206,13 @@ function hubRunning(sys) {
 function sawFix(lat, lon) {
   lastLook = Date.now();
   lastSys = systemAt(lat, lon);
-  nearHub = !!(lastSys && lastSys.hub && metres(lat, lon, lastSys.hub.lat, lastSys.hub.lon) <= NEAR_HUB);
 }
 
 function look(force) {
   var mode = hubMode(), since = Date.now() - lastLook;
   // Inside a hub's system out of its hours, transit has nothing to ask.
   var transitWants = mode !== MODE_OFF && (force || !(lastSys && lastSys.hub && !hubRunning(lastSys)));
-  var near = transitWants && nearHub && hubRunning(lastSys);
-  if (!force && since < (near ? NEAR_EVERY : LOOK_EVERY)) return;
+  if (!force && since < LOOK_EVERY) return;
   var wx = weatherWanted();
   if (!wx && !transitWants) return;
   navigator.geolocation.getCurrentPosition(function (pos) {
@@ -569,8 +570,19 @@ function onFlick() {
   }, { enableHighAccuracy: true, timeout: 9000, maximumAge: 20000 });
 }
 
+// The watch asks for a look as the wearer walks near a hub; the phone takes
+// it only while the hub's buses run.
+function onLook() {
+  if (hubMode() === MODE_OFF || !(lastSys && lastSys.hub && hubRunning(lastSys))) return;
+  if (Date.now() - lastLook < 60 * 1000) return;
+  console.log('headway: look (walking near the hub)');
+  lastLook = 0;
+  look(false);
+}
+
 Pebble.addEventListener('appmessage', function (e) {
   if (e.payload && e.payload.FLICK) { console.log('headway: flick'); onFlick(); }
+  else if (e.payload && e.payload.LOOK) onLook();
 });
 
 Pebble.addEventListener('ready', function () { look(true); });
@@ -578,4 +590,4 @@ Pebble.addEventListener('webviewclosed', function () {
   // Settings may have switched weather or transit on, or changed units.
   setTimeout(function () { look(true); }, 500);
 });
-setInterval(function () { look(false); }, NEAR_EVERY);
+setInterval(function () { look(false); }, 5 * 60 * 1000);

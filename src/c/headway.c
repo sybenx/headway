@@ -86,6 +86,7 @@ typedef struct {
 typedef struct {
   uint8_t state;           // 0 away or out of hours, 1 at the hub
   uint8_t area;            // 1 inside a system the face knows
+  uint8_t near;            // 1 within a walk of a hub: the watch asks the phone to look as you walk
   uint16_t g[TR_MAX], b[TR_MAX];
   uint16_t km;             // outside every system: how far to the nearest, 0 unknown
   time_t at;
@@ -1978,8 +1979,42 @@ static void retune_tick(void) {
   s_ticking_seconds = want;
 }
 
+// ---- near a hub the watch, not a timer, says when the phone should look:
+// after a hundred steps, about seventy metres, since it last did. Sitting at
+// home by the transit centre costs nothing; walking to it, the countdown is
+// on as you arrive. A watch without a step count asks every five minutes.
+#define LOOK_STEPS 100
+#define LOOK_EVERY (5 * 60)
+static int32_t s_look_steps = -1;   // the day's steps at the last look, -1 none yet
+static time_t s_look_at;
+static int32_t steps_today(void) {
+#ifdef PBL_HEALTH
+  const time_t now = time(NULL);
+  if (health_service_metric_accessible(HealthMetricStepCount, time_start_of_today(), now) & HealthServiceAccessibilityMaskAvailable)
+    return (int32_t)health_service_sum_today(HealthMetricStepCount);
+#endif
+  return -1;
+}
+static void looked(void) {   // a fix has just been taken, by whoever asked
+  s_look_steps = steps_today();
+  s_look_at = time(NULL);
+}
+static void walk_look(void) {
+  if (!s_tr.near || s_set.transit == TRANSIT_OFF) return;
+  const int32_t steps = steps_today();
+  const bool due = steps >= 0
+      ? (s_look_steps < 0 || steps < s_look_steps || steps - s_look_steps >= LOOK_STEPS)
+      : time(NULL) - s_look_at >= LOOK_EVERY;
+  if (!due) return;
+  DictionaryIterator *out;
+  if (app_message_outbox_begin(&out) != APP_MSG_OK) return;
+  dict_write_uint8(out, MESSAGE_KEY_LOOK, 1);
+  if (app_message_outbox_send() == APP_MSG_OK) looked();
+}
+
 static void tick_handler(struct tm *tick_time, TimeUnits units) {
   retune_tick();
+  if (units & MINUTE_UNIT) walk_look();
   layer_mark_dirty(s_face);
 }
 
@@ -2113,7 +2148,10 @@ static void take_transit(DictionaryIterator *iter) {
   Tuple *ta = dict_find(iter, MESSAGE_KEY_TR_AT);
   Tuple *tarea = dict_find(iter, MESSAGE_KEY_TR_AREA);
   Tuple *tkm = dict_find(iter, MESSAGE_KEY_TR_KM);
+  Tuple *tnear = dict_find(iter, MESSAGE_KEY_TR_NEAR);
   s_tr.state = (uint8_t)tp->value->int32;
+  s_tr.near = tnear ? (uint8_t)(tnear->value->int32 != 0) : 0;
+  looked();
   s_tr.km = tkm ? (uint16_t)tkm->value->int32 : 0;
   s_tr.area = tarea ? (uint8_t)(tarea->value->int32 != 0) : 1;
   for (int i = 0; i < TR_MAX; i++) {
