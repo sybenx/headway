@@ -192,7 +192,7 @@ function transitState(lat, lon) {
 // so the countdown comes on as the wearer walks up; after the day's last bus
 // transit asks nothing until a quarter hour before the first one next
 // morning. A flick takes its own fix, and counts as a look.
-var LOOK_EVERY = 30 * 60 * 1000, NEAR_EVERY = 5 * 60 * 1000, NEAR_HUB = 5000;
+var LOOK_EVERY = 30 * 60 * 1000, NEAR_EVERY = 5 * 60 * 1000, NEAR_HUB = 1000;   // NEAR_HUB: about a twelve-minute walk
 var lastLook = 0, lastSys = null, nearHub = false;
 
 function hubRunning(sys) {
