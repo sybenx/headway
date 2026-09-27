@@ -1149,6 +1149,21 @@ static void format_dist(char *out, size_t n, int metres) {
   }
 }
 
+// A stop's name cut down to the room there is: a word at a time from the
+// end, so it never stops mid-word, and a glyph at a time only when one word
+// alone is too wide. Inlined, so the text renderer is no deeper for it.
+static inline __attribute__((always_inline)) void fit_name(char *s, GFont f, int room) {
+  while (s[0] && run_w(s, f, false, TRACK) > room) {
+    char *e = strrchr(s, ' ');
+    if (!e) {
+      e = s + strlen(s) - 1;
+      while (e > s && ((unsigned char)*e & 0xC0) == 0x80) e--;
+    }
+    *e = 0;
+    while (e > s && e[-1] == ' ') *--e = 0;
+  }
+}
+
 // The board, as the design draws it: hung from the outer edge, a line for
 // the stop, then a row a route — its badge and the next clock times, two
 // where they fit, or the next time and its day when today's are done. It
@@ -1176,15 +1191,9 @@ static void layout_stopview(const struct tm *t, const Frame *fr, int band_top) {
     format_dist(s_svl.dist, sizeof(s_svl.dist), s_sv.dist);
     s_svl.dist_w = run_w(s_svl.dist, f_line, false, TRACK);
   }
-  // The stop's name gives way to the distance, a glyph at a time.
+  // The stop's name gives way to the distance, a word at a time.
   strncpy(s_svl.stop, s_sv.stop, sizeof(s_svl.stop) - 1); s_svl.stop[sizeof(s_svl.stop) - 1] = 0;
-  const int name_room = fr->end - fr->start - (s_svl.dist_w ? s_svl.dist_w + sc(6) : 0);
-  while (s_svl.stop[0] && run_w(s_svl.stop, f_line, false, TRACK) > name_room) {
-    char *e = s_svl.stop + strlen(s_svl.stop) - 1;
-    while (e > s_svl.stop && ((unsigned char)*e & 0xC0) == 0x80) e--;
-    *e = 0;
-    while (e > s_svl.stop && e[-1] == ' ') *--e = 0;
-  }
+  fit_name(s_svl.stop, f_line, fr->end - fr->start - (s_svl.dist_w ? s_svl.dist_w + sc(6) : 0));
   s_svl.stop_x = fr->end - run_w(s_svl.stop, f_line, false, TRACK);
   s_svl.note[0] = 0;
   if (s_sv.n == 0) strncpy(s_svl.note, "NO SERVICE", sizeof(s_svl.note));   // a stop the data has nothing for
@@ -1314,14 +1323,9 @@ static void layout_sideblock(const Frame *fr, int band_top, int band_bot, int le
   s_sb.m_val = barlow_metrics(measure("8", s_f_board).h);
   s_sb.m_bad = barlow_metrics(measure("8", s_f_label).h);
   const int room = right - left - sc(8);
-  // The stop's name, a glyph at a time down to the room there is.
+  // The stop's name, a word at a time down to the room there is.
   strncpy(s_sb.stop, s_sv.stop, sizeof(s_sb.stop) - 1); s_sb.stop[sizeof(s_sb.stop) - 1] = 0;
-  while (s_sb.stop[0] && run_w(s_sb.stop, s_f_cap, false, TRACK) > room) {
-    char *e = s_sb.stop + strlen(s_sb.stop) - 1;
-    while (e > s_sb.stop && ((unsigned char)*e & 0xC0) == 0x80) e--;
-    *e = 0;
-    while (e > s_sb.stop && e[-1] == ' ') *--e = 0;
-  }
+  fit_name(s_sb.stop, s_f_cap, room);
   // The row: badge and the next time, as on the board.
   const char *sp = strchr(row->when, ' ');
   sv_clock(s_sb.t1, sizeof(s_sb.t1), row->when);
