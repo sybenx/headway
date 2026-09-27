@@ -48,7 +48,9 @@ Colour watches show the badges and icons in colour; Pebble Classic and Pebble
 
 At the transit centre the watch now buzzes once when the next departure is
 five minutes out, on by default. The setting can move the buzz to wherever
-the countdown runs, or turn it off.
+the countdown runs, or turn it off. The battery icon no longer turns amber
+at 20%: on the Time 2 it goes amber at 10% and red at 5%, and elsewhere red
+at 10%.
 
 ## Release notes (1.12.1)
 
