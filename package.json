@@ -1,7 +1,7 @@
 {
   "name": "headway",
   "author": "Aaron Herbst",
-  "version": "1.12.2",
+  "version": "1.13.0",
   "keywords": [
     "pebble-app",
     "watchface",
@@ -68,6 +68,13 @@
       "SV_T1",
       "SV_T2",
       "SV_T3",
+      "SV_MODE",
+      "SV_K1",
+      "SV_K2",
+      "SV_K3",
+      "SV_O1",
+      "SV_O2",
+      "SV_O3",
       "FLICK_ON",
       "TR_AREA"
     ],

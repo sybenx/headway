@@ -28,13 +28,15 @@ Flick your wrist at a bus stop and for twelve seconds the face shows what
 leaves from there next: the stop, each route as a coloured badge, and its
 next times. One route sits beside the icons and the rest of the face stays;
 two or three routes take the screen. After the last bus it shows the next
-one with its day. Stops across a road from each other read as one, and the
-transit centre reads as one place.
+one with its day. Stops across a road from each other read as one. At the
+transit centre, where a dozen routes leave together, it answers by time
+instead: each departure minute with every route leaving then as a badge.
 
 It knows one system so far: Connect, the Cache Valley Transit District in
-Logan, Utah. Everything it shows is the published schedule, refreshed
-nightly; there's no live tracking yet. Elsewhere it's the plain watch, and
-it asks the phone very little.
+Logan, Utah. A flick also asks for Connect's live predictions: a predicted
+time carries a small arc, a late bus shows when it will really leave, and
+without a live answer the face shows the published schedule, refreshed
+nightly. Elsewhere it's the plain watch, and it asks the phone very little.
 
 Settings on the phone: three module slots (heart rate, steps, battery,
 weather) as captions or icons; theme and night hours; accent colour; left or
@@ -43,6 +45,17 @@ countdown on everywhere for any service that runs on a fixed headway.
 
 Colour watches show the badges and icons in colour; Pebble Classic and Pebble
 2 draw them in black and white. Round watches aren't supported.
+
+## Release notes (1.13.0)
+
+Live times: a flick asks for Connect's live predictions, and a predicted
+time carries a small arc. A late bus shows when it will really leave; one
+that will skip the stop drops out. Without a live answer the face shows the
+schedule as before. At the transit centre a flick now answers by time: each
+departure minute with every route leaving then as a badge, in route order,
+instead of three rows that mostly repeated the countdown; a hollow badge is
+a bus that isn't in yet. Long stop names
+now shorten by whole words.
 
 ## Release notes (1.12.2)
 

@@ -207,6 +207,45 @@ function dirWord(head) {
   return (head || '').replace(/\s+$/, '').slice(0, 8);
 }
 
+// Live predictions, when the system names a relay for them. Only ever an
+// overlay: whatever goes wrong here — no relay, no answer inside the wait,
+// an error, a feed gone quiet — the answer is the schedule, as it always was.
+var LIVE_WAIT = 3000, LIVE_FRESH = 90;
+// A bus this close to its bay, by a position this fresh, is in and waiting.
+var AT_BAY = 60, BUS_FRESH = 180;
+function getLive(sys, ids, cb) {
+  if (!sys.live || !ids.length) return cb(null);
+  var done = false;
+  function finish(v) { if (!done) { done = true; cb(v); } }
+  var req = new XMLHttpRequest();
+  req.open('GET', sys.live + '?stops=' + ids.join(','), true);
+  req.onload = function () {
+    if (req.status !== 200) return finish(null);
+    try {
+      var d = JSON.parse(req.responseText);
+      // The relay passes the feed's own clock through; a feed that has
+      // stopped moving still answers, so its age is checked here.
+      var age = Date.now() / 1000 - d.t;
+      console.log('headway: live ' + Object.keys(d.trips || {}).length + ' trips, age ' + Math.round(age) + 's');
+      finish(d.trips && age < LIVE_FRESH ? d : null);
+    } catch (e) { finish(null); }
+  };
+  req.onerror = function () { finish(null); };
+  req.timeout = LIVE_WAIT;
+  req.ontimeout = function () { finish(null); };
+  setTimeout(function () { finish(null); }, LIVE_WAIT + 250);   // not every phone honours XHR timeouts
+  req.send();
+}
+
+// Route order for ties and within a wave: numbers by number, then the
+// lettered routes in the agency's own order (G before B, as the chips read).
+var routeRank = {};
+function routeKey(r) {
+  var n = parseInt(r, 10);
+  return isNaN(n) ? 1000 + (routeRank[r] || 0) : n;
+}
+function byRoute(a, b) { return routeKey(a) - routeKey(b) || (a < b ? -1 : a > b ? 1 : 0); }
+
 function dayKind(d) { var wd = d.getDay(); return wd === 0 ? 'sunday' : wd === 6 ? 'saturday' : 'weekday'; }
 
 // Times go to the watch as minutes past midnight; the watch writes them in
@@ -214,15 +253,102 @@ function dayKind(d) { var wd = d.getDay(); return wd === 0 ? 'sunday' : wd === 6
 
 function sendStopView(name, dist, rows) {
   console.log('headway: stop view ' + (name || '(none)') + ' ' + rows.length + ' rows');
-  var msg = { SV_STOP: name, SV_DIST: Math.round(dist), SV_N: rows.length };
+  var msg = { SV_STOP: name, SV_DIST: Math.round(dist), SV_N: rows.length, SV_MODE: 0 };
   for (var i = 0; i < rows.length && i < 3; i++) {
     msg['SV_R' + (i + 1)] = rows[i].route;
     msg['SV_H' + (i + 1)] = rows[i].head;
     msg['SV_W' + (i + 1)] = rows[i].when;
-    msg['SV_T' + (i + 1)] = 0;
+    msg['SV_T' + (i + 1)] = rows[i].live ? 1 : 0;
     msg['SV_C' + (i + 1)] = rows[i].color;
   }
   Pebble.sendAppMessage(msg);
+}
+
+// At the hub the answer is by time, not by route: a line a departure minute,
+// every route leaving then as a badge in route order. SV_R holds the labels
+// comma-separated (a label may hold a space: 16 AM),
+// SV_K their colours three bytes a badge, SV_T a bit a badge for live, SV_O a
+// bit a badge for a bus not in at its bay yet.
+function sendWaves(name, waves) {
+  console.log('headway: hub view ' + waves.map(function (w) {
+    return w.when + ' [' + w.routes.map(function (r, j) { return r + ((w.live >> j) & 1 ? '~' : '') + ((w.away >> j) & 1 ? '(away)' : ''); }).join(' ') + ']';
+  }).join(', '));
+  var msg = { SV_STOP: name, SV_DIST: 0, SV_N: waves.length, SV_MODE: 1 };
+  waves.forEach(function (w, i) {
+    var k = [];
+    w.colors.forEach(function (c) { k.push((c >> 16) & 255, (c >> 8) & 255, c & 255); });
+    msg['SV_R' + (i + 1)] = w.routes.join(',');
+    msg['SV_W' + (i + 1)] = w.when;
+    msg['SV_K' + (i + 1)] = k;
+    msg['SV_T' + (i + 1)] = w.live;
+    msg['SV_O' + (i + 1)] = w.away;
+  });
+  Pebble.sendAppMessage(msg);
+}
+
+// Which routes have a bus in at the hub: a fresh live position within AT_BAY
+// of any bay, on a trip of that route. The bays stand too close together to
+// tell apart by position, so the trip says whose bus it is: from the stop
+// files where the trip is one of ours, else from the agency's trip id (3_1030
+// and 3S_1030 are route 3's, B1_0625 is B's), for a bus still on its way in.
+// Null when there is no live answer, so nothing is ever said to be away on no
+// news.
+function routesIn(group, live, stops) {
+  if (!live || !live.at) return null;
+  var tripRoute = {}, nowS = Date.now() / 1000, out = {};
+  stops.forEach(function (stop) {
+    Object.keys(stop.days).forEach(function (k) { stop.days[k].forEach(function (d) { if (d[3]) tripRoute[d[3]] = d[1]; }); });
+  });
+  live.at.forEach(function (b) {
+    if (!(nowS - b[2] < BUS_FRESH) || !b[3]) return;
+    if (!group.some(function (st) { return metres(b[0], b[1], st.lat, st.lon) <= AT_BAY; })) return;
+    out[routeStem(tripRoute[b[3]] || b[3])] = true;
+  });
+  return out;
+}
+// A route's stem, to match a trip id's: 16 AM and 16 PM are 16, B1 is B.
+function routeStem(r) { var m = /^(\d+|[A-Z])/.exec(r || ''); return m ? m[1] : r; }
+
+// The hub's answer: the next three departure minutes, each with every route
+// leaving then, once, in route order, twelve at most. After the day's last
+// bus the first line carries the day word. With live positions, a route's
+// first badge says whether its bus is in yet; later ones say nothing, since
+// the bus at the bay is the one leaving first.
+function waves(deps, dayWord, index, routesInNow) {
+  var out = [], byMin = {}, firstSeen = {};
+  deps.forEach(function (dep) {
+    var w = byMin[dep.t];
+    if (!w) {
+      if (out.length === 3) return;
+      w = byMin[dep.t] = { t: dep.t, list: [], seen: {} };
+      out.push(w);
+    }
+    var here = !routesInNow || !!routesInNow[routeStem(dep.route)];
+    if (w.seen[dep.route]) { var x = w.seen[dep.route]; x.live = x.live || dep.live; x.here = x.here || here; return; }
+    if (w.list.length === 12) return;
+    w.list.push(w.seen[dep.route] = { route: dep.route, live: dep.live, here: here, first: !firstSeen[dep.route] });
+    firstSeen[dep.route] = true;
+  });
+  return out.map(function (w, i) {
+    w.list.sort(function (a, b) { return byRoute(a.route, b.route); });
+    var bits = 0, away = 0;
+    w.list.forEach(function (x, j) {
+      if (x.live) bits |= 1 << j;
+      if (x.first && !x.here) away |= 1 << j;
+    });
+    return {
+      when: String(w.t) + (i === 0 && dayWord ? ' ' + dayWord : ''),
+      routes: w.list.map(function (x) { return x.route; }),
+      colors: w.list.map(function (x) { return parseInt((index.routes[x.route] || ['888888'])[0], 16); }),
+      live: bits,
+      away: away,
+    };
+  });
+}
+
+// A Pebble Classic (aplite) has no room for the hub's view; it keeps the board.
+function classic() {
+  try { return Pebble.getActiveWatchInfo().platform === 'aplite'; } catch (e) { return false; }
 }
 
 function onFlick() {
@@ -235,6 +361,7 @@ function onFlick() {
     var DATA_URL = sys.data, tag = sys.agency.toLowerCase();
     getJSON(DATA_URL + 'stops.json', 'hw-stops-' + tag, INDEX_TTL, function (index) {
       if (!index) return sendStopView('', 0, []);
+      Object.keys(index.routes || {}).forEach(function (r, i) { routeRank[r] = i; });
       var ranked = index.stops.map(function (st) {
         return { id: st[0], d: metres(lat, lon, st[1], st[2]), lat: st[1], lon: st[2] };
       }).sort(function (a, b) { return a.d - b.d; });
@@ -248,53 +375,77 @@ function onFlick() {
         ? ranked.filter(function (st) { return metres(sys.hub.lat, sys.hub.lon, st.lat, st.lon) <= HUB; }).slice(0, 16)
         : ranked.filter(function (st) { return metres(best.lat, best.lon, st.lat, st.lon) <= TWIN; }).slice(0, 8);
       var now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes();
-      var pending = group.length, name = atHub ? sys.hub.name : '', stops = [];
+      var midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      var pending = group.length + 1, name = atHub ? sys.hub.name : '', stops = [], live = null;
+      // The live answer is asked for alongside the schedule and waited on
+      // for at most LIVE_WAIT; the schedule never waits on it beyond that.
+      getLive(sys, group.map(function (st) { return st.id; }), function (l) { live = l; answer(); });
       group.forEach(function (st) {
         getJSON(DATA_URL + 'stops/' + st.id + '.json', 'hw-stop-' + tag + '-' + st.id, STOP_TTL, function (stop) {
-          if (stop) { if (!name) name = stop.name; stops.push(stop); }
-          if (--pending) return;
-          // Today's remaining departures; when there are none, the first
-          // day ahead with any — tomorrow, or Monday after a Saturday —
-          // so the answer is the next bus, whenever that is.
-          var deps = [], dayWord = '';
-          for (var ahead = 0; ahead < 8 && !deps.length; ahead++) {
-            var date = new Date(now.getTime() + ahead * 24 * 60 * 60 * 1000);
-            // Today's list keeps the minute just gone: a bus due a minute ago
-            // may still be pulling in, and the watch reads it as NOW.
-            var kind = dayKind(date), from = ahead ? 0 : nowMin - 1;
-            stops.forEach(function (stop) {
-              (stop.days[kind] || []).forEach(function (dep) {
-                if (dep[0] >= from) deps.push({ t: dep[0], route: dep[1], head: dep[2] });
-              });
-            });
-            if (deps.length && ahead) dayWord = ahead === 1 ? 'TOMORROW' : ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'][date.getDay()];
-          }
-          deps.sort(function (a, b) { return a.t - b.t; });
-          // A row a route and direction, in order of its next departure,
-          // with its next two times, or its next time and the day. Where a
-          // route runs both ways from here — twin stops across a road — the
-          // second column is the direction instead, since two identical
-          // badges would say nothing.
-          var groups = [], byKey = {}, perRoute = {};
-          deps.forEach(function (dep) {
-            var key = dep.route + '|' + dep.head, g = byKey[key];
-            if (!g) { g = byKey[key] = { route: dep.route, head: dep.head, times: [] }; groups.push(g); perRoute[dep.route] = (perRoute[dep.route] || 0) + 1; }
-            if (g.times.length < 2) g.times.push(dep.t);
-          });
-          // Every row, near or far: the watch counts rows, not metres, and
-          // seats one row beside the modules and more on the board. The
-          // second column holds one qualifier: the day first, since a bus
-          // you can't catch today is the costliest thing to misread; then
-          // the direction at a merged pair; else the second time.
-          var rows = groups.slice(0, 3).map(function (g) {
-            var col = (index.routes[g.route] || ['888888'])[0];
-            var word = dayWord || (perRoute[g.route] > 1 ? dirWord(g.head) : '');
-            var when = word ? [g.times[0], word] : g.times;
-            return { route: g.route, head: g.head, when: when.join(' '), color: parseInt(col, 16) };
-          });
-          sendStopView(name, best.d <= AT_STOP ? 0 : best.d, rows);
+          if (stop) { if (!name) name = stop.name; stop.id = stop.id || st.id; stops.push(stop); }
+          answer();
         });
       });
+      function answer() {
+        if (--pending) return;
+        // Today's remaining departures; when there are none, the first
+        // day ahead with any — tomorrow, or Monday after a Saturday —
+        // so the answer is the next bus, whenever that is.
+        var deps = [], dayWord = '';
+        for (var ahead = 0; ahead < 8 && !deps.length; ahead++) {
+          var date = new Date(now.getTime() + ahead * 24 * 60 * 60 * 1000);
+          // Today's list keeps the minute just gone: a bus due a minute ago
+          // may still be pulling in, and the watch reads it as NOW.
+          var kind = dayKind(date), from = ahead ? 0 : nowMin - 1;
+          stops.forEach(function (stop) {
+            (stop.days[kind] || []).forEach(function (dep) {
+              // Today's departures take the live prediction for this trip
+              // at this stop where there is one. A stop the bus will skip
+              // drops out; at the hub a bus is held to its time, never
+              // early. No prediction: the schedule, unmarked.
+              var t = dep[0], isLive = false, at = null;
+              var trip = !ahead && live && dep[3] && live.trips[dep[3]];
+              for (var i = 0; trip && i < trip.s.length; i++) if (trip.s[i][0] === stop.id) at = trip.s[i];
+              if (at) {
+                if (at[3] === 1) return;
+                var p = Math.floor((at[2] * 1000 - midnight) / 60000);
+                // A bus still listed at its hub bay after the feed's time for
+                // it is still there, boarding: it leaves now, not already.
+                var boarding = at[2] * 1000 < now.getTime() - 30000 ? nowMin : -1;
+                t = atHub ? Math.max(t, p, boarding) : p; isLive = true;
+              }
+              if (t >= from) deps.push({ t: t, route: dep[1], head: dep[2], live: isLive });
+            });
+          });
+          if (deps.length && ahead) dayWord = ahead === 1 ? 'TOMORROW' : ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'][date.getDay()];
+        }
+        // Ties in route order, never in whichever file happened to load first.
+        deps.sort(function (a, b) { return a.t - b.t || byRoute(a.route, b.route); });
+        if (atHub && !classic()) return sendWaves(name, waves(deps, dayWord, index, routesIn(group, live, stops)));
+        // A row a route and direction, in order of its next departure,
+        // with its next two times, or its next time and the day. Where a
+        // route runs both ways from here — twin stops across a road — the
+        // second column is the direction instead, since two identical
+        // badges would say nothing.
+        var groups = [], byKey = {}, perRoute = {};
+        deps.forEach(function (dep) {
+          var key = dep.route + '|' + dep.head, g = byKey[key];
+          if (!g) { g = byKey[key] = { route: dep.route, head: dep.head, times: [], live: dep.live }; groups.push(g); perRoute[dep.route] = (perRoute[dep.route] || 0) + 1; }
+          if (g.times.length < 2) g.times.push(dep.t);
+        });
+        // Every row, near or far: the watch counts rows, not metres, and
+        // seats one row beside the modules and more on the board. The
+        // second column holds one qualifier: the day first, since a bus
+        // you can't catch today is the costliest thing to misread; then
+        // the direction at a merged pair; else the second time.
+        var rows = groups.slice(0, 3).map(function (g) {
+          var col = (index.routes[g.route] || ['888888'])[0];
+          var word = dayWord || (perRoute[g.route] > 1 ? dirWord(g.head) : '');
+          var when = word ? [g.times[0], word] : g.times;
+          return { route: g.route, head: g.head, when: when.join(' '), color: parseInt(col, 16), live: g.live };
+        });
+        sendStopView(name, best.d <= AT_STOP ? 0 : best.d, rows);
+      }
     });
   }, function (err) {
     console.log('headway: no fix ' + (err && err.message));

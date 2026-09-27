@@ -78,8 +78,31 @@ minute it is.
 |---|---|---|
 | ![one row](screenshots/stop-one.png) | ![the board](screenshots/stop.png) | ![twins](screenshots/stop-twin.png) |
 
-Stops across a road from each other are read as one, and at the hub every
-bay is, under the hub's own name. Off the stop, the line says how far.
+Stops across a road from each other are read as one. Off the stop, the line
+says how far.
+
+**At the transit centre** a dozen routes leave on the same minute, so a row a
+route would show three of them. There the answer is by time instead: a line
+a departure minute, the time at the outer edge and every route leaving then
+as a badge beside it, in route order, wrapping when a wave is wider than the
+line. Four lines fit where the date was: the loops, the half-hour wave, and
+what follows. A Pebble Classic has no room for it and keeps the board.
+
+| at the transit centre | light | the minute it leaves |
+|---|---|---|
+| ![hub](screenshots/stop-hub.png) | ![hub, light](screenshots/stop-hub-light.png) | ![hub, now](screenshots/stop-hub-now.png) |
+
+**Live times.** Where the agency publishes GTFS-realtime, a flick also asks
+for predictions, and a predicted time carries a small arc in the accent: the
+board's first time, the side block's time, a badge at the hub. A late bus
+moves to the minute it will really leave; a bus that will skip the stop
+drops out; at the hub a bus is never shown leaving early. A time without the
+arc is the timetable's. At the hub the live feed also says which buses are
+in: a route whose bus hasn't reached the transit centre yet has its badge
+hollow, and solid once it's there. Only the next departure of each route is
+drawn so; with no live answer every badge is solid, as before.
+
+![live times on the board](screenshots/stop-live.png)
 Every flick, anywhere, shows the seconds the moment the watch feels it:
 under the time on the plain face, or, where the countdown is running, in
 the block itself, where `19 MIN` becomes `18:42`, what is truly left. With
@@ -126,8 +149,16 @@ what the phone needs — the hub, its hours, the departures of the routes on
 their own timetable, and a file per stop with its scheduled departures by
 day — and writes `src/pkjs/transit.json` for the app and `docs/data/` for
 GitHub Pages, where the phone fetches stop files on a flick and caches them.
-A nightly workflow refetches the feed and commits what changed. Everything
-shown is a schedule; there is no live data yet.
+A nightly workflow refetches the feed and commits what changed.
+
+Each departure names its trip, from the agency's own GTFS, so live
+predictions can be laid over it. For Connect they come from the relay at
+`live.cacherider.com`, asked only for the stops being answered
+(`?stops=id,id`). The live answer is an overlay and nothing more: the phone
+waits three seconds for it at most, drops it if the feed's own clock is more
+than ninety seconds old, and on any failure shows exactly the schedule it
+would have shown without it. A system names its relay with `--live-url`, or
+has none.
 
 To add a system: run `tools/transit.py` with the feed, the hub's position and
 name, and the routes that keep their own timetable, and add the same line to
