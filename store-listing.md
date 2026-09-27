@@ -54,8 +54,9 @@ that will skip the stop drops out. Without a live answer the face shows the
 schedule as before. At the transit centre a flick now answers by time: each
 departure minute with every route leaving then as a badge, in route order,
 instead of three rows that mostly repeated the countdown; a hollow badge is
-a bus that isn't in yet. Long stop names
-now shorten by whole words.
+a bus that isn't in yet. Long stop names now shorten by whole words, and
+the badges' 5, 6 and 8 are redrawn. On the charger the battery takes the
+heart rate's place, with a small bolt beside it.
 
 ## Release notes (1.12.2)
 
