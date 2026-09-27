@@ -892,8 +892,21 @@ static void layout_modules(GFont f_val, GFont f_cap, int c_start, int avail_w,
 static void layout_modules(GFont f_val, GFont f_cap, int c_start, int avail_w,
                            int band_top, int band_bot) {
   s_md.n = 0;
+  // On the charger the battery is what's worth a glance. It takes the slot
+  // of something that can't change there — heart rate, which reads nothing
+  // off the wrist, then steps, then an empty slot — unless a slot already
+  // shows it. Weather keeps its place. Unplugged, the slot is the wearer's.
+  int charger = -1;
+  const BatteryChargeState bs = battery_state_service_peek();
+  if (bs.is_plugged || bs.is_charging) {
+    static const uint8_t give[] = { MODULE_HR, MODULE_STEPS, MODULE_NONE };
+    bool shown = false;
+    for (int j = 0; j < MODULE_COUNT; j++) if (s_set.mod[j] == MODULE_BATTERY) shown = true;
+    for (int g = 0; !shown && charger < 0 && g < 3; g++)
+      for (int j = 0; charger < 0 && j < MODULE_COUNT; j++) if (s_set.mod[j] == give[g]) charger = j;
+  }
   for (int i = 0; i < MODULE_COUNT; i++) {
-    uint8_t kind = s_set.mod[i];
+    uint8_t kind = i == charger ? MODULE_BATTERY : s_set.mod[i];
     if (kind == MODULE_NONE) continue;
     if (module_read(kind, &s_md.m[s_md.n])) { s_md.n++; continue; }
     // No heart-rate sensor, or no reading yet: the slot shows the battery,
@@ -2106,6 +2119,12 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
   layer_mark_dirty(s_face);
 }
 
+// Plugged in or out: the modules change at once, not at the next minute.
+static void battery_changed(BatteryChargeState state) {
+  (void)state;
+  layer_mark_dirty(s_face);
+}
+
 static void unobstructed_changing(AnimationProgress progress, void *context) {
   layer_mark_dirty(s_face);
 }
@@ -2159,6 +2178,7 @@ static void init(void) {
   app_message_register_inbox_received(inbox_received);
   app_message_open(512, 64);
   accel_tap_service_subscribe(tap_handler);
+  battery_state_service_subscribe(battery_changed);
 }
 
 static void deinit(void) {
@@ -2174,6 +2194,7 @@ static void deinit(void) {
   fonts_unload_custom_font(s_f_time_p);
   tick_timer_service_unsubscribe();
   accel_tap_service_unsubscribe();
+  battery_state_service_unsubscribe();
   window_destroy(s_window);
 }
 
