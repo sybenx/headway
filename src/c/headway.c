@@ -97,12 +97,20 @@ typedef struct {
 #define SV_ROWS 3
 #define SV_SHOW_MS 12000
 #define SV_WAIT_MS 15000
+#define SV_MIN_MS 8000    // an answer that lands late still gets this long
 typedef struct { char route[8], head[20], when[24]; uint32_t color; bool live; } SvRow;
 static struct {
   bool valid, pending, lit;   // lit: a flick was heard; the seconds show until the answer's time is up
   bool wave;                  // the hub's answer: lines by departure time, not rows by route
-  time_t shown_s;             // when the answer's twelve seconds began, for the hairline
-  uint16_t shown_ms;
+  // The hairline's countdown, from the flick: it drains from seg_f (in
+  // ten-thousandths of the line) at seg_at to nothing at end_at, both in ms
+  // since the flick at t0. An answer starts a new segment from where the line
+  // is, so it never jumps, only slows.
+  bool draining;
+  time_t t0_s;
+  uint16_t t0_ms;
+  int32_t seg_at, end_at;
+  int16_t seg_f;
   char stop[24];
   int dist, n;
   SvRow row[SV_ROWS];
@@ -769,22 +777,27 @@ static void draw_rail(GContext *ctx, const Schedule *sch, int16_t h) {
 
 // Away from the hub the rail keeps only its hairline: nothing to drain.
 static bool s_quiet_face;   // the plain face is up, so its hairline shows
-// The milliseconds of a flick's answer still to go, or -1 when there is none.
-static int32_t answer_left(void) {
-  if (!s_sv.lit || s_sv.pending || !s_sv.shown_s) return -1;
+// Milliseconds since the flick.
+static int32_t since_flick(void) {
   time_t now_s; uint16_t now_ms;
   time_ms(&now_s, &now_ms);
-  const int32_t gone = (int32_t)(now_s - s_sv.shown_s) * 1000 + now_ms - s_sv.shown_ms;
-  const int32_t left = SV_SHOW_MS - (gone < 0 ? 0 : gone);
-  return left < 0 ? 0 : left;
+  return (int32_t)(now_s - s_sv.t0_s) * 1000 + now_ms - s_sv.t0_ms;
+}
+// How much of the hairline is left, in ten-thousandths, or -1 with no flick.
+static int32_t line_left(void) {
+  if (!s_sv.lit || !s_sv.draining) return -1;
+  const int32_t t = since_flick();
+  if (t >= s_sv.end_at) return 0;
+  if (t <= s_sv.seg_at) return s_sv.seg_f;
+  return (int32_t)s_sv.seg_f * (s_sv.end_at - t) / (s_sv.end_at - s_sv.seg_at);
 }
 static void draw_hairline(GContext *ctx, int16_t h) {
   const int rail_w = sc(RAIL_W), border = sc(RAIL_BORDER);
   graphics_context_set_fill_color(ctx, s_ink);
-  // Through a flick's answer the line shortens from the foot and is gone as
-  // the answer goes, a pixel at a time. Waiting on the phone, it stays whole.
-  const int32_t left = answer_left();
-  if (left >= 0) h = (int16_t)((int32_t)h * left / SV_SHOW_MS);
+  // From a flick the line shortens from the foot and is gone as the answer
+  // goes; it starts at the flick, not when the phone replies.
+  const int32_t left = line_left();
+  if (left >= 0) h = (int16_t)((int32_t)h * left / 10000);
   graphics_fill_rect(ctx, GRect(mapx(s_w - rail_w - border, border), 0, border, h), 0, GCornerNone);
 }
 
@@ -2027,20 +2040,51 @@ static int tuple_int(const Tuple *tp) {
   return tp->type == TUPLE_CSTRING ? atoi(tp->value->cstring) : (int)tp->value->int32;
 }
 
-// The hairline's own clock, only while an answer is up on the plain face.
-// While the light is on, the first few seconds, when the face is being read,
-// it repaints each time the line has a pixel less to show, 14 a second on a
-// 168-pixel face; after that, twice a second. None once the answer goes.
+// The hairline's own clock, only while it drains on the plain face. It wakes
+// exactly when the line has a whole step less to show, so every step is the
+// same: a pixel at a time while the light is on and a little past, when the
+// face is being read; three at a time after that. None once the answer goes.
 #define DRAIN_SMOOTH_MS 3500   // the light's few seconds, and a little past them
+#define DRAIN_LATE_PX 3
 static void drain_tick(void *data) {
   (void)data;
   s_sv.drain = NULL;
-  const int32_t left = answer_left();
+  const int32_t left = line_left();
   if (left <= 0 || !s_quiet_face) return;
   layer_mark_dirty(s_face);
-  const int h = layer_get_bounds(s_face).size.h;
-  const uint32_t step = SV_SHOW_MS - left < DRAIN_SMOOTH_MS ? SV_SHOW_MS / (h > 0 ? h : 168) : 500;
-  s_sv.drain = app_timer_register(step, drain_tick, NULL);
+  const int32_t h = layer_get_bounds(s_face).size.h > 0 ? layer_get_bounds(s_face).size.h : 168;
+  const int32_t t = since_flick();
+  const int32_t px = h * left / 10000;
+  const int32_t target = px - (t < DRAIN_SMOOTH_MS ? 1 : DRAIN_LATE_PX);
+  // When the line is halfway through the target pixel, on the current
+  // segment: waking at the pixel's edge, a millisecond late reads a pixel
+  // short and the step comes out one too many.
+  int32_t at = s_sv.end_at;
+  if (target > 0 && s_sv.seg_f > 0)
+    at = s_sv.end_at - (2 * target + 1) * 10000 / (2 * h) * (s_sv.end_at - s_sv.seg_at) / s_sv.seg_f;   // fits 32 bits: 10000 x 15000
+  const int32_t wait = at - t;
+  s_sv.drain = app_timer_register(wait < 15 ? 15 : (uint32_t)wait, drain_tick, NULL);
+}
+
+// A flick starts the line's countdown, twelve seconds from now.
+static void drain_start(void) {
+  time_ms(&s_sv.t0_s, &s_sv.t0_ms);
+  s_sv.draining = true;
+  s_sv.seg_at = 0; s_sv.seg_f = 10000; s_sv.end_at = SV_SHOW_MS;
+  if (s_sv.drain) app_timer_cancel(s_sv.drain);
+  s_sv.drain = app_timer_register(0, drain_tick, NULL);
+}
+// The answer has landed: the line goes on from where it is, to nothing by
+// twelve seconds from the flick, or by SV_MIN_MS from now if that is later.
+// Returns how long the answer stays up.
+static uint32_t drain_answer(void) {
+  if (!s_sv.draining) drain_start();
+  const int32_t t = since_flick(), left = line_left();
+  const int32_t end = t + SV_MIN_MS > SV_SHOW_MS ? t + SV_MIN_MS : SV_SHOW_MS;
+  s_sv.seg_at = t; s_sv.seg_f = (int16_t)(left < 0 ? 10000 : left); s_sv.end_at = end;
+  if (s_sv.drain) app_timer_cancel(s_sv.drain);
+  s_sv.drain = app_timer_register(0, drain_tick, NULL);
+  return (uint32_t)(end - t);
 }
 
 static void stopview_done(void *data) {
@@ -2050,18 +2094,11 @@ static void stopview_done(void *data) {
   s_sv.valid = false;
   s_sv.pending = false;
   s_sv.lit = false;
+  s_sv.draining = false;
   retune_tick();
   layer_mark_dirty(s_face);
 }
 static void stopview_hold(uint32_t ms) {
-  // The answer's twelve seconds start now; a wait on the phone has none.
-  if (ms == SV_SHOW_MS) {
-    time_ms(&s_sv.shown_s, &s_sv.shown_ms);
-    if (s_sv.drain) app_timer_cancel(s_sv.drain);
-    s_sv.drain = app_timer_register(0, drain_tick, NULL);
-  } else {
-    s_sv.shown_s = 0;
-  }
   if (s_sv.timer) app_timer_reschedule(s_sv.timer, ms);
   else s_sv.timer = app_timer_register(ms, stopview_done, NULL);
 }
@@ -2090,6 +2127,7 @@ static void tap_handler(AccelAxisType axis, int32_t direction) {
   if (s_sv.pending) return;
   s_sv.lit = true;
   light_enable_interaction();
+  drain_start();
   stopview_hold(SV_SHOW_MS);
   retune_tick();
   layer_mark_dirty(s_face);
@@ -2196,13 +2234,13 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
       // seconds under the time say the flick was heard. Nothing is taken
       // away to say nothing.
       s_sv.valid = false;
-      stopview_hold(SV_SHOW_MS);
+      stopview_hold(drain_answer());
       layer_mark_dirty(s_face);
       return;
     }
     s_sv.valid = true;
     light_enable_interaction();
-    stopview_hold(SV_SHOW_MS);
+    stopview_hold(drain_answer());
     retune_tick();
     layer_mark_dirty(s_face);
     return;
