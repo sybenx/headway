@@ -2368,8 +2368,15 @@ static void init(void) {
   s_f_board = fonts_load_custom_font(resource_get_handle(RES_BOARD));
   s_f_cap = fonts_load_custom_font(resource_get_handle(RES_CAP));
   s_f_bigdate = fonts_load_custom_font(resource_get_handle(RES_BIGDATE));
+#ifdef PBL_PLATFORM_APLITE
+  // The Classic has no timeline peek, so the peek's smaller time and
+  // countdown are never drawn; each custom font costs 60 B of its heap.
+  s_f_count_s = s_f_count;
+  s_f_time_p = s_f_time;
+#else
   s_f_count_s = fonts_load_custom_font(resource_get_handle(RES_COUNT_S));
   s_f_time_p = fonts_load_custom_font(resource_get_handle(RES_TIME_P));
+#endif
 
   s_window = window_create();
   window_set_window_handlers(s_window, (WindowHandlers){
@@ -2395,8 +2402,10 @@ static void deinit(void) {
   fonts_unload_custom_font(s_f_board);
   fonts_unload_custom_font(s_f_cap);
   fonts_unload_custom_font(s_f_bigdate);
+#ifndef PBL_PLATFORM_APLITE
   fonts_unload_custom_font(s_f_count_s);
   fonts_unload_custom_font(s_f_time_p);
+#endif
   tick_timer_service_unsubscribe();
   accel_tap_service_unsubscribe();
   battery_state_service_unsubscribe();
