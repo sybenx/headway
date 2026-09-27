@@ -26,6 +26,7 @@ FONTS = [
     ('time_60', 60, DIGITS), ('time_83', 83, DIGITS),
     ('count_44', 44, '[0-9NOW]'), ('count_61', 61, '[0-9NOW]'),
     ('time_38', 38, DIGITS), ('time_53', 53, DIGITS),         # the time under a timeline peek
+    ('time_50', 50, DIGITS), ('time_69', 69, DIGITS),         # the time beside a flick's seconds
     ('count_30', 30, '[0-9NOW:]'), ('count_42', 42, '[0-9NOW:]'),  # and the flick's M:SS countdown
     ('mod_15', 15, '[0-9.%°KA-Z: ]'), ('mod_21', 21, '[0-9.%°KA-Z: ]'),   # letters and a colon for the stop view's badges and clock times
     ('label_11', 11, '[A-Z0-9:. ]'), ('label_15', 15, '[A-Z0-9:. ]'),   # the point in a distance
@@ -37,7 +38,7 @@ FONTS = [
 import json as _json, pfo
 for spec in FONTS:
     name, height, regex = spec[:3]
-    f = Font(SEMI if len(spec) > 3 else TTF, height, MAX_GLYPHS, 512 if name.endswith(('_83', '_61', '_21', '_15', '_17', '_12', '_25', '_67', '_42', '_53')) and name not in ('mod_15',) else 256, False)
+    f = Font(SEMI if len(spec) > 3 else TTF, height, MAX_GLYPHS, 512 if name.endswith(('_83', '_61', '_21', '_15', '_17', '_12', '_25', '_67', '_42', '_53', '_69')) and name not in ('mod_15',) else 256, False)
     f.set_regex_filter(regex)
     f.build_tables()
     data = f.bitstring()

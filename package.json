@@ -259,6 +259,24 @@
         },
         {
           "type": "raw",
+          "name": "FONT_TIME_50",
+          "file": "fonts/time_50.pfo",
+          "targetPlatforms": [
+            "basalt",
+            "diorite",
+            "flint"
+          ]
+        },
+        {
+          "type": "raw",
+          "name": "FONT_TIME_69",
+          "file": "fonts/time_69.pfo",
+          "targetPlatforms": [
+            "emery"
+          ]
+        },
+        {
+          "type": "raw",
           "name": "FONT_BOARD_12",
           "file": "fonts/board_12.pfo",
           "targetPlatforms": [

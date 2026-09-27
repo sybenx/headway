@@ -289,6 +289,7 @@ static int transit_next(const uint16_t *list, int now_min) {
   #define RES_BIGDATE RESOURCE_ID_FONT_DATE_25
   #define RES_COUNT_S RESOURCE_ID_FONT_COUNT_42
   #define RES_TIME_P  RESOURCE_ID_FONT_TIME_53
+  #define RES_TIME_M  RESOURCE_ID_FONT_TIME_69
 #else
   #define RES_TIME  RESOURCE_ID_FONT_TIME_60
   #define RES_COUNT RESOURCE_ID_FONT_COUNT_44
@@ -300,12 +301,16 @@ static int transit_next(const uint16_t *list, int now_min) {
   #define RES_BIGDATE RESOURCE_ID_FONT_DATE_18
   #define RES_COUNT_S RESOURCE_ID_FONT_COUNT_30
   #define RES_TIME_P  RESOURCE_ID_FONT_TIME_38
+  #ifndef PBL_PLATFORM_APLITE
+  #define RES_TIME_M  RESOURCE_ID_FONT_TIME_50
+  #endif
 #endif
 
 static GFont s_f_time, s_f_count, s_f_mod, s_f_label, s_f_date, s_f_cap, s_f_bigdate;
 static GFont s_f_board;   // the board's clock times, in the wider cut
 static GFont s_f_count_s;   // the countdown a size down, under a timeline peek
 static GFont s_f_time_p;                // the time under a timeline peek
+static GFont s_f_time_m;                // the time beside a flick's seconds
 static Window *s_window;
 static Layer *s_face;
 static int s_last_remaining = -1;
@@ -1595,12 +1600,83 @@ static void paint_sideblock(void) {
   }
 }
 
+// ---- zone 03/04: the time, flush to the outer edge so the minute survives
+// a cuff that hides the hour.
+static struct {
+  char hh[4], mm[4];
+  int x, y, w, hh_w, colon_w, cgap, band_top;
+  GSize z_colon;
+  GFont f;
+  // The seconds through a flick, when they sit in the time itself (SECS_STYLE).
+  bool secs;
+  char ss[3];
+  int ss_dx, ss_y, ss_w, s1_y, s2_y, track;
+  GFont ss_f;
+} s_tm;
+
 // ---- the seconds through a flick: two small dim digits just beneath the
 // time, at its outer edge, where a sleeve uncovers them first. A board read
 // against a timetable wants to know where in the minute it is.
+// Where the flick's seconds go, while Aaron chooses: 0 beneath the time, as
+// now; 1 the time squeezed toward the wrist, full size, the seconds beside it
+// at the outer edge; 3 two digits stacked where the colon was. In 1 and 3
+// nothing below the time moves: the time keeps its box and the board its place.
+#ifndef SECS_STYLE
+#define SECS_STYLE 1
+#endif
 static struct { bool show; char t[3]; int x, y, h; } s_sec;
 static void layout_secs(const struct tm *t, const Frame *fr, int band_top) __attribute__((noinline));
 static void layout_secs(const struct tm *t, const Frame *fr, int band_top) {
+#if SECS_STYLE
+  (void)band_top;
+  snprintf(s_tm.ss, sizeof(s_tm.ss), "%02d", t->tm_sec);
+  s_tm.secs = true;
+  s_sec.show = false;
+  s_sec.h = 0;
+#if SECS_STYLE == 1 && defined(RES_TIME_M)
+  {
+    // The time a size down, hung from the wrist side, in the middle of the
+    // full-size time's box so nothing beneath it moves; the seconds fill the
+    // room left at the outer edge, as large as the face's own sizes allow,
+    // on its baseline.
+    const Metrics mf = barlow_metrics(measure("0", s_tm.f).h);
+    GFont f = s_f_time_m;
+    const Metrics m = barlow_metrics(measure("0", f).h);
+    s_tm.f = f;
+    s_tm.z_colon = measure(":", f);
+    s_tm.hh_w = run_w(s_tm.hh, f, true, 0);
+    s_tm.colon_w = s_tm.z_colon.w + 2 * s_tm.cgap;
+    const int tw = s_tm.hh_w + s_tm.colon_w + run_w(s_tm.mm, f, true, 0);
+    s_tm.x = fr->start - sc(PAD_WRIST) / 2;
+    s_tm.w = fr->end - s_tm.x;
+    const int room = s_tm.w - tw - sc(2);
+    const GFont sizes[] = { s_f_count_s, s_f_bigdate, s_f_mod, s_f_date, s_f_label };
+    for (unsigned i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
+      s_tm.ss_f = sizes[i];
+      s_tm.ss_w = run_w(s_tm.ss, s_tm.ss_f, true, 0);
+      if (s_tm.ss_w <= room) break;
+    }
+    const Metrics ms = barlow_metrics(measure("8", s_tm.ss_f).h);
+    s_tm.ss_dx = s_tm.w - s_tm.ss_w;
+    const int top = s_tm.y + mf.bearing + (mf.cap - m.cap) / 2;
+    s_tm.y = top - m.bearing;
+    s_tm.ss_y = top + m.cap - ms.cap - ms.bearing;
+  }
+#else
+  {
+    // The larger date's digits fit the colon's own slot; two of them stack
+    // on the time's middle, and the time keeps its width.
+    const Metrics mf = barlow_metrics(measure("0", s_tm.f).h);
+    const Metrics ml = barlow_metrics(measure("8", s_f_bigdate).h);
+    const int dw = run_w("0", s_f_bigdate, true, 0);
+    s_tm.ss_dx = s_tm.hh_w + (s_tm.colon_w - dw + 1) / 2;
+    const int mid = s_tm.y + mf.bearing + mf.cap / 2, gap = sc(3);
+    s_tm.s1_y = mid - gap / 2 - ml.cap - ml.bearing;
+    s_tm.s2_y = mid + (gap + 1) / 2 - ml.bearing;
+  }
+#endif
+  return;
+#endif
   const Metrics m = barlow_metrics(measure("8", s_f_cap).h);
   snprintf(s_sec.t, sizeof(s_sec.t), "%02d", t->tm_sec);
   s_sec.x = fr->end - run_w(s_sec.t, s_f_cap, false, TRACK);
@@ -1621,14 +1697,6 @@ static void paint_secs(void) {
 // and with their numbers in memory rather than in locals their frames stay
 // small enough to leave it the stack it needs.
 
-// ---- zone 03/04: the time, flush to the outer edge so the minute survives
-// a cuff that hides the hour.
-static struct {
-  char hh[4], mm[4];
-  int x, y, w, hh_w, colon_w, cgap, band_top;
-  GSize z_colon;
-  GFont f;
-} s_tm;
 
 static void layout_time(const struct tm *t, const Frame *fr, GFont f, int margin_top) __attribute__((noinline));
 static void layout_time(const struct tm *t, const Frame *fr, GFont f, int margin_top) {
@@ -1648,6 +1716,26 @@ static void layout_time(const struct tm *t, const Frame *fr, GFont f, int margin
   // The band the design leaves empty runs from the time's line box down to
   // the top of the countdown block.
   s_tm.band_top = s_tm.y + m.bearing + m.cap + sc(3);
+  s_tm.secs = false;
+  s_tm.ss_w = 0;
+  s_tm.track = 0;
+}
+
+// The accent a step brighter on the dark ground, where small digits in the
+// cobalt itself sink into the black: each colour channel up one of Pebble's
+// four levels. The light ground takes the accent as it is.
+static GColor secs_color(void) {
+#ifdef PBL_COLOR
+  GColor c = accent();
+  if (!light_theme()) {
+    if (c.r < 3) c.r++;
+    if (c.g < 3) c.g++;
+    if (c.b < 3) c.b++;
+  }
+  return c;
+#else
+  return s_ink;
+#endif
 }
 
 static void paint_time(void) __attribute__((noinline));
@@ -1655,13 +1743,30 @@ static void paint_time(void) {
   // The row is mirrored as a whole; hour, colon and minute keep their order.
   const int x = mapx(s_tm.x, s_tm.w);
   graphics_context_set_text_color(s_ctx, s_ink);
-  draw_run_s(s_tm.hh, s_tm.f, x, s_tm.y, true, 0);
-  draw_run_s(s_tm.mm, s_tm.f, x + s_tm.hh_w + s_tm.colon_w, s_tm.y, true, 0);
+  draw_run_s(s_tm.hh, s_tm.f, x, s_tm.y, true, s_tm.track);
+  draw_run_s(s_tm.mm, s_tm.f, x + s_tm.hh_w + s_tm.colon_w, s_tm.y, true, s_tm.track);
+#if SECS_STYLE == 3
+  if (s_tm.secs) {
+    // The seconds in the colon's place, a step brighter on the dark ground.
+    graphics_context_set_text_color(s_ctx, secs_color());
+    char d[2] = { s_tm.ss[0], 0 };
+    draw_run_s(d, s_f_bigdate, x + s_tm.ss_dx, s_tm.s1_y, true, 0);
+    d[0] = s_tm.ss[1];
+    draw_run_s(d, s_f_bigdate, x + s_tm.ss_dx, s_tm.s2_y, true, 0);
+    return;
+  }
+#endif
   // The one accent in the time: the design's colon.
   graphics_context_set_text_color(s_ctx, accent());
   s_tx.t = ":"; s_tx.f = s_tm.f; s_tx.mode = GTextOverflowModeWordWrap;
-  s_tx.r = GRect(x + s_tm.hh_w + s_tm.cgap, s_tm.y, s_tm.z_colon.w, s_tm.z_colon.h);
+  s_tx.r = GRect(x + s_tm.hh_w + s_tm.cgap + s_tm.track, s_tm.y, s_tm.z_colon.w, s_tm.z_colon.h);
   tx_draw();
+#if SECS_STYLE == 1 && defined(RES_TIME_M)
+  if (s_tm.secs) {
+    graphics_context_set_text_color(s_ctx, secs_color());
+    draw_run_s(s_tm.ss, s_tm.ss_f, x + s_tm.ss_dx, s_tm.ss_y, true, 0);
+  }
+#endif
 }
 
 // ---- zone 02: the countdown, and zone 04: weekday and date.
@@ -1877,8 +1982,8 @@ static void face_update(Layer *layer, GContext *ctx) {
   }
   if (s_sv.valid && !s_sb.show) {
     layout_time(t, &fr, s_f_time, TIME_MARGIN_TOP);
-    paint_time();
     layout_secs(t, &fr, s_tm.band_top);
+    paint_time();
 #ifdef HAS_WAVE
     if (s_sv.wave) {
       layout_wave(t, &fr, s_tm.band_top + s_sec.h);
@@ -2205,6 +2310,9 @@ static void init(void) {
   s_f_bigdate = fonts_load_custom_font(resource_get_handle(RES_BIGDATE));
   s_f_count_s = fonts_load_custom_font(resource_get_handle(RES_COUNT_S));
   s_f_time_p = fonts_load_custom_font(resource_get_handle(RES_TIME_P));
+#ifdef RES_TIME_M
+  s_f_time_m = fonts_load_custom_font(resource_get_handle(RES_TIME_M));
+#endif
 
   s_window = window_create();
   window_set_window_handlers(s_window, (WindowHandlers){
@@ -2232,6 +2340,9 @@ static void deinit(void) {
   fonts_unload_custom_font(s_f_bigdate);
   fonts_unload_custom_font(s_f_count_s);
   fonts_unload_custom_font(s_f_time_p);
+#ifdef RES_TIME_M
+  fonts_unload_custom_font(s_f_time_m);
+#endif
   tick_timer_service_unsubscribe();
   accel_tap_service_unsubscribe();
   battery_state_service_unsubscribe();
