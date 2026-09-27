@@ -99,10 +99,13 @@ typedef struct { char route[8], head[20], when[24]; uint32_t color; bool live; }
 static struct {
   bool valid, pending, lit;   // lit: a flick was heard; the seconds show until the answer's time is up
   bool wave;                  // the hub's answer: lines by departure time, not rows by route
+  time_t shown_s;             // when the answer's twelve seconds began, for the hairline
+  uint16_t shown_ms;
   char stop[24];
   int dist, n;
   SvRow row[SV_ROWS];
   AppTimer *timer;
+  AppTimer *drain;            // repaints the hairline as it shortens
 } s_sv;
 
 // The hub's answer, a line a departure minute: the minute, and every route
@@ -763,9 +766,23 @@ static void draw_rail(GContext *ctx, const Schedule *sch, int16_t h) {
 }
 
 // Away from the hub the rail keeps only its hairline: nothing to drain.
+static bool s_quiet_face;   // the plain face is up, so its hairline shows
+// The milliseconds of a flick's answer still to go, or -1 when there is none.
+static int32_t answer_left(void) {
+  if (!s_sv.lit || s_sv.pending || !s_sv.shown_s) return -1;
+  time_t now_s; uint16_t now_ms;
+  time_ms(&now_s, &now_ms);
+  const int32_t gone = (int32_t)(now_s - s_sv.shown_s) * 1000 + now_ms - s_sv.shown_ms;
+  const int32_t left = SV_SHOW_MS - (gone < 0 ? 0 : gone);
+  return left < 0 ? 0 : left;
+}
 static void draw_hairline(GContext *ctx, int16_t h) {
   const int rail_w = sc(RAIL_W), border = sc(RAIL_BORDER);
   graphics_context_set_fill_color(ctx, s_ink);
+  // Through a flick's answer the line shortens from the foot and is gone as
+  // the answer goes, a pixel at a time. Waiting on the phone, it stays whole.
+  const int32_t left = answer_left();
+  if (left >= 0) h = (int16_t)((int32_t)h * left / SV_SHOW_MS);
   graphics_fill_rect(ctx, GRect(mapx(s_w - rail_w - border, border), 0, border, h), 0, GCornerNone);
 }
 
@@ -1595,23 +1612,35 @@ static void paint_sideblock(void) {
   }
 }
 
-// ---- the seconds through a flick: two small dim digits just beneath the
-// time, at its outer edge, where a sleeve uncovers them first. A board read
-// against a timetable wants to know where in the minute it is.
-static struct { bool show; char t[3]; int x, y, h; } s_sec;
-static void layout_secs(const struct tm *t, const Frame *fr, int band_top) __attribute__((noinline));
-static void layout_secs(const struct tm *t, const Frame *fr, int band_top) {
-  const Metrics m = barlow_metrics(measure("8", s_f_cap).h);
-  snprintf(s_sec.t, sizeof(s_sec.t), "%02d", t->tm_sec);
-  s_sec.x = fr->end - run_w(s_sec.t, s_f_cap, false, TRACK);
-  s_sec.y = band_top - m.bearing;
-  s_sec.h = m.cap + sc(3);   // what the band beneath gives up
-  s_sec.show = true;
-}
-static void paint_secs(void) __attribute__((noinline));
-static void paint_secs(void) {
-  graphics_context_set_text_color(s_ctx, s_dim);
-  draw_run(s_sec.t, s_f_cap, s_sec.x, s_sec.y, false, TRACK);
+// ---- zone 03/04: the time, flush to the outer edge so the minute survives
+// a cuff that hides the hour.
+static struct {
+  char hh[4], mm[4];
+  int x, y, w, hh_w, colon_w, cgap, band_top;
+  GSize z_colon;
+  GFont f;
+  // Through a flick the seconds stand in the colon's place.
+  bool secs;
+  char ss[3];
+  int ss_dx, s1_y, s2_y;
+} s_tm;
+
+// ---- the seconds through a flick: two digits stacked in the colon's place,
+// in the accent, a step brighter on the dark ground. The larger date's
+// digits are as wide as a colon dot and stand as tall as the pair, so the
+// time keeps its width and nothing beneath it moves. A board read against a
+// timetable wants to know where in the minute it is.
+static void layout_secs(const struct tm *t) __attribute__((noinline));
+static void layout_secs(const struct tm *t) {
+  snprintf(s_tm.ss, sizeof(s_tm.ss), "%02d", t->tm_sec);
+  const Metrics mf = barlow_metrics(measure("0", s_tm.f).h);
+  const Metrics ml = barlow_metrics(measure("8", s_f_bigdate).h);
+  const int dw = run_w("0", s_f_bigdate, true, 0);
+  s_tm.ss_dx = s_tm.hh_w + (s_tm.colon_w - dw + 1) / 2;
+  const int mid = s_tm.y + mf.bearing + mf.cap / 2, gap = sc(3);
+  s_tm.s1_y = mid - gap / 2 - ml.cap - ml.bearing;
+  s_tm.s2_y = mid + (gap + 1) / 2 - ml.bearing;
+  s_tm.secs = true;
 }
 
 // The content box, inside the rail and the paddings, in logical x.
@@ -1621,14 +1650,6 @@ static void paint_secs(void) {
 // and with their numbers in memory rather than in locals their frames stay
 // small enough to leave it the stack it needs.
 
-// ---- zone 03/04: the time, flush to the outer edge so the minute survives
-// a cuff that hides the hour.
-static struct {
-  char hh[4], mm[4];
-  int x, y, w, hh_w, colon_w, cgap, band_top;
-  GSize z_colon;
-  GFont f;
-} s_tm;
 
 static void layout_time(const struct tm *t, const Frame *fr, GFont f, int margin_top) __attribute__((noinline));
 static void layout_time(const struct tm *t, const Frame *fr, GFont f, int margin_top) {
@@ -1648,6 +1669,24 @@ static void layout_time(const struct tm *t, const Frame *fr, GFont f, int margin
   // The band the design leaves empty runs from the time's line box down to
   // the top of the countdown block.
   s_tm.band_top = s_tm.y + m.bearing + m.cap + sc(3);
+  s_tm.secs = false;
+}
+
+// The accent a step brighter on the dark ground, where small digits in the
+// cobalt itself sink into the black: each colour channel up one of Pebble's
+// four levels. The light ground takes the accent as it is.
+static GColor secs_color(void) {
+#ifdef PBL_COLOR
+  GColor c = accent();
+  if (!light_theme()) {
+    if (c.r < 3) c.r++;
+    if (c.g < 3) c.g++;
+    if (c.b < 3) c.b++;
+  }
+  return c;
+#else
+  return s_ink;
+#endif
 }
 
 static void paint_time(void) __attribute__((noinline));
@@ -1657,6 +1696,14 @@ static void paint_time(void) {
   graphics_context_set_text_color(s_ctx, s_ink);
   draw_run_s(s_tm.hh, s_tm.f, x, s_tm.y, true, 0);
   draw_run_s(s_tm.mm, s_tm.f, x + s_tm.hh_w + s_tm.colon_w, s_tm.y, true, 0);
+  if (s_tm.secs) {
+    graphics_context_set_text_color(s_ctx, secs_color());
+    char d[2] = { s_tm.ss[0], 0 };
+    draw_run_s(d, s_f_bigdate, x + s_tm.ss_dx, s_tm.s1_y, true, 0);
+    d[0] = s_tm.ss[1];
+    draw_run_s(d, s_f_bigdate, x + s_tm.ss_dx, s_tm.s2_y, true, 0);
+    return;
+  }
   // The one accent in the time: the design's colon.
   graphics_context_set_text_color(s_ctx, accent());
   s_tx.t = ":"; s_tx.f = s_tm.f; s_tx.mode = GTextOverflowModeWordWrap;
@@ -1828,6 +1875,7 @@ static void face_update(Layer *layer, GContext *ctx) {
   // The countdown is earned by being at the hub. Anywhere else the face is
   // a plain watch — unless the countdown is asked for everywhere.
   quiet = !at_hub && s_set.transit != TRANSIT_CHIPS;
+  s_quiet_face = quiet;
 
   theme_apply(t->tm_hour);
   graphics_context_set_fill_color(ctx, s_ground);
@@ -1847,7 +1895,6 @@ static void face_update(Layer *layer, GContext *ctx) {
   // a small date at the foot. Laid out first, so a one-row answer with no
   // room beside the modules can still take the board.
   s_sb.show = false;
-  s_sec.show = false;
   if (!s_sv.valid || s_sv.n == 1) {
     // A timeline peek covers the bottom third. The date goes first, the time
     // and the countdown step down, and the modules and the second countdown
@@ -1869,27 +1916,26 @@ static void face_update(Layer *layer, GContext *ctx) {
       // countdown face at the outer end past them.
       if (quiet) layout_sideblock(&fr, s_tm.band_top, band_bot, fr.start - sc(8), s_md.n ? s_md.x0 - sc(8) : fr.end);
       else layout_sideblock(&fr, s_tm.band_top, band_bot, s_md.n ? s_md.x0 + s_md.total : fr.start - sc(8), fr.end);
-      if (s_sb.show) layout_secs(t, &fr, s_tm.band_top);
+      if (s_sb.show) layout_secs(t);
     }
     // A flick with nothing to show, or one still waiting on the phone: the
     // seconds alone, under the time, so the gesture is seen to have landed.
-    if (s_sv.lit && !s_sec.show && quiet) layout_secs(t, &fr, s_tm.band_top);
+    if (s_sv.lit && !s_tm.secs && quiet) layout_secs(t);
   }
   if (s_sv.valid && !s_sb.show) {
     layout_time(t, &fr, s_f_time, TIME_MARGIN_TOP);
+    layout_secs(t);
     paint_time();
-    layout_secs(t, &fr, s_tm.band_top);
 #ifdef HAS_WAVE
     if (s_sv.wave) {
-      layout_wave(t, &fr, s_tm.band_top + s_sec.h);
+      layout_wave(t, &fr, s_tm.band_top);
       paint_wave(fr.start);
     } else
 #endif
     {
-      layout_stopview(t, &fr, s_tm.band_top + s_sec.h);
+      layout_stopview(t, &fr, s_tm.band_top);
       paint_stopview(fr.start);
     }
-    paint_secs();
   } else {
     paint_time();
     if (quiet) paint_idle();
@@ -1897,7 +1943,6 @@ static void face_update(Layer *layer, GContext *ctx) {
     paint_modules();
     if (s_gb.show) paint_gb();
     if (s_sb.show) paint_sideblock();
-    if (s_sec.show) paint_secs();
   }
 
   // ---- boarding buzz, once on the transition into the solid block: at the
@@ -1944,9 +1989,26 @@ static int tuple_int(const Tuple *tp) {
   return tp->type == TUPLE_CSTRING ? atoi(tp->value->cstring) : (int)tp->value->int32;
 }
 
+// The hairline's own clock, only while an answer is up on the plain face.
+// While the light is on, the first few seconds, when the face is being read,
+// it repaints each time the line has a pixel less to show, 14 a second on a
+// 168-pixel face; after that, twice a second. None once the answer goes.
+#define DRAIN_SMOOTH_MS 3500   // the light's few seconds, and a little past them
+static void drain_tick(void *data) {
+  (void)data;
+  s_sv.drain = NULL;
+  const int32_t left = answer_left();
+  if (left <= 0 || !s_quiet_face) return;
+  layer_mark_dirty(s_face);
+  const int h = layer_get_bounds(s_face).size.h;
+  const uint32_t step = SV_SHOW_MS - left < DRAIN_SMOOTH_MS ? SV_SHOW_MS / (h > 0 ? h : 168) : 500;
+  s_sv.drain = app_timer_register(step, drain_tick, NULL);
+}
+
 static void stopview_done(void *data) {
   (void)data;
   s_sv.timer = NULL;
+  if (s_sv.drain) { app_timer_cancel(s_sv.drain); s_sv.drain = NULL; }
   s_sv.valid = false;
   s_sv.pending = false;
   s_sv.lit = false;
@@ -1954,6 +2016,14 @@ static void stopview_done(void *data) {
   layer_mark_dirty(s_face);
 }
 static void stopview_hold(uint32_t ms) {
+  // The answer's twelve seconds start now; a wait on the phone has none.
+  if (ms == SV_SHOW_MS) {
+    time_ms(&s_sv.shown_s, &s_sv.shown_ms);
+    if (s_sv.drain) app_timer_cancel(s_sv.drain);
+    s_sv.drain = app_timer_register(0, drain_tick, NULL);
+  } else {
+    s_sv.shown_s = 0;
+  }
   if (s_sv.timer) app_timer_reschedule(s_sv.timer, ms);
   else s_sv.timer = app_timer_register(ms, stopview_done, NULL);
 }
