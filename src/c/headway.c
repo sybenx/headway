@@ -1292,7 +1292,7 @@ static void layout_stopview(const struct tm *t, const Frame *fr, int band_top) _
 static void layout_stopview(const struct tm *t, const Frame *fr, int band_top) {
   layout_board_head(t, fr);
   const int band_bot = s_svl.date_y - sc(4);
-  const GFont f_line = s_f_cap, f_time = s_f_board, f_badge = s_f_label;
+  const GFont f_line = s_f_cap, f_badge = s_f_label;
   if (s_sv.n == 0) strncpy(s_svl.note, "NO SERVICE", sizeof(s_svl.note));   // a stop the data has nothing for
   s_svl.note_x = fr->end - run_w(s_svl.note, f_line, false, TRACK);
 
@@ -1342,7 +1342,7 @@ static void layout_stopview(const struct tm *t, const Frame *fr, int band_top) {
     // A word in the second column takes the caption font on the baseline.
     s_svl.r[i].t2_y = s_svl.r[i].t2_day ? s_svl.r[i].text_y + s_svl.m_val.bearing + s_svl.m_val.cap - s_svl.m_lab.cap - s_svl.m_lab.bearing : s_svl.r[i].text_y;
     const int w1 = run_w(s_svl.r[i].t1, sv_font(s_svl.r[i].t1), false, 0);
-    const int w2 = s_svl.r[i].t2[0] ? run_w(s_svl.r[i].t2, s_svl.r[i].t2_day ? f_line : f_time, false, s_svl.r[i].t2_day ? TRACK : 0) : 0;
+    const int w2 = s_svl.r[i].t2[0] ? run_w(s_svl.r[i].t2, s_svl.r[i].t2_day ? f_line : sv_font(s_svl.r[i].t2), false, s_svl.r[i].t2_day ? TRACK : 0) : 0;
     if (w1 > W1) W1 = w1;
     if (w2 > W2) W2 = w2;
     s_svl.n = i + 1;
@@ -1412,7 +1412,9 @@ static void paint_stopview(int fr_start) {
       graphics_context_set_text_color(s_ctx, s_dim);
       draw_run_s(s_svl.r[i].t2, s_f_cap, rx + s_svl.r[i].t2_dx, s_svl.r[i].t2_y, false, TRACK);
     } else if (s_svl.r[i].t2[0]) {
-      draw_run_s(s_svl.r[i].t2, s_f_board, rx + s_svl.r[i].t2_dx, s_svl.r[i].text_y, false, 0);
+      // A second time can be NOW too, a bus hard on the heels of one just
+      // gone: it takes the letters' font as the first column's does.
+      draw_run_s(s_svl.r[i].t2, sv_font(s_svl.r[i].t2), rx + s_svl.r[i].t2_dx, s_svl.r[i].text_y, false, 0);
     }
   }
 }
@@ -1571,7 +1573,7 @@ static void layout_sideblock(const Frame *fr, int band_top, int band_bot, int le
   if (s_sv.dist > 60) { format_dist(s_sb.q, sizeof(s_sb.q), s_sv.dist); s_sb.q_day = true; }
   else if (sp && isdigit((int)sp[1])) sv_clock(s_sb.q, sizeof(s_sb.q), sp + 1);
   else if (sp && sp[1]) { strncpy(s_sb.q, sp + 1, sizeof(s_sb.q) - 1); s_sb.q[sizeof(s_sb.q) - 1] = 0; s_sb.q_day = true; }
-  const int q_w = s_sb.q[0] ? run_w(s_sb.q, s_sb.q_day ? s_f_cap : s_f_board, false, s_sb.q_day ? TRACK : 0) : 0;
+  const int q_w = s_sb.q[0] ? run_w(s_sb.q, s_sb.q_day ? s_f_cap : sv_font(s_sb.q), false, s_sb.q_day ? TRACK : 0) : 0;
   if (s_sb.row_w > room || q_w > room) return;   // no room beside the modules: the board it is
   // Three lines, centred in the band.
   const int h = s_sb.m_lab.cap + sc(SB_GAP) + badge_h + (s_sb.q[0] ? sc(SB_GAP) + (s_sb.q_day ? s_sb.m_lab.cap : s_sb.m_val.cap) : 0);
@@ -1610,7 +1612,7 @@ static void paint_sideblock(void) {
     paint_live_mark(rx + s_sb.t_dx + run_w(s_sb.t1, sv_font(s_sb.t1), false, 0) + 1, s_sb.t_y + s_sb.m_val.bearing - 1);
   if (s_sb.q[0]) {
     graphics_context_set_text_color(s_ctx, s_sb.q_day ? s_dim : s_ink);
-    draw_run(s_sb.q, s_sb.q_day ? s_f_cap : s_f_board, s_sb.q_x, s_sb.q_y, false, s_sb.q_day ? TRACK : 0);
+    draw_run(s_sb.q, s_sb.q_day ? s_f_cap : sv_font(s_sb.q), s_sb.q_x, s_sb.q_y, false, s_sb.q_day ? TRACK : 0);
   }
 }
 
