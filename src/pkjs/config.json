@@ -199,7 +199,7 @@
         "type": "select",
         "messageKey": "MOD_ICONS",
         "label": "Captions or icons",
-        "description": "Captions name the sky: SUNNY, CLOUDY, RAIN. Icons draw it. In colour the heart is red, the sun yellow at night and orange by day, rain blue, and the battery goes amber at 20% and red at 10%. A watch without a heart-rate sensor shows its battery in that slot.",
+        "description": "Captions name the sky: SUNNY, CLOUDY, RAIN. Icons draw it. In colour the heart is red, the sun yellow at night and orange by day, rain blue, and the battery goes amber at 10% and red at 5% (red at 10% on the original Pebble Time, which counts in tens). A watch without a heart-rate sensor shows its battery in that slot.",
         "defaultValue": "2",
         "options": [
           {

@@ -827,7 +827,14 @@ static GColor module_tint(const Module *m) {
   if (s_set.mod_icons != MOD_ICONS_COLOUR) return s_dim;
   switch (m->kind) {
     case MODULE_HR:      return GColorFromHEX(0xFF0055);
-    case MODULE_BATTERY: return GColorFromHEX(m->extra > 20 ? 0x00AA55 : m->extra > 10 ? 0xFFAA00 : 0xFF0000);   // these watches last: amber at a fifth, red at a tenth
+#ifdef PBL_PLATFORM_EMERY
+    // The Time 2's fuel gauge counts single percents: amber at a tenth, red
+    // at a twentieth.
+    case MODULE_BATTERY: return GColorFromHEX(m->extra > 10 ? 0x00AA55 : m->extra > 5 ? 0xFFAA00 : 0xFF0000);
+#else
+    // The Time counts in tens, so there is no 5 to see: red at a tenth.
+    case MODULE_BATTERY: return GColorFromHEX(m->extra > 10 ? 0x00AA55 : 0xFF0000);
+#endif
     case MODULE_WEATHER:
       switch (wx_kind(m->extra)) {
         // Yellow on the dark ground, where it glows; orange on the light,
