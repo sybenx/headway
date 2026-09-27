@@ -36,6 +36,10 @@ transit off and it never checks your location for transit.
 Settings on the phone for modules, theme, accent, wrist, clock and units.
 Round watches aren't supported.
 
+## Release notes (1.15.2)
+
+More memory to spare on the Pebble Classic.
+
 ## Release notes (1.15.1)
 
 The hairline after a flick starts draining the moment you flick rather
