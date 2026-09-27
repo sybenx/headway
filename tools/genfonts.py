@@ -34,19 +34,27 @@ FONTS = [
     ('cap_12', 12, '[A-Z0-9%°&.: ]'),   # emery's captions, still rasterised; the 144px caption font is drawn by hand, see below
     ('board_12', 12, '[0-9:AP]', 'semi'), ('board_17', 17, '[0-9:AP]', 'semi'),   # the board's clock times, semi-condensed
 ]
+import json as _json, pfo
 for spec in FONTS:
     name, height, regex = spec[:3]
     f = Font(SEMI if len(spec) > 3 else TTF, height, MAX_GLYPHS, 512 if name.endswith(('_83', '_61', '_21', '_15', '_17', '_12', '_25', '_67', '_42', '_53')) and name not in ('mod_15',) else 256, False)
     f.set_regex_filter(regex)
     f.build_tables()
     data = f.bitstring()
+    # A glyph the rasteriser still mangles is drawn by hand in
+    # tools/fonts/<name>.fix.json and laid over the generated font: label_11's
+    # 8 came out as a two-pixel block over a lopsided waist.
+    fix = os.path.join(os.path.dirname(__file__), 'fonts', name + '.fix.json')
+    if os.path.exists(fix):
+        font = pfo.decode(data)
+        font['glyphs'].update(_json.load(open(fix)))
+        data = pfo.encode(font)
     with open(os.path.join(OUT, name + '.pfo'), 'wb') as out:
         out.write(data)
     print(f'{name}.pfo {len(data)} bytes')
 
 # The 9px caption font is drawn by hand — tools/fonts/cap_9.json, rows of
 # '#' and '.', digits in one cell — and written through tools/pfo.py.
-import json as _json, pfo
 _cap = _json.load(open(os.path.join(os.path.dirname(__file__), 'fonts', 'cap_9.json')))
 with open(os.path.join(OUT, 'cap_9.pfo'), 'wb') as out:
     data = pfo.encode(_cap); out.write(data)
