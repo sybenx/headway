@@ -478,6 +478,21 @@ static void icon_battery(GContext *ctx, GRect r, int pct, GColor tint) {
   if (fill > 0) graphics_fill_rect(ctx, GRect(r.origin.x + 2, y + 2, fill, h - 4), 0, GCornerNone);
 }
 
+// A lightning bolt, set beside the battery while it charges; the battery
+// itself keeps its fill and the number stays.
+static const char *const BOLT[10] = {
+  "...##",
+  "..##.",
+  "..##.",
+  ".##..",
+  "#####",
+  "..##.",
+  ".##..",
+  ".##..",
+  "##...",
+  "#....",
+};
+
 static const char *const HEART[10] = {
   "..........",
   ".##....##.",
@@ -764,6 +779,7 @@ typedef struct {
   const char *caption;
   uint8_t kind;
   int extra;            // battery percent / weather code
+  bool charging;        // a battery on the charger: a bolt beside the icon
 } Module;
 
 static bool module_read(uint8_t kind, Module *m) {
@@ -826,7 +842,7 @@ static bool module_uses_icon(const Module *m) {
 
 static int module_icon_w(const Module *m, int icon) {
   switch (m->kind) {
-    case MODULE_BATTERY: return icon * 8 / 5;
+    case MODULE_BATTERY: return icon * 8 / 5 + (m->charging ? icon / 2 + sc(2) : 0);
     case MODULE_STEPS:   return icon;
     default:             return icon;
   }
@@ -871,7 +887,20 @@ static void module_draw_icon(GContext *ctx, const Module *m, GRect box) {
   switch (m->kind) {
     case MODULE_HR:      graphics_context_set_fill_color(ctx, tint); icon_heart(ctx, box); break;
     case MODULE_STEPS:   icon_steps(ctx, box); break;
-    case MODULE_BATTERY: icon_battery(ctx, box, m->extra, tint); break;
+    case MODULE_BATTERY:
+      if (m->charging) {
+        // The battery as ever, then the bolt after its nub: yellow on the
+        // dark ground and orange on the light, as the sun is, grey where the
+        // icons are.
+        const int bw = box.size.h * 8 / 5, lw = box.size.h / 2;
+        icon_battery(ctx, GRect(box.origin.x, box.origin.y, bw, box.size.h), m->extra, tint);
+        graphics_context_set_fill_color(ctx, s_set.mod_icons == MOD_ICONS_COLOUR
+            ? PBL_IF_COLOR_ELSE(gcolor_equal(s_ground, GColorWhite) ? GColorFromHEX(0xFF5500) : GColorFromHEX(0xFFFF00), s_dim) : s_dim);
+        draw_bits(ctx, GRect(box.origin.x + bw + sc(2), box.origin.y, lw, box.size.h), BOLT, 5, 10, '#');
+      } else {
+        icon_battery(ctx, box, m->extra, tint);
+      }
+      break;
     case MODULE_WEATHER: icon_weather(ctx, box, m->extra, s_dim, tint); break;
     default: break;
   }
@@ -908,13 +937,20 @@ static void layout_modules(GFont f_val, GFont f_cap, int c_start, int avail_w,
   for (int i = 0; i < MODULE_COUNT; i++) {
     uint8_t kind = i == charger ? MODULE_BATTERY : s_set.mod[i];
     if (kind == MODULE_NONE) continue;
-    if (module_read(kind, &s_md.m[s_md.n])) { s_md.n++; continue; }
+    if (module_read(kind, &s_md.m[s_md.n])) {
+      s_md.m[s_md.n].charging = kind == MODULE_BATTERY && (bs.is_plugged || bs.is_charging);
+      s_md.n++;
+      continue;
+    }
     // No heart-rate sensor, or no reading yet: the slot shows the battery,
     // or steps if the battery already has a slot of its own.
     if (kind != MODULE_HR) continue;
     kind = MODULE_BATTERY;
     for (int j = 0; j < MODULE_COUNT; j++) if (s_set.mod[j] == MODULE_BATTERY) kind = MODULE_STEPS;
-    if (module_read(kind, &s_md.m[s_md.n])) s_md.n++;
+    if (module_read(kind, &s_md.m[s_md.n])) {
+      s_md.m[s_md.n].charging = kind == MODULE_BATTERY && (bs.is_plugged || bs.is_charging);
+      s_md.n++;
+    }
   }
   if (s_md.n == 0) return;
 
