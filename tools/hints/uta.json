@@ -1,0 +1,23 @@
+{
+  "labels": {
+    "701": "BLUE",
+    "703": "RED",
+    "704": "GRN",
+    "720": "S",
+    "750": "FR"
+  },
+  "headsigns": {
+    "To University Medical": "U MED",
+    "To University": "U OF U",
+    "To Salt Lake Central": "SL CTRL",
+    "To Central Pointe": "C POINTE",
+    "To Daybreak Parkway": "DAYBREAK",
+    "To Fashion Place West": "FASHION",
+    "To West Valley": "W VALLEY",
+    "To North Temple": "N TEMPLE",
+    "TO DRAPER": "DRAPER",
+    "To ": "",
+    "TO ": ""
+  },
+  "stops": {}
+}

@@ -81,6 +81,11 @@ function systemAt(lat, lon) {
   }
   return null;
 }
+function firstHub() {
+  var list = transit.systems || [];
+  for (var i = 0; i < list.length; i++) if (list[i].hub) return list[i];
+  return null;
+}
 function hubMode() {
   var s = settings();
   var m = s.TRANSIT === undefined ? MODE_AUTO : String(s.TRANSIT);
@@ -141,10 +146,17 @@ function checkTransit(force) {
       // always-on modes still take the first system as their hub.
       lastOutside = Date.now();
       if (mode === MODE_AUTO) { console.log('headway: outside any known system'); return sendTransit(0, 0, [], []); }
-      sys = (transit.systems || [])[0];
+      sys = firstHub();
       if (!sys) return;
     } else {
       lastOutside = 0;
+    }
+    if (!sys.hub) {
+      // A system of stops and no hub: in its area a flick answers, and the
+      // face stays the plain watch. The always-on modes count down to the
+      // first system that has a hub.
+      if (mode === MODE_AUTO || !firstHub()) { console.log('headway: ' + sys.agency + ', no hub'); return sendTransit(1, 0, [], []); }
+      sys = firstHub();
     }
     var d = metres(lat, lon, sys.hub.lat, sys.hub.lon);
     var now = new Date();
@@ -200,11 +212,14 @@ function getJSON(url, key, ttl, cb) {
 }
 
 // A direction word that fits the board's second column: the compass word
-// when the headsign has one, else the headsign cut to eight.
+// when the headsign has one, else as many of its words as fit in eight, or
+// its first eight letters when the first word alone is longer.
 function dirWord(head) {
   var m = /\b(NORTH|SOUTH|EAST|WEST|IN|OUT)BOUND\b/.exec(head || '');
   if (m) return m[1].length <= 2 ? m[1] + 'BOUND' : m[1];
-  return (head || '').replace(/\s+$/, '').slice(0, 8);
+  var words = (head || '').trim().split(/\s+/), out = '';
+  for (var i = 0; i < words.length && (out ? out.length + 1 : 0) + words[i].length <= 8; i++) out += (out ? ' ' : '') + words[i];
+  return out || (head || '').trim().slice(0, 8);
 }
 
 // Live predictions, when the system names a relay for them. Only ever an
@@ -246,14 +261,36 @@ function routeKey(r) {
 }
 function byRoute(a, b) { return routeKey(a) - routeKey(b) || (a < b ? -1 : a > b ? 1 : 0); }
 
-function dayKind(d) { var wd = d.getDay(); return wd === 0 ? 'sunday' : wd === 6 ? 'saturday' : 'weekday'; }
+// The services running on a date, from the agency's own calendar: a weekly
+// pattern between two dates, and dates added or taken away. Each service is
+// [weekmask Mon..Sun, "start", "end", [added], [removed]], dates YYYYMMDD.
+function ymd(d) {
+  var m = d.getMonth() + 1, day = d.getDate();
+  return d.getFullYear() + (m < 10 ? '0' : '') + m + (day < 10 ? '0' : '') + day;
+}
+function activeServices(services, d) {
+  var key = ymd(d), bit = 1 << ((d.getDay() + 6) % 7), on = {};
+  (services || []).forEach(function (sv, i) {
+    var weekly = (sv[0] & bit) && sv[1] <= key && key <= sv[2] && sv[4].indexOf(key) < 0;
+    if (weekly || sv[3].indexOf(key) >= 0) on[i] = true;
+  });
+  return on;
+}
 
 // Times go to the watch as minutes past midnight; the watch writes them in
 // its own clock style, 12-hour with A or P, or 24-hour.
 
+// The watch keeps 23 characters of a stop's name; cut at a word, never in one.
+function fitName(name) {
+  name = name || '';
+  if (name.length <= 23) return name;
+  var cut = name.slice(0, 24).lastIndexOf(' ');
+  return name.slice(0, cut > 0 ? cut : 23);
+}
+
 function sendStopView(name, dist, rows) {
   console.log('headway: stop view ' + (name || '(none)') + ' ' + rows.length + ' rows');
-  var msg = { SV_STOP: name, SV_DIST: Math.round(dist), SV_N: rows.length, SV_MODE: 0 };
+  var msg = { SV_STOP: fitName(name), SV_DIST: Math.round(dist), SV_N: rows.length, SV_MODE: 0 };
   for (var i = 0; i < rows.length && i < 3; i++) {
     msg['SV_R' + (i + 1)] = rows[i].route;
     msg['SV_H' + (i + 1)] = rows[i].head;
@@ -273,7 +310,7 @@ function sendWaves(name, waves) {
   console.log('headway: hub view ' + waves.map(function (w) {
     return w.when + ' [' + w.routes.map(function (r, j) { return r + ((w.live >> j) & 1 ? '~' : '') + ((w.away >> j) & 1 ? '(away)' : ''); }).join(' ') + ']';
   }).join(', '));
-  var msg = { SV_STOP: name, SV_DIST: 0, SV_N: waves.length, SV_MODE: 1 };
+  var msg = { SV_STOP: fitName(name), SV_DIST: 0, SV_N: waves.length, SV_MODE: 1 };
   waves.forEach(function (w, i) {
     var k = [];
     w.colors.forEach(function (c) { k.push((c >> 16) & 255, (c >> 8) & 255, c & 255); });
@@ -297,7 +334,7 @@ function routesIn(group, live, stops) {
   if (!live || !live.at) return null;
   var tripRoute = {}, nowS = Date.now() / 1000, out = {};
   stops.forEach(function (stop) {
-    Object.keys(stop.days).forEach(function (k) { stop.days[k].forEach(function (d) { if (d[3]) tripRoute[d[3]] = d[1]; }); });
+    (stop.deps || []).forEach(function (d) { if (d[3]) tripRoute[d[3]] = d[1]; });
   });
   live.at.forEach(function (b) {
     if (!(nowS - b[2] < BUS_FRESH) || !b[3]) return;
@@ -359,21 +396,24 @@ function onFlick() {
     var sys = systemAt(lat, lon);
     if (!sys || !sys.data) return sendStopView('', 0, []);
     var DATA_URL = sys.data, tag = sys.agency.toLowerCase();
-    getJSON(DATA_URL + 'stops.json', 'hw-stops-' + tag, INDEX_TTL, function (index) {
+    getJSON(DATA_URL + 'stops.json', 'hw2-stops-' + tag, INDEX_TTL, function (index) {
       if (!index) return sendStopView('', 0, []);
       Object.keys(index.routes || {}).forEach(function (r, i) { routeRank[r] = i; });
       var ranked = index.stops.map(function (st) {
-        return { id: st[0], d: metres(lat, lon, st[1], st[2]), lat: st[1], lon: st[2] };
+        return { id: st[0], d: metres(lat, lon, st[1], st[2]), lat: st[1], lon: st[2], station: st[3] };
       }).sort(function (a, b) { return a.d - b.d; });
       if (!ranked.length || ranked[0].d > FAR) return sendStopView('', 0, []);
       var best = ranked[0];
-      // Twins across a road are read as one stop. At the hub, every bay is:
-      // the group is the whole hub, and it goes by the hub's own name rather
-      // than whichever bay happened to be nearest.
+      // Twins across a road are read as one stop, and so is a station: every
+      // stop the index marks with the nearest one's station number. At the
+      // hub, every bay is: the group is the whole hub, and it goes by the
+      // hub's own name rather than whichever bay happened to be nearest.
       var atHub = sys.hub && metres(best.lat, best.lon, sys.hub.lat, sys.hub.lon) <= HUB;
       var group = atHub
         ? ranked.filter(function (st) { return metres(sys.hub.lat, sys.hub.lon, st.lat, st.lon) <= HUB; }).slice(0, 16)
-        : ranked.filter(function (st) { return metres(best.lat, best.lon, st.lat, st.lon) <= TWIN; }).slice(0, 8);
+        : ranked.filter(function (st) {
+          return metres(best.lat, best.lon, st.lat, st.lon) <= TWIN || (best.station && st.station === best.station);
+        }).slice(0, 16);
       var now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes();
       var midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
       var pending = group.length + 1, name = atHub ? sys.hub.name : '', stops = [], live = null;
@@ -381,7 +421,7 @@ function onFlick() {
       // for at most LIVE_WAIT; the schedule never waits on it beyond that.
       getLive(sys, group.map(function (st) { return st.id; }), function (l) { live = l; answer(); });
       group.forEach(function (st) {
-        getJSON(DATA_URL + 'stops/' + st.id + '.json', 'hw-stop-' + tag + '-' + st.id, STOP_TTL, function (stop) {
+        getJSON(DATA_URL + 'stops/' + st.id + '.json', 'hw2-stop-' + tag + '-' + st.id, STOP_TTL, function (stop) {
           if (stop) { if (!name) name = stop.name; stop.id = stop.id || st.id; stops.push(stop); }
           answer();
         });
@@ -393,12 +433,20 @@ function onFlick() {
         // so the answer is the next bus, whenever that is.
         var deps = [], dayWord = '';
         for (var ahead = 0; ahead < 8 && !deps.length; ahead++) {
-          var date = new Date(now.getTime() + ahead * 24 * 60 * 60 * 1000);
-          // Today's list keeps the minute just gone: a bus due a minute ago
-          // may still be pulling in, and the watch reads it as NOW.
-          var kind = dayKind(date), from = ahead ? 0 : nowMin - 1;
+          var date = new Date(now.getFullYear(), now.getMonth(), now.getDate() + ahead);
+          // A day's buses are its own services' departures, and the ones the
+          // day before's services run past midnight (GTFS writes 12:53 AM as
+          // 24:53 on the evening's service). Today's list keeps the minute
+          // just gone: a bus due a minute ago may still be pulling in, and
+          // the watch reads it as NOW.
+          var onDay = activeServices(index.services, date);
+          var onEve = activeServices(index.services, new Date(date.getFullYear(), date.getMonth(), date.getDate() - 1));
+          var from = ahead ? 0 : nowMin - 1;
           stops.forEach(function (stop) {
-            (stop.days[kind] || []).forEach(function (dep) {
+            (stop.deps || []).forEach(function (row) {
+              var shift = row[0] >= 1440 && onEve[row[4]] ? 1440 : 0;
+              if (!shift && !onDay[row[4]]) return;
+              var dep = [row[0] - shift, row[1], row[2], row[3]];
               // Today's departures take the live prediction for this trip
               // at this stop where there is one. A stop the bus will skip
               // drops out; at the hub a bus is held to its time, never

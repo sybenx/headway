@@ -32,11 +32,12 @@ one with its day. Stops across a road from each other read as one. At the
 transit centre, where a dozen routes leave together, it answers by time
 instead: each departure minute with every route leaving then as a badge.
 
-It knows one system so far: Connect, the Cache Valley Transit District in
-Logan, Utah. A flick also asks for Connect's live predictions: a predicted
-time carries a small arc, a late bus shows when it will really leave, and
-without a live answer the face shows the published schedule, refreshed
-nightly. Elsewhere it's the plain watch, and it asks the phone very little.
+It knows Connect, the Cache Valley Transit District in Logan, Utah, and UTA,
+from Ogden to Provo: TRAX, FrontRunner and the buses. A flick also asks for
+Connect's live predictions: a predicted time carries a small arc, a late bus
+shows when it will really leave, and without a live answer the face shows
+the published schedule, refreshed nightly. Elsewhere it's the plain watch,
+and it asks the phone very little.
 
 Settings on the phone: three module slots (heart rate, steps, battery,
 weather) as captions or icons; theme and night hours; accent colour; left or
@@ -45,6 +46,14 @@ countdown on everywhere for any service that runs on a fixed headway.
 
 Colour watches show the badges and icons in colour; Pebble Classic and Pebble
 2 draw them in black and white. Round watches aren't supported.
+
+## Release notes (1.14.0)
+
+UTA: flick at any stop or station from Ogden to Provo and the face shows
+what leaves next: TRAX by line (BLUE, RED, GRN, S), FrontRunner (FR) and the
+buses, every bay of a station read as one. Timetables now follow each
+agency's own calendar, so holidays and special service days show what really
+runs, and late-night trips show after midnight.
 
 ## Release notes (1.13.0)
 

@@ -1,36 +1,68 @@
 name: transit data
 
-# Every night, fetch the agency's GTFS, reduce it to what the face needs, and
-# commit the result if it changed. The per-stop files serve from GitHub Pages
-# (docs/), and the hub file ships inside the app on the next release.
+# Every night, fetch each agency's GTFS and reduce it to what the phone needs.
+# The per-stop files are served by GitHub Pages from the `pages` branch, which
+# holds only the latest data: it is rebuilt from nothing and force-pushed, so
+# old timetables never pile up in history. transit.json, which ships inside
+# the app, is committed to main when it changes.
 
 on:
   schedule:
-    - cron: '17 9 * * *'   # 03:17 Mountain, after the agency's overnight update
+    - cron: '17 9 * * *'   # 03:17 Mountain, after the agencies' overnight updates
   workflow_dispatch:
 
 permissions:
   contents: write
+  pages: write
 
 jobs:
   reduce:
     runs-on: ubuntu-latest
+    env:
+      PAGES: https://sybenx.github.io/headway/data
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Fetch CVTD GTFS
-        run: curl -fsSL -o /tmp/cvtd.zip https://mycvtdbus.org/gtfs
+      - name: Fetch
+        run: |
+          curl -fsSL -o /tmp/cvtd.zip https://mycvtdbus.org/gtfs
+          curl -fsSL -o /tmp/uta.zip https://gtfsfeed.rideuta.com/GTFS.zip
       - name: Reduce
         run: |
-          python3 tools/transit.py /tmp/cvtd.zip --hub 41.7406,-111.8309 --routes G,B --data-url https://sybenx.github.io/headway/data/cvtd/ --live-url https://live.cacherider.com/ \
-            --agency CVTD --name "TRANSIT CTR" --hints tools/hints/cvtd.json --stops-out docs/data/cvtd
-      - name: Commit if changed
+          # Connect keeps its day-type files at data/cvtd for phones on 1.13.0
+          # and before; everything else reads data/v2/<agency>.
+          python3 tools/transit.py /tmp/cvtd.zip --agency CVTD --hub 41.7406,-111.8309 --routes G,B --name "TRANSIT CTR" \
+            --hints tools/hints/cvtd.json --live-url https://live.cacherider.com/ \
+            --data-url $PAGES/v2/cvtd/ --stops-out site/data/v2/cvtd --legacy-out site/data/cvtd
+          python3 tools/transit.py /tmp/uta.zip --agency UTA --hints tools/hints/uta.json \
+            --data-url $PAGES/v2/uta/ --stops-out site/data/v2/uta
+          touch site/.nojekyll
+      - name: Commit transit.json if changed
         run: |
           git config user.name 'transit data'
           git config user.email 'actions@users.noreply.github.com'
-          git add docs/data src/pkjs/transit.json
-          git diff --cached --quiet && echo 'no change' && exit 0
-          git commit -m "Transit data: $(date -u +%Y-%m-%d)"
-          git push
+          git add src/pkjs/transit.json
+          if git diff --cached --quiet; then echo 'transit.json unchanged'; else
+            git commit -m "Transit data: $(date -u +%Y-%m-%d)"
+            git push
+          fi
+      - name: Publish the data if changed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd site
+          git init -q -b pages
+          git config user.name 'transit data'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -A
+          git commit -q -m "Transit data: $(date -u +%Y-%m-%d)"
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+          # The same files make the same tree: publish only when they differ.
+          old=$(git ls-remote "$remote" refs/heads/pages | cut -f1)
+          if [ -n "$old" ] && git fetch -q --depth=1 "$remote" pages && [ "$(git rev-parse FETCH_HEAD^{tree})" = "$(git rev-parse HEAD^{tree})" ]; then
+            echo 'data unchanged'; exit 0
+          fi
+          git push -q -f "$remote" pages
+          gh api -X POST repos/${{ github.repository }}/pages/builds || true

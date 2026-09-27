@@ -41,10 +41,13 @@ which needs no key.
 
 ## Near a system it knows
 
-The face knows some transit systems: each one's hub, its hours, the routes
-that leave the hub on their own timetable, and every stop. By default the
-phone checks where it is now and then, coarsely, and the face changes by the
-answer. Outside every known system nothing changes and it asks less often.
+The face knows some transit systems and every stop in them. Most are just
+that: stand at a stop, flick, and the face answers with what leaves next.
+One kind is more: a system built around a hub, a transit centre whose routes
+leave together, where the face also counts down to the next departure. By
+default the phone checks where it is now and then, coarsely, and the face
+changes by the answer. Outside every known system nothing changes and it
+asks less often.
 
 **At the hub**, in its hours, the countdown appears: minutes to the next
 departure, at the outer edge. Five minutes out the block goes solid and the
@@ -110,10 +113,12 @@ no stop within two kilometres that is all a flick shows: the gesture was
 heard, and nothing is taken away to say there is nothing. The countdown steps aside for
 a board and is back the moment it goes.
 
-The face knows one system so far: Connect, the Cache Valley Transit District
-in Logan, Utah, whose routes leave the transit centre on the half hour and
-whose G and B loops keep their own timetable. Adding another is a GTFS feed
-and a hub; see Data below.
+The face knows two systems so far. Connect, the Cache Valley Transit District
+in Logan, Utah, is the hub kind: its routes leave the transit centre on the
+half hour and its G and B loops keep their own timetable. UTA, from Ogden to
+Provo, is the stops kind: TRAX, FrontRunner and the buses, with the rail
+lines by the names riders use (`BLUE`, `RED`, `GRN`, `S`, `FR`) and every bay
+of a station answering as one. Adding another is a GTFS feed; see Data below.
 
 ## Countdown everywhere
 
@@ -145,11 +150,16 @@ From the Pebble app.
 ## Data
 
 The watch never reads a feed. `tools/transit.py` reduces an agency's GTFS to
-what the phone needs — the hub, its hours, the departures of the routes on
-their own timetable, and a file per stop with its scheduled departures by
-day — and writes `src/pkjs/transit.json` for the app and `docs/data/` for
-GitHub Pages, where the phone fetches stop files on a flick and caches them.
-A nightly workflow refetches the feed and commits what changed.
+what the phone needs: a file per stop with its departures, each naming the
+service it runs on, and an index with the agency's whole calendar — weekly
+patterns, dates added and dates taken away — so the phone works out which
+buses run on the day it is asked about, holidays and all, and a bus the
+agency writes as 24:53 runs at 12:53 the next morning. For a hub system it
+also writes the hub, its hours and the departures of the routes on their own
+timetable. The app's entry for each system goes in `src/pkjs/transit.json`;
+the stop files are served by GitHub Pages from the `pages` branch, which a
+nightly workflow rebuilds from the feeds and replaces whole, so old
+timetables never pile up in the history.
 
 Each departure names its trip, from the agency's own GTFS, so live
 predictions can be laid over it. For Connect they come from the relay at
@@ -160,9 +170,11 @@ than ninety seconds old, and on any failure shows exactly the schedule it
 would have shown without it. A system names its relay with `--live-url`, or
 has none.
 
-To add a system: run `tools/transit.py` with the feed, the hub's position and
-name, and the routes that keep their own timetable, and add the same line to
-`.github/workflows/transit.yml`.
+To add a system: add its feed to `.github/workflows/transit.yml` with a line
+running `tools/transit.py` (the feed, the agency, and a hints file for short
+names and badge labels), and ship the new `transit.json` in a release. A hub
+system also gives the hub's position and name and the routes that keep
+their own timetable.
 
 ## Platforms
 
