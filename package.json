@@ -76,7 +76,8 @@
       "SV_O2",
       "SV_O3",
       "FLICK_ON",
-      "TR_AREA"
+      "TR_AREA",
+      "TR_KM"
     ],
     "resources": {
       "media": [

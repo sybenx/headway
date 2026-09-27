@@ -25,34 +25,35 @@ function send(temp, code) {
   Pebble.sendAppMessage({ WOK: 1, TEMP: Math.round(temp), WCODE: code || 0 });
 }
 
-function fetchWeather(force) {
+// Only when a slot is actually showing weather.
+function weatherWanted() {
   var s = settings();
-  // Only fetch when a slot is actually showing weather.
-  var wanted = [s.MOD1, s.MOD2, s.MOD3].some(function (m) { return String(m) === '4'; });
-  if (!wanted && s.MOD1 !== undefined) return;
-  var now = Date.now();
-  if (!force && now - lastFetch < WEATHER_TTL) return;
+  return s.MOD1 === undefined || [s.MOD1, s.MOD2, s.MOD3].some(function (m) { return String(m) === '4'; });
+}
 
-  navigator.geolocation.getCurrentPosition(function (pos) {
-    var unit = s.UNITS === 'imperial' ? 'fahrenheit' : 'celsius';
-    var url = 'https://api.open-meteo.com/v1/forecast' +
-      '?latitude=' + pos.coords.latitude.toFixed(3) +
-      '&longitude=' + pos.coords.longitude.toFixed(3) +
-      '&current=temperature_2m,weather_code' +
-      '&temperature_unit=' + unit;
-
-    var req = new XMLHttpRequest();
-    req.open('GET', url, true);
-    req.onload = function () {
-      if (req.status !== 200) return;
-      try {
-        var cur = JSON.parse(req.responseText).current;
-        lastFetch = Date.now();
-        send(cur.temperature_2m, cur.weather_code);
-      } catch (e) {}
-    };
-    req.send();
-  }, function () {}, { timeout: 15000, maximumAge: 10 * 60 * 1000 });
+// The weather for a fix already taken: the phone looks once for weather and
+// transit both (see look()).
+function weatherAt(pos, force) {
+  var s = settings();
+  if (!weatherWanted()) return;
+  if (!force && Date.now() - lastFetch < WEATHER_TTL) return;
+  var unit = s.UNITS === 'imperial' ? 'fahrenheit' : 'celsius';
+  var url = 'https://api.open-meteo.com/v1/forecast' +
+    '?latitude=' + pos.coords.latitude.toFixed(3) +
+    '&longitude=' + pos.coords.longitude.toFixed(3) +
+    '&current=temperature_2m,weather_code' +
+    '&temperature_unit=' + unit;
+  var req = new XMLHttpRequest();
+  req.open('GET', url, true);
+  req.onload = function () {
+    if (req.status !== 200) return;
+    try {
+      var cur = JSON.parse(req.responseText).current;
+      lastFetch = Date.now();
+      send(cur.temperature_2m, cur.weather_code);
+    } catch (e) {}
+  };
+  req.send();
 }
 
 // ---- transit: is the wearer at the hub, and what leaves it next.
@@ -61,7 +62,6 @@ function fetchWeather(force) {
 // countdown applies here and now, and the next few departures of the
 // routes on their own timetable. A coarse fix does: the question is
 // "within a few hundred metres of the hub", not "which side of the road".
-var TRANSIT_EVERY = 5 * 60 * 1000;
 var TR_MAX = 4;
 
 function metres(aLat, aLon, bLat, bLon) {
@@ -124,14 +124,23 @@ function transitMsg(st) {
     TR_G: packMinutes(st.g),
     TR_B: packMinutes(st.b),
     TR_AT: Math.floor(Date.now() / 1000),
+    TR_KM: st.km || 0,
   };
 }
 
-// Away from every known system the phone asks less often.
-var lastOutside = 0;
-// Once an hour is enough: a flick asks too, and finds a system the moment
-// the wearer wants one.
-var OUTSIDE_EVERY = 60 * 60 * 1000;
+// Kilometres from a fix to the nearest system's area, 0 inside one. The
+// watch weighs a flick by it: nobody drives from the next state into Logan
+// in half an hour, so far from every system a flick needn't ask at all.
+function kmToSystem(lat, lon) {
+  var best = Infinity;
+  (transit.systems || []).forEach(function (sys) {
+    var a = sys.area;
+    if (!a) return;
+    var cl = Math.min(Math.max(lat, a[0]), a[2]), co = Math.min(Math.max(lon, a[1]), a[3]);
+    best = Math.min(best, metres(lat, lon, cl, co) / 1000);
+  });
+  return best === Infinity ? 0 : Math.min(65535, Math.round(best));
+}
 
 // What the face should know about a position: whether it is in a system it
 // knows, and whether it is at that system's hub in its hours, with the next
@@ -147,7 +156,10 @@ function transitState(lat, lon) {
   if (!sys) {
     // Outside every system the face knows. Automatic: a plain watch; the
     // always-on modes still take the first system as their hub.
-    if (mode === MODE_AUTO) return { area: 0, state: 0, g: [], b: [], why: 'outside any known system' };
+    if (mode === MODE_AUTO) {
+      var km = kmToSystem(lat, lon);
+      return { area: 0, state: 0, g: [], b: [], km: km, why: 'outside any known system, ' + km + ' km away' };
+    }
     sys = firstHub();
     if (!sys) return null;
   }
@@ -175,13 +187,38 @@ function transitState(lat, lon) {
   };
 }
 
-function checkTransit(force) {
-  var mode = hubMode();
-  if (mode === MODE_OFF) return;
-  if (!force && mode === MODE_AUTO && lastOutside && Date.now() - lastOutside < OUTSIDE_EVERY) return;
+// ---- when the phone looks. One rough fix every half hour serves the weather
+// and transit both. Every five minutes only near a hub while its buses run,
+// so the countdown comes on as the wearer walks up; after the day's last bus
+// transit asks nothing until a quarter hour before the first one next
+// morning. A flick takes its own fix, and counts as a look.
+var LOOK_EVERY = 30 * 60 * 1000, NEAR_EVERY = 5 * 60 * 1000, NEAR_HUB = 5000;
+var lastLook = 0, lastSys = null, nearHub = false;
+
+function hubRunning(sys) {
+  var now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes();
+  var day = sys && sys.days ? dayTable(sys, now) : null;
+  return !!day && nowMin >= day.hours[0] - 15 && nowMin <= day.hours[1];
+}
+function sawFix(lat, lon) {
+  lastLook = Date.now();
+  lastSys = systemAt(lat, lon);
+  nearHub = !!(lastSys && lastSys.hub && metres(lat, lon, lastSys.hub.lat, lastSys.hub.lon) <= NEAR_HUB);
+}
+
+function look(force) {
+  var mode = hubMode(), since = Date.now() - lastLook;
+  // Inside a hub's system out of its hours, transit has nothing to ask.
+  var transitWants = mode !== MODE_OFF && (force || !(lastSys && lastSys.hub && !hubRunning(lastSys)));
+  var near = transitWants && nearHub && hubRunning(lastSys);
+  if (!force && since < (near ? NEAR_EVERY : LOOK_EVERY)) return;
+  var wx = weatherWanted();
+  if (!wx && !transitWants) return;
   navigator.geolocation.getCurrentPosition(function (pos) {
     var lat = pos.coords.latitude, lon = pos.coords.longitude;
-    lastOutside = systemAt(lat, lon) ? 0 : Date.now();
+    sawFix(lat, lon);
+    if (wx) weatherAt(pos, force);
+    if (!transitWants) return;
     var st = transitState(lat, lon);
     if (!st) return;
     console.log('headway: ' + st.why);
@@ -422,9 +459,8 @@ function onFlick() {
     var lat = pos.coords.latitude, lon = pos.coords.longitude;
     console.log('headway: fix ' + lat.toFixed(4) + ',' + lon.toFixed(4) + ' +-' + Math.round(pos.coords.accuracy) + 'm');
     flickTransit = transitState(lat, lon);
-    // The flick's fix answers the background question too: inside a system
-    // the checks go back to every few minutes, outside they wait an hour.
-    lastOutside = systemAt(lat, lon) ? 0 : Date.now();
+    // The flick's fix answers the background question too.
+    sawFix(lat, lon);
     var sys = systemAt(lat, lon);
     if (!sys || !sys.data) return sendStopView('', 0, []);
     var DATA_URL = sys.data, tag = sys.agency.toLowerCase();
@@ -537,10 +573,9 @@ Pebble.addEventListener('appmessage', function (e) {
   if (e.payload && e.payload.FLICK) { console.log('headway: flick'); onFlick(); }
 });
 
-Pebble.addEventListener('ready', function () { fetchWeather(true); checkTransit(true); });
+Pebble.addEventListener('ready', function () { look(true); });
 Pebble.addEventListener('webviewclosed', function () {
   // Settings may have switched weather or transit on, or changed units.
-  setTimeout(function () { fetchWeather(true); checkTransit(true); }, 500);
+  setTimeout(function () { look(true); }, 500);
 });
-setInterval(function () { fetchWeather(false); }, 10 * 60 * 1000);
-setInterval(function () { checkTransit(false); }, TRANSIT_EVERY);
+setInterval(function () { look(false); }, NEAR_EVERY);

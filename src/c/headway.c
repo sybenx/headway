@@ -87,6 +87,7 @@ typedef struct {
   uint8_t state;           // 0 away or out of hours, 1 at the hub
   uint8_t area;            // 1 inside a system the face knows
   uint16_t g[TR_MAX], b[TR_MAX];
+  uint16_t km;             // outside every system: how far to the nearest, 0 unknown
   time_t at;
 } Transit;
 
@@ -2028,21 +2029,34 @@ static void stopview_hold(uint32_t ms) {
   else s_sv.timer = app_timer_register(ms, stopview_done, NULL);
 }
 
+// Whether a flick asks the phone, and so takes a precise fix. Not with transit
+// off. In the chosen modes, always. Automatic: inside a system, or where the
+// wearer could have driven into one since the phone last looked, at highway
+// speed; nobody drives from the next state into Logan in half an hour, so a
+// flick far from every system never takes a fix. With nothing heard yet, ask.
+#define DRIVE_KMH 130
+static bool flick_asks(void) {
+  if (s_set.transit == TRANSIT_OFF || !s_set.flick) return false;
+  if (s_set.transit != TRANSIT_AUTO && s_set.transit != TRANSIT_NEAR) return true;
+  if (s_tr.area || !s_tr.at || !s_tr.km) return true;
+  const int32_t gone = (int32_t)(time(NULL) - s_tr.at);
+  return gone < 0 || gone / 60 * DRIVE_KMH / 60 + 1 >= s_tr.km;
+}
+
 // A flick of the wrist asks the phone for the nearest stop. The light comes
 // on with the gesture, and again when the answer lands, so the answer is
 // read in the same glance.
 static void tap_handler(AccelAxisType axis, int32_t direction) {
   (void)axis; (void)direction;
   // Every flick is heard: the light, and the seconds, at once. The phone is
-  // asked unless transit is off: it takes one fix and finds the system, if
-  // any, so the background checks outside every system can be rare.
+  // asked only where the answer could be worth a fix (flick_asks).
   if (s_sv.pending) return;
   s_sv.lit = true;
   light_enable_interaction();
   stopview_hold(SV_SHOW_MS);
   retune_tick();
   layer_mark_dirty(s_face);
-  if (s_set.transit == TRANSIT_OFF || !s_set.flick) return;
+  if (!flick_asks()) return;
   DictionaryIterator *out;
   if (app_message_outbox_begin(&out) != APP_MSG_OK) return;
   dict_write_uint8(out, MESSAGE_KEY_FLICK, 1);
@@ -2098,7 +2112,9 @@ static void take_transit(DictionaryIterator *iter) {
   Tuple *tb = dict_find(iter, MESSAGE_KEY_TR_B);
   Tuple *ta = dict_find(iter, MESSAGE_KEY_TR_AT);
   Tuple *tarea = dict_find(iter, MESSAGE_KEY_TR_AREA);
+  Tuple *tkm = dict_find(iter, MESSAGE_KEY_TR_KM);
   s_tr.state = (uint8_t)tp->value->int32;
+  s_tr.km = tkm ? (uint16_t)tkm->value->int32 : 0;
   s_tr.area = tarea ? (uint8_t)(tarea->value->int32 != 0) : 1;
   for (int i = 0; i < TR_MAX; i++) {
     s_tr.g[i] = (tg && tg->length >= 2 * TR_MAX) ? (uint16_t)(tg->value->data[2 * i] | (tg->value->data[2 * i + 1] << 8)) : TR_NONE;
