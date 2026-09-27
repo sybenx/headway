@@ -22,6 +22,7 @@ ap.add_argument('--out', default=os.path.join(os.path.dirname(__file__), '..', '
 ap.add_argument('--hints', help='JSON of headsign and stop-name abbreviations for this agency')
 ap.add_argument('--stops-out', help='directory for the per-stop departure files and the stop index (docs/data/<agency>)')
 ap.add_argument('--data-url', default='', help='where the per-stop files are served from, for the phone')
+ap.add_argument('--live-url', default='', help='a GTFS-realtime relay the phone may ask for predictions (optional; the schedule never needs it)')
 ap.add_argument('--margin', type=float, default=3000, help='metres around the outermost stops that still count as the system\'s area')
 a = ap.parse_args()
 hints = json.load(open(a.hints)) if a.hints else {}
@@ -84,6 +85,12 @@ def short(text, table):
     text = re.sub(r'\s*\([^)]*\)', '', text)   # a stop code in brackets says nothing on a watch
     return re.sub(r'\s+', ' ', text).strip().upper()
 
+# The trip a departure belongs to, as GTFS-realtime names it: the agency's
+# trip_id without the -N its variants carry. Only used to lay live
+# predictions over the schedule when there are any.
+def base_trip(tid):
+    return re.sub(r'-\d+$', '', tid)
+
 if a.stops_out:
     os.makedirs(os.path.join(a.stops_out, 'stops'), exist_ok=True)
     route_by_id = {r['route_id']: r for r in table('routes.txt')}
@@ -95,13 +102,13 @@ if a.stops_out:
         r = route_by_id[t['route_id']]
         head = short(t.get('trip_headsign') or '', hints.get('headsigns', {}))
         if not head and r['route_short_name'] in hints.get('loops', []): head = 'LOOP'
-        per_stop.setdefault(st['stop_id'], {}).setdefault(kind, set()).add((mins(st['departure_time']), r['route_short_name'], head))
+        per_stop.setdefault(st['stop_id'], {}).setdefault(kind, set()).add((mins(st['departure_time']), r['route_short_name'], head, base_trip(st['trip_id'])))
     index = []
     for s_ in stops_all:
         sid = s_['stop_id']
         if sid not in per_stop: continue
         days = {kind: [list(x) for x in sorted(v)] for kind, v in per_stop[sid].items()}
-        json.dump({'name': short(s_['stop_name'], hints.get('stops', {})), 'days': days},
+        json.dump({'id': sid, 'name': short(s_['stop_name'], hints.get('stops', {})), 'days': days},
                   open(os.path.join(a.stops_out, 'stops', sid + '.json'), 'w'), separators=(',', ':'))
         index.append([sid, round(float(s_['stop_lat']), 5), round(float(s_['stop_lon']), 5)])
     colours = {r['route_short_name']: [r.get('route_color') or '888888', r.get('route_text_color') or '000000']
@@ -120,6 +127,7 @@ system = {
     'agency': a.agency, 'hub': {'name': a.name, 'lat': lat, 'lon': lon}, 'routes': wanted,
     'area': [round(min(lats) - dlat, 4), round(min(lons) - dlon, 4), round(max(lats) + dlat, 4), round(max(lons) + dlon, 4)],
     'data': a.data_url,
+    **({'live': a.live_url} if a.live_url else {}),
     'days': {kind: {'hours': [first[kind], last[kind]],
                     'dep': {r: sorted(v) for r, v in deps.get(kind, {}).items()}}
              for kind in sorted(first)},
