@@ -14,38 +14,38 @@ A watch that reads past your sleeve, and knows when you're near the bus.
 
 ## Description
 
-Headway is a plain watch most of the day: big time, your heart rate and the
-weather as small coloured icons, and the date. Everything hangs from the
-outer edge of the screen, so when your cuff slides over the watch the part
-you can still see is the part you need. Dark at night, light by day.
+A plain watch that reads past your sleeve: the time, heart rate, weather and
+date hang from the outer edge, so the part a cuff uncovers first is the part
+you need. Dark at night, light by day.
 
-Near a transit centre it knows, it changes. A countdown to the next
-departure takes the outer edge, minutes and the clock time, and goes solid
-with a buzz at five minutes. Routes with their own timetable get a second
-countdown as colour chips. Away from the centre, it's the plain watch again.
+It knows two transit systems: Connect in Logan, Utah, and UTA from Ogden to
+Provo. The half-hourly check that fetches the weather also tells it whether
+you're near one. If you are, flick your wrist at a stop to see what leaves
+next: each route as a coloured badge with its next times, live predictions
+marked with a small arc where there are any. If you're not, a flick doesn't
+check your location at all.
 
-Flick your wrist at a bus stop and for twelve seconds the face shows what
-leaves from there next: the stop, each route as a coloured badge, and its
-next times. One route sits beside the icons and the rest of the face stays;
-two or three routes take the screen. After the last bus it shows the next
-one with its day. Stops across a road from each other read as one. At the
-transit centre, where a dozen routes leave together, it answers by time
-instead: each departure minute with every route leaving then as a badge.
+At Connect's transit centre it counts down to the next departure, with a
+buzz at five minutes. While buses run there, it checks every five minutes
+nearby so the countdown is on when you arrive, and stops after the last bus.
 
-It knows Connect, the Cache Valley Transit District in Logan, Utah, and UTA,
-from Ogden to Provo: TRAX, FrontRunner and the buses. A flick also asks for
-Connect's live predictions: a predicted time carries a small arc, a late bus
-shows when it will really leave, and without a live answer the face shows
-the published schedule, refreshed nightly. Elsewhere it's the plain watch,
-and it asks the phone very little.
+Your location stays on your phone: the weather service gets it rounded to
+about 100 m, and live times are asked for by stop number. No accounts. Turn
+transit off and it never checks your location for transit.
 
-Settings on the phone: three module slots (heart rate, steps, battery,
-weather) as captions or icons; theme and night hours; accent colour; left or
-right wrist; 12 or 24 hour; units. Or turn the transit part off, or turn the
-countdown on everywhere for any service that runs on a fixed headway.
+Settings on the phone for modules, theme, accent, wrist, clock and units.
+Round watches aren't supported.
 
-Colour watches show the badges and icons in colour; Pebble Classic and Pebble
-2 draw them in black and white. Round watches aren't supported.
+## Release notes (1.15.0)
+
+Location, more lightly. One rough check every half hour now serves the
+weather and transit both, and a flick only takes a precise fix where you
+could be near a transit system; in another state it never does. Near
+Connect's transit centre the watch's step count, not a timer, asks for a
+look as you walk up, and nothing is checked there after the last bus.
+"At the transit centre" now means within 100 m, not 300. A flick's seconds
+stand in the colon, and the hairline counts the answer down. A bus due
+this minute in a board's second column reads NOW.
 
 ## Release notes (1.14.0)
 
