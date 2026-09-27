@@ -36,6 +36,13 @@ transit off and it never checks your location for transit.
 Settings on the phone for modules, theme, accent, wrist, clock and units.
 Round watches aren't supported.
 
+## Release notes (1.15.1)
+
+The hairline after a flick starts draining the moment you flick rather
+than when the phone answers, and drains in even steps: a pixel at a time
+while the light is on, then three at a time about every fifth of a second.
+An answer that comes late still gets at least eight seconds on screen.
+
 ## Release notes (1.15.0)
 
 Location, more lightly. One rough check every half hour now serves the
