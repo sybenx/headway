@@ -117,60 +117,73 @@ function packMinutes(list) {
   return bytes;
 }
 
-function sendTransit(area, state, g, b) {
-  Pebble.sendAppMessage({
-    TR_AREA: area,
-    TR_STATE: state,
-    TR_G: packMinutes(g),
-    TR_B: packMinutes(b),
+function transitMsg(st) {
+  return {
+    TR_AREA: st.area,
+    TR_STATE: st.state,
+    TR_G: packMinutes(st.g),
+    TR_B: packMinutes(st.b),
     TR_AT: Math.floor(Date.now() / 1000),
-  });
+  };
 }
 
 // Away from every known system the phone asks less often.
 var lastOutside = 0;
 var OUTSIDE_EVERY = 15 * 60 * 1000;
 
+// What the face should know about a position: whether it is in a system it
+// knows, and whether it is at that system's hub in its hours, with the next
+// departures of the routes on their own timetable. Null when there is
+// nothing to say. The background check and a flick both ask this, a flick
+// with its own precise fix, so walking up to the hub and flicking starts the
+// countdown then and there.
+function transitState(lat, lon) {
+  var mode = hubMode();
+  if (mode === MODE_OFF) return null;
+  var radius = Number(settings().TR_RADIUS) || 300;
+  var sys = systemAt(lat, lon);
+  if (!sys) {
+    // Outside every system the face knows. Automatic: a plain watch; the
+    // always-on modes still take the first system as their hub.
+    if (mode === MODE_AUTO) return { area: 0, state: 0, g: [], b: [], why: 'outside any known system' };
+    sys = firstHub();
+    if (!sys) return null;
+  }
+  if (!sys.hub) {
+    // A system of stops and no hub: in its area a flick answers, and the
+    // face stays the plain watch. The always-on modes count down to the
+    // first system that has a hub.
+    if (mode === MODE_AUTO || !firstHub()) return { area: 1, state: 0, g: [], b: [], why: sys.agency + ', no hub' };
+    sys = firstHub();
+  }
+  var d = metres(lat, lon, sys.hub.lat, sys.hub.lon);
+  var now = new Date();
+  var nowMin = now.getHours() * 60 + now.getMinutes();
+  var day = dayTable(sys, now);
+  // A quarter hour before the first run counts as hours: that is when the
+  // first riders are standing there.
+  var inHours = !!day && nowMin >= day.hours[0] - 15 && nowMin <= day.hours[1];
+  var active = d <= radius && inHours;
+  var routes = sys.routes;
+  return {
+    area: 1, state: active ? 1 : 0,
+    g: active ? upcoming(day.dep[routes[0]] || [], nowMin) : [],
+    b: active ? upcoming(day.dep[routes[1]] || [], nowMin) : [],
+    why: sys.agency + ' ' + Math.round(d) + 'm from the hub, ' + (active ? 'at it' : 'away'),
+  };
+}
+
 function checkTransit(force) {
   var mode = hubMode();
   if (mode === MODE_OFF) return;
   if (!force && mode === MODE_AUTO && lastOutside && Date.now() - lastOutside < OUTSIDE_EVERY) return;
-  var s = settings();
-  var radius = Number(s.TR_RADIUS) || 300;
-
   navigator.geolocation.getCurrentPosition(function (pos) {
     var lat = pos.coords.latitude, lon = pos.coords.longitude;
-    var sys = systemAt(lat, lon);
-    if (!sys) {
-      // Outside every system the face knows. Automatic: a plain watch; the
-      // always-on modes still take the first system as their hub.
-      lastOutside = Date.now();
-      if (mode === MODE_AUTO) { console.log('headway: outside any known system'); return sendTransit(0, 0, [], []); }
-      sys = firstHub();
-      if (!sys) return;
-    } else {
-      lastOutside = 0;
-    }
-    if (!sys.hub) {
-      // A system of stops and no hub: in its area a flick answers, and the
-      // face stays the plain watch. The always-on modes count down to the
-      // first system that has a hub.
-      if (mode === MODE_AUTO || !firstHub()) { console.log('headway: ' + sys.agency + ', no hub'); return sendTransit(1, 0, [], []); }
-      sys = firstHub();
-    }
-    var d = metres(lat, lon, sys.hub.lat, sys.hub.lon);
-    var now = new Date();
-    var nowMin = now.getHours() * 60 + now.getMinutes();
-    var day = dayTable(sys, now);
-    // A quarter hour before the first run counts as hours: that is when the
-    // first riders are standing there.
-    var inHours = !!day && nowMin >= day.hours[0] - 15 && nowMin <= day.hours[1];
-    var active = d <= radius && inHours;
-    var routes = sys.routes;
-    var g = active ? upcoming(day.dep[routes[0]] || [], nowMin) : [];
-    var b = active ? upcoming(day.dep[routes[1]] || [], nowMin) : [];
-    console.log('headway: ' + sys.agency + ' ' + Math.round(d) + 'm from the hub, ' + (active ? 'at it' : 'away'));
-    sendTransit(1, active ? 1 : 0, g, b);
+    lastOutside = systemAt(lat, lon) ? 0 : Date.now();
+    var st = transitState(lat, lon);
+    if (!st) return;
+    console.log('headway: ' + st.why);
+    Pebble.sendAppMessage(transitMsg(st));
   }, function () {
     // No fix: say nothing, and the watch keeps its last word until it is stale.
   }, { timeout: 10000, maximumAge: 4 * 60 * 1000 });
@@ -288,9 +301,22 @@ function fitName(name) {
   return name.slice(0, cut > 0 ? cut : 23);
 }
 
+// The transit state worked out from a flick's own fix, sent with its answer
+// in the same message rather than a second one hard on its heels.
+var flickTransit = null;
+function withTransit(msg) {
+  if (flickTransit) {
+    var t = transitMsg(flickTransit);
+    Object.keys(t).forEach(function (k) { msg[k] = t[k]; });
+    console.log('headway: ' + flickTransit.why + ' (flick)');
+    flickTransit = null;
+  }
+  return msg;
+}
+
 function sendStopView(name, dist, rows) {
   console.log('headway: stop view ' + (name || '(none)') + ' ' + rows.length + ' rows');
-  var msg = { SV_STOP: fitName(name), SV_DIST: Math.round(dist), SV_N: rows.length, SV_MODE: 0 };
+  var msg = withTransit({ SV_STOP: fitName(name), SV_DIST: Math.round(dist), SV_N: rows.length, SV_MODE: 0 });
   for (var i = 0; i < rows.length && i < 3; i++) {
     msg['SV_R' + (i + 1)] = rows[i].route;
     msg['SV_H' + (i + 1)] = rows[i].head;
@@ -310,7 +336,7 @@ function sendWaves(name, waves) {
   console.log('headway: hub view ' + waves.map(function (w) {
     return w.when + ' [' + w.routes.map(function (r, j) { return r + ((w.live >> j) & 1 ? '~' : '') + ((w.away >> j) & 1 ? '(away)' : ''); }).join(' ') + ']';
   }).join(', '));
-  var msg = { SV_STOP: fitName(name), SV_DIST: 0, SV_N: waves.length, SV_MODE: 1 };
+  var msg = withTransit({ SV_STOP: fitName(name), SV_DIST: 0, SV_N: waves.length, SV_MODE: 1 });
   waves.forEach(function (w, i) {
     var k = [];
     w.colors.forEach(function (c) { k.push((c >> 16) & 255, (c >> 8) & 255, c & 255); });
@@ -393,6 +419,7 @@ function onFlick() {
   navigator.geolocation.getCurrentPosition(function (pos) {
     var lat = pos.coords.latitude, lon = pos.coords.longitude;
     console.log('headway: fix ' + lat.toFixed(4) + ',' + lon.toFixed(4) + ' +-' + Math.round(pos.coords.accuracy) + 'm');
+    flickTransit = transitState(lat, lon);
     var sys = systemAt(lat, lon);
     if (!sys || !sys.data) return sendStopView('', 0, []);
     var DATA_URL = sys.data, tag = sys.agency.toLowerCase();

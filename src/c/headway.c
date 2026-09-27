@@ -2018,8 +2018,28 @@ static void take_row(DictionaryIterator *iter, int i, uint32_t kr, uint32_t kh, 
   row->live = tt ? tt->value->int32 != 0 : false;
 }
 
+// The hub's word, pushed by the phone: from its background check, or with a
+// flick's answer, worked out from the flick's own fix.
+static void take_transit(DictionaryIterator *iter) {
+  Tuple *tp = dict_find(iter, MESSAGE_KEY_TR_STATE);
+  if (!tp) return;
+  Tuple *tg = dict_find(iter, MESSAGE_KEY_TR_G);
+  Tuple *tb = dict_find(iter, MESSAGE_KEY_TR_B);
+  Tuple *ta = dict_find(iter, MESSAGE_KEY_TR_AT);
+  Tuple *tarea = dict_find(iter, MESSAGE_KEY_TR_AREA);
+  s_tr.state = (uint8_t)tp->value->int32;
+  s_tr.area = tarea ? (uint8_t)(tarea->value->int32 != 0) : 1;
+  for (int i = 0; i < TR_MAX; i++) {
+    s_tr.g[i] = (tg && tg->length >= 2 * TR_MAX) ? (uint16_t)(tg->value->data[2 * i] | (tg->value->data[2 * i + 1] << 8)) : TR_NONE;
+    s_tr.b[i] = (tb && tb->length >= 2 * TR_MAX) ? (uint16_t)(tb->value->data[2 * i] | (tb->value->data[2 * i + 1] << 8)) : TR_NONE;
+  }
+  s_tr.at = ta ? (time_t)ta->value->int32 : time(NULL);
+  transit_save();
+}
+
 static void inbox_received(DictionaryIterator *iter, void *ctx) {
   Tuple *tp;
+  take_transit(iter);
   if ((tp = dict_find(iter, MESSAGE_KEY_SV_N))) {
     Tuple *ts = dict_find(iter, MESSAGE_KEY_SV_STOP);
     Tuple *td = dict_find(iter, MESSAGE_KEY_SV_DIST);
@@ -2120,22 +2140,6 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
   if ((tp = dict_find(iter, MESSAGE_KEY_TR_RADIUS))) {
     s_set.radius = (uint16_t)tp->value->int32;
   }
-  // The hub's word arrives on the same channel, pushed by the JS side.
-  if ((tp = dict_find(iter, MESSAGE_KEY_TR_STATE))) {
-    Tuple *tg = dict_find(iter, MESSAGE_KEY_TR_G);
-    Tuple *tb = dict_find(iter, MESSAGE_KEY_TR_B);
-    Tuple *ta = dict_find(iter, MESSAGE_KEY_TR_AT);
-    Tuple *tarea = dict_find(iter, MESSAGE_KEY_TR_AREA);
-    s_tr.state = (uint8_t)tp->value->int32;
-    s_tr.area = tarea ? (uint8_t)(tarea->value->int32 != 0) : 1;
-    for (int i = 0; i < TR_MAX; i++) {
-      s_tr.g[i] = (tg && tg->length >= 2 * TR_MAX) ? (uint16_t)(tg->value->data[2 * i] | (tg->value->data[2 * i + 1] << 8)) : TR_NONE;
-      s_tr.b[i] = (tb && tb->length >= 2 * TR_MAX) ? (uint16_t)(tb->value->data[2 * i] | (tb->value->data[2 * i + 1] << 8)) : TR_NONE;
-    }
-    s_tr.at = ta ? (time_t)ta->value->int32 : time(NULL);
-    transit_save();
-  }
-
   // Weather arrives on the same channel, pushed by the JS side.
   if ((tp = dict_find(iter, MESSAGE_KEY_WOK))) {
     Tuple *tt = dict_find(iter, MESSAGE_KEY_TEMP);
