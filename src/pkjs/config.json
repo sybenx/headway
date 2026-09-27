@@ -271,7 +271,7 @@
         "type": "slider",
         "messageKey": "TR_RADIUS",
         "label": "At the transit centre within",
-        "defaultValue": 300,
+        "defaultValue": 100,
         "min": 100,
         "max": 1000,
         "step": 50,

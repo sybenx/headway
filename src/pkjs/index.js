@@ -152,7 +152,7 @@ function kmToSystem(lat, lon) {
 function transitState(lat, lon) {
   var mode = hubMode();
   if (mode === MODE_OFF) return null;
-  var radius = Number(settings().TR_RADIUS) || 300;
+  var radius = Number(settings().TR_RADIUS) || 100;
   var sys = systemAt(lat, lon);
   if (!sys) {
     // Outside every system the face knows. Automatic: a plain watch; the
@@ -196,7 +196,7 @@ function transitState(lat, lon) {
 // a quarter hour before the first one next morning. A flick takes its own
 // fix, and counts as a look.
 var LOOK_EVERY = 30 * 60 * 1000, NEAR_HUB = 1000;
-var lastLook = 0, lastSys = null;
+var lastLook = 0, lastSys = null, lastHubM = Infinity;
 
 function hubRunning(sys) {
   var now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes();
@@ -206,9 +206,14 @@ function hubRunning(sys) {
 function sawFix(lat, lon) {
   lastLook = Date.now();
   lastSys = systemAt(lat, lon);
+  lastHubM = lastSys && lastSys.hub ? metres(lat, lon, lastSys.hub.lat, lastSys.hub.lon) : Infinity;
 }
 
-function look(force) {
+// A walking look near the hub is precise once the last fix is within
+// PRECISE_NEAR of it, where the countdown's hundred metres is decided;
+// further out a rough fix tells closer from farther well enough.
+var PRECISE_NEAR = 400;
+function look(force, precise) {
   var mode = hubMode(), since = Date.now() - lastLook;
   // Inside a hub's system out of its hours, transit has nothing to ask.
   var transitWants = mode !== MODE_OFF && (force || !(lastSys && lastSys.hub && !hubRunning(lastSys)));
@@ -226,7 +231,8 @@ function look(force) {
     Pebble.sendAppMessage(transitMsg(st));
   }, function () {
     // No fix: say nothing, and the watch keeps its last word until it is stale.
-  }, { timeout: 10000, maximumAge: 4 * 60 * 1000 });
+  }, precise ? { enableHighAccuracy: true, timeout: 9000, maximumAge: 20000 }
+             : { timeout: 10000, maximumAge: 4 * 60 * 1000 });
 }
 
 // ---- the flick: the nearest stop and what leaves it next.
@@ -577,7 +583,7 @@ function onLook() {
   if (Date.now() - lastLook < 60 * 1000) return;
   console.log('headway: look (walking near the hub)');
   lastLook = 0;
-  look(false);
+  look(false, lastHubM <= PRECISE_NEAR);
 }
 
 Pebble.addEventListener('appmessage', function (e) {

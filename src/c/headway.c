@@ -147,7 +147,7 @@ static void settings_defaults(void) {
   s_set.final_seconds = true;
   s_set.imperial = false;
   s_set.transit = TRANSIT_AUTO;
-  s_set.radius = 300;
+  s_set.radius = 100;   // every bay, and hardly a house
   s_set.flick = true;
 }
 
