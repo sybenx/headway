@@ -99,7 +99,9 @@ what follows. A Pebble Classic has no room for it and keeps the board.
 for predictions, and a predicted time carries a small arc in the accent: the
 board's first time, the side block's time, a badge at the hub. A late bus
 moves to the minute it will really leave; a bus that will skip the stop
-drops out; at the hub a bus is never shown leaving early. A time without the
+drops out; a cancelled run drops out too; at the hub, and at any timepoint
+where the timetable has the bus wait for its time, a bus is never shown
+leaving early. A time without the
 arc is the timetable's. At the hub the live feed also says which buses are
 in: a route whose bus hasn't reached the transit centre yet has its badge
 hollow, and solid once it's there. Only the next departure of each route is
@@ -164,11 +166,15 @@ timetables never pile up in the history.
 Each departure names its trip, from the agency's own GTFS, so live
 predictions can be laid over it. For Connect they come from the relay at
 `live.cacherider.com`, asked only for the stops being answered
-(`?stops=id,id`). The live answer is an overlay and nothing more: the phone
+(`?stops=id,id`). UTA's server turns relays away and its predictions name
+no stop, only each trip's place in it, so the phone reads UTA's own
+TripUpdate feed (about 170 KB, no key) and unpacks only the trips leaving
+the stop in the next ninety minutes, matched by trip and `stop_sequence`
+(`--live-by feed`). The live answer is an overlay and nothing more: the phone
 waits three seconds for it at most, drops it if the feed's own clock is more
 than ninety seconds old, and on any failure shows exactly the schedule it
-would have shown without it. A system names its relay with `--live-url`, or
-has none.
+would have shown without it. A system names its relay or feed with
+`--live-url`, or has none.
 
 To add a system: add its feed to `.github/workflows/transit.yml` with a line
 running `tools/transit.py` (the feed, the agency, and a hints file for short

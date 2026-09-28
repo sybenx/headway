@@ -29,8 +29,8 @@ ap.add_argument('--hints', help='JSON of headsign and stop-name abbreviations an
 ap.add_argument('--stops-out', help='directory for the per-stop departure files and the stop index (<site>/data/v2/<agency>)')
 ap.add_argument('--legacy-out', help='also write the day-type stop files the phones of 1.13.0 and before read (<site>/data/<agency>)')
 ap.add_argument('--data-url', default='', help='where the per-stop files are served from, for the phone')
-ap.add_argument('--live-url', default='', help='a GTFS-realtime relay the phone may ask for predictions (optional; the schedule never needs it)')
-ap.add_argument('--live-by', choices=['stop', 'trip'], default='stop', help='how the relay is asked: by stop ids, or by trip and place in it for a feed whose predictions name no stop')
+ap.add_argument('--live-url', default='', help='where the phone gets predictions: a relay, or with --live-by feed the agency\'s own feed (optional; the schedule never needs it)')
+ap.add_argument('--live-by', choices=['stop', 'trip', 'feed'], default='stop', help='how live times are got: a relay asked by stop ids, or by trip and place in it for a feed whose predictions name no stop, or (feed) the agency\'s own GTFS-realtime TripUpdate, read by the phone and matched by trip and place')
 ap.add_argument('--margin', type=float, default=3000, help='metres around the outermost stops that still count as the system\'s area')
 ap.add_argument('--today', help='YYYYMMDD the data is built on (default: yesterday, UTC); services wholly before it are left out')
 a = ap.parse_args()
@@ -217,7 +217,7 @@ system = {
     'data': a.data_url,
 }
 if a.live_url: system['live'] = a.live_url
-if a.live_url and a.live_by == 'trip': system['liveBy'] = 'trip'
+if a.live_url and a.live_by != 'stop': system['liveBy'] = a.live_by
 if a.hub:
     system['hub'] = {'name': a.name, 'lat': lat, 'lon': lon}
     system['routes'] = wanted

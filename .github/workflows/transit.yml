@@ -36,7 +36,7 @@ jobs:
           python3 tools/transit.py /tmp/cvtd.zip --agency CVTD --hub 41.7406,-111.8309 --routes G,B --name "TRANSIT CTR" \
             --hints tools/hints/cvtd.json --live-url https://live.cacherider.com/ \
             --data-url $PAGES/v2/cvtd/ --stops-out site/data/v2/cvtd --legacy-out site/data/cvtd
-          python3 tools/transit.py /tmp/uta.zip --agency UTA --hints tools/hints/uta.json --live-url https://live.cacherider.com/uta --live-by trip \
+          python3 tools/transit.py /tmp/uta.zip --agency UTA --hints tools/hints/uta.json --live-url https://apps.rideuta.com/tms/gtfs/TripUpdate --live-by feed \
             --data-url $PAGES/v2/uta/ --stops-out site/data/v2/uta
           touch site/.nojekyll
       - name: Commit transit.json if changed

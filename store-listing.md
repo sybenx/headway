@@ -30,11 +30,21 @@ buzz at five minutes. While buses run there, it checks every five minutes
 nearby so the countdown is on when you arrive, and stops after the last bus.
 
 Your location stays on your phone: the weather service gets it rounded to
-about 100 m, and live times are asked for by stop number. No accounts. Turn
+about 100 m, and live times are asked for by stop number (UTA's come from
+its own feed, whole, so nothing is asked). No accounts. Turn
 transit off and it never checks your location for transit.
 
 Settings on the phone for modules, theme, accent, wrist, clock and units.
 Round watches aren't supported.
+
+## Release notes (1.16.0)
+
+Live times for UTA. A flick at a TRAX, FrontRunner or bus stop reads UTA's
+own live feed and marks predicted times with the arc; a run UTA has
+cancelled drops out. At a timepoint, where the bus waits for its time, a
+bus is never shown leaving early. Buses that start at the stop you're at
+show the timetable until they set off. With no answer in three seconds
+it's the timetable, as before.
 
 ## Release notes (1.15.2)
 

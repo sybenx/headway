@@ -313,6 +313,89 @@ function getLive(sys, query, cb) {
   req.send();
 }
 
+// A feed the phone reads itself (liveBy: 'feed'): the agency's own
+// GTFS-realtime TripUpdate, where its server turns relays away. Only the
+// asked trips are unpacked, so the whole feed costs a few milliseconds, and
+// the answer takes the relay's shape, so the overlay is the same.
+function getFeed(sys, pairs, cb) {
+  var want = {};
+  pairs.forEach(function (p) {
+    var at = p.lastIndexOf(':'), id = p.slice(0, at);
+    (want[id] = want[id] || {})[Number(p.slice(at + 1))] = true;
+  });
+  var done = false;
+  function finish(v) { if (!done) { done = true; cb(v); } }
+  var req = new XMLHttpRequest();
+  req.open('GET', sys.live, true);
+  req.responseType = 'arraybuffer';
+  req.onload = function () {
+    if (req.status !== 200 || !req.response || typeof req.response === 'string') return finish(null);
+    try {
+      var d = skimTrips(new Uint8Array(req.response.buffer || req.response), want);
+      var age = Date.now() / 1000 - d.t;
+      console.log('headway: feed ' + Object.keys(d.trips).length + ' trips, age ' + Math.round(age) + 's');
+      finish(age < LIVE_FRESH ? d : null);
+    } catch (e) { finish(null); }
+  };
+  req.onerror = function () { finish(null); };
+  req.timeout = LIVE_WAIT;
+  req.ontimeout = function () { finish(null); };
+  setTimeout(function () { finish(null); }, LIVE_WAIT + 250);
+  req.send();
+}
+
+// A lean protobuf walk. Numbers stay plain numbers: the times and sequences
+// fit well inside 2^53.
+function walkPb(b, from, to, fn) {   // fn(field, wireType, valueOrStart, end)
+  var i = from;
+  function uv() { var v = 0, m = 1, c; do { c = b[i++]; v += (c & 0x7f) * m; m *= 128; } while (c & 0x80); return v; }
+  while (i < to) {
+    var k = uv(), f = Math.floor(k / 8), wt = k & 7;
+    if (wt === 0) fn(f, 0, uv());
+    else if (wt === 2) { var n = uv(); fn(f, 2, i, i + n); i += n; }
+    else if (wt === 5) i += 4;
+    else if (wt === 1) i += 8;
+    else return;
+  }
+}
+// { t: the header's time, 0 without one; trips: { id: { s: [[null, seq,
+// time, rel]] } } }, a cancelled trip as { c: 1, s: [] }.
+function skimTrips(b, want) {
+  var out = { t: 0, trips: {} };
+  walkPb(b, 0, b.length, function (f, wt, s, e) {
+    if (f === 1 && wt === 2) walkPb(b, s, e, function (g, w, v) { if (g === 3 && w === 0) out.t = v; });
+    if (f !== 2 || wt !== 2) return;
+    walkPb(b, s, e, function (g, w, s2, e2) {
+      if (g !== 3 || w !== 2) return;   // the entity's trip_update
+      var id = null, seqs = null, cancelled = false, hits = [];
+      walkPb(b, s2, e2, function (h, w3, s3, e3) {
+        if (h === 1 && w3 === 2) walkPb(b, s3, e3, function (k, w4, s4, e4) {
+          if (k === 1 && w4 === 2) {
+            id = '';
+            for (var j = s4; j < e4; j++) id += String.fromCharCode(b[j]);
+            seqs = want[id] || null;
+          } else if (k === 4 && w4 === 0 && s4 === 3) cancelled = true;   // schedule_relationship: CANCELED
+        });
+        else if (h === 2 && w3 === 2 && seqs) {
+          var seq = null, arr = null, dep = null, rel = 0;
+          walkPb(b, s3, e3, function (k, w5, v5, e5) {
+            if (k === 1 && w5 === 0) seq = v5;
+            else if ((k === 2 || k === 3) && w5 === 2) walkPb(b, v5, e5, function (m, w6, v6) {
+              if (m === 2 && w6 === 0) { if (k === 3) dep = v6; else arr = v6; }
+            });
+            else if (k === 5 && w5 === 0) rel = v5;
+          });
+          var time = dep || arr;
+          if (seq !== null && seqs[seq] && (time || rel === 1)) hits.push([null, seq, time || 0, rel]);
+        }
+      });
+      if (id && seqs && cancelled) out.trips[id] = { c: 1, s: [] };
+      else if (id && hits.length) out.trips[id] = { s: hits };
+    });
+  });
+  return out;
+}
+
 // Route order for ties and within a wave: numbers by number, then the
 // lettered routes in the agency's own order (G before B, as the chips read).
 var routeRank = {};
@@ -512,7 +595,7 @@ function onFlick() {
         }).slice(0, 16);
       var now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes();
       var midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-      var byTrip = sys.liveBy === 'trip', askedTrips = false;
+      var byTrip = sys.liveBy === 'trip' || sys.liveBy === 'feed', askedTrips = false;
       var pending = group.length + (byTrip ? 0 : 1), name = atHub ? sys.hub.name : '', stops = [], live = null;
       // The live answer is asked for alongside the schedule and waited on
       // for at most LIVE_WAIT; the schedule never waits on it beyond that. A
@@ -531,7 +614,8 @@ function onFlick() {
           var pairs = tripsSoon(stops, index.services, now, nowMin);
           if (pairs.length) {
             pending = 1;
-            return getLive(sys, 'trips=' + pairs.join(','), function (l) { live = l; answer(); });
+            var got = function (l) { live = l; answer(); };
+            return sys.liveBy === 'feed' ? getFeed(sys, pairs, got) : getLive(sys, 'trips=' + pairs.join(','), got);
           }
         }
         // Today's remaining departures; when there are none, the first
