@@ -556,7 +556,8 @@ function onFlick() {
               // Today's departures take the live prediction for this trip
               // at this stop where there is one. A stop the bus will skip
               // drops out; at the hub a bus is held to its time, never
-              // early. No prediction: the schedule, unmarked.
+              // early, and so is it at a timepoint, where the bus waits for
+              // its time. No prediction: the schedule, unmarked.
               var t = dep[0], isLive = false, at = null;
               var trip = !ahead && live && dep[3] && live.trips[dep[3]];
               // A run the feed says is cancelled isn't coming.
@@ -573,7 +574,7 @@ function onFlick() {
                 // A bus still listed at its hub bay after the feed's time for
                 // it is still there, boarding: it leaves now, not already.
                 var boarding = at[2] * 1000 < now.getTime() - 30000 ? nowMin : -1;
-                t = atHub ? Math.max(t, p, boarding) : p; isLive = true;
+                t = atHub ? Math.max(t, p, boarding) : row[6] ? Math.max(t, p) : p; isLive = true;
               }
               if (t >= from) deps.push({ t: t, route: dep[1], head: dep[2], live: isLive });
             });

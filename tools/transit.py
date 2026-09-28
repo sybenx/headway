@@ -156,7 +156,11 @@ if a.stops_out or a.legacy_out:
         if t['service_id'] in svc_index:
             # The departure's place in its trip, from the agency's own timetable:
             # a feed that names no stop in its predictions still names this.
-            per_stop.setdefault(st['stop_id'], set()).add(row + (svc_index[t['service_id']], int(st['stop_sequence'])))
+            # A timepoint, where the bus waits for its time, is marked with a
+            # trailing 1; the rest leave it off.
+            at_place = (svc_index[t['service_id']], int(st['stop_sequence']))
+            if st.get('timepoint') == '1': at_place += (1,)
+            per_stop.setdefault(st['stop_id'], set()).add(row + at_place)
         kind = kind_of.get(t['service_id'])
         if kind: per_stop_kind.setdefault(st['stop_id'], {}).setdefault(kind, set()).add(row)
     colours = {label(r['route_short_name']): [r.get('route_color') or '888888', r.get('route_text_color') or '000000']
