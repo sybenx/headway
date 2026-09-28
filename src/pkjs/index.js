@@ -287,12 +287,14 @@ function dirWord(head) {
 var LIVE_WAIT = 3000, LIVE_FRESH = 90;
 // A bus this close to its bay, by a position this fresh, is in and waiting.
 var AT_BAY = 60, BUS_FRESH = 180;
-function getLive(sys, ids, cb) {
-  if (!sys.live || !ids.length) return cb(null);
+// Asked by stop ids ('stops=a,b'), or by trip and place in it ('trips=5912862:12,...')
+// for a feed whose predictions name no stop (liveBy: 'trip').
+function getLive(sys, query, cb) {
+  if (!sys.live || !query) return cb(null);
   var done = false;
   function finish(v) { if (!done) { done = true; cb(v); } }
   var req = new XMLHttpRequest();
-  req.open('GET', sys.live + '?stops=' + ids.join(','), true);
+  req.open('GET', sys.live + '?' + query, true);
   req.onload = function () {
     if (req.status !== 200) return finish(null);
     try {
@@ -460,6 +462,25 @@ function classic() {
   try { return Pebble.getActiveWatchInfo().platform === 'aplite'; } catch (e) { return false; }
 }
 
+// The trips worth asking a feed about, by trip and place: today's departures
+// from these stops in the next ninety minutes, soonest first, forty at most.
+function tripsSoon(stops, services, now, nowMin) {
+  var today = activeServices(services, now);
+  var eve = activeServices(services, new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
+  var soon = [], seen = {};
+  stops.forEach(function (stop) {
+    (stop.deps || []).forEach(function (row) {
+      if (!row[3] || row[5] === undefined) return;
+      var t = row[0] >= 1440 && eve[row[4]] ? row[0] - 1440 : (today[row[4]] ? row[0] : -1);
+      if (t < nowMin - 1 || t > nowMin + 90) return;
+      var key = row[3] + ':' + row[5];
+      if (!seen[key]) { seen[key] = true; soon.push({ t: t, key: key }); }
+    });
+  });
+  soon.sort(function (a, b) { return a.t - b.t; });
+  return soon.slice(0, 40).map(function (x) { return x.key; });
+}
+
 function onFlick() {
   // The watch only asks when its own setting allows, so no gate here.
   navigator.geolocation.getCurrentPosition(function (pos) {
@@ -491,10 +512,12 @@ function onFlick() {
         }).slice(0, 16);
       var now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes();
       var midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-      var pending = group.length + 1, name = atHub ? sys.hub.name : '', stops = [], live = null;
+      var byTrip = sys.liveBy === 'trip', askedTrips = false;
+      var pending = group.length + (byTrip ? 0 : 1), name = atHub ? sys.hub.name : '', stops = [], live = null;
       // The live answer is asked for alongside the schedule and waited on
-      // for at most LIVE_WAIT; the schedule never waits on it beyond that.
-      getLive(sys, group.map(function (st) { return st.id; }), function (l) { live = l; answer(); });
+      // for at most LIVE_WAIT; the schedule never waits on it beyond that. A
+      // system asked by trip is asked once the stop files say which trips.
+      if (!byTrip) getLive(sys, 'stops=' + group.map(function (st) { return st.id; }).join(','), function (l) { live = l; answer(); });
       group.forEach(function (st) {
         getJSON(DATA_URL + 'stops/' + st.id + '.json', 'hw2-stop-' + tag + '-' + st.id, STOP_TTL, function (stop) {
           if (stop) { if (!name) name = stop.name; stop.id = stop.id || st.id; stops.push(stop); }
@@ -503,6 +526,14 @@ function onFlick() {
       });
       function answer() {
         if (--pending) return;
+        if (byTrip && !askedTrips) {
+          askedTrips = true;
+          var pairs = tripsSoon(stops, index.services, now, nowMin);
+          if (pairs.length) {
+            pending = 1;
+            return getLive(sys, 'trips=' + pairs.join(','), function (l) { live = l; answer(); });
+          }
+        }
         // Today's remaining departures; when there are none, the first
         // day ahead with any — tomorrow, or Monday after a Saturday —
         // so the answer is the next bus, whenever that is.
@@ -528,7 +559,12 @@ function onFlick() {
               // early. No prediction: the schedule, unmarked.
               var t = dep[0], isLive = false, at = null;
               var trip = !ahead && live && dep[3] && live.trips[dep[3]];
-              for (var i = 0; trip && i < trip.s.length; i++) if (trip.s[i][0] === stop.id) at = trip.s[i];
+              // By the stop's id, or where the feed names no stop, by the
+              // departure's place in its trip.
+              for (var i = 0; trip && i < trip.s.length; i++) {
+                var pr = trip.s[i];
+                if (pr[0] === stop.id || (pr[0] === null && pr[1] === row[5])) at = pr;
+              }
               if (at) {
                 if (at[3] === 1) return;
                 var p = Math.floor((at[2] * 1000 - midnight) / 60000);

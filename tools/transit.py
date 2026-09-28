@@ -30,6 +30,7 @@ ap.add_argument('--stops-out', help='directory for the per-stop departure files 
 ap.add_argument('--legacy-out', help='also write the day-type stop files the phones of 1.13.0 and before read (<site>/data/<agency>)')
 ap.add_argument('--data-url', default='', help='where the per-stop files are served from, for the phone')
 ap.add_argument('--live-url', default='', help='a GTFS-realtime relay the phone may ask for predictions (optional; the schedule never needs it)')
+ap.add_argument('--live-by', choices=['stop', 'trip'], default='stop', help='how the relay is asked: by stop ids, or by trip and place in it for a feed whose predictions name no stop')
 ap.add_argument('--margin', type=float, default=3000, help='metres around the outermost stops that still count as the system\'s area')
 ap.add_argument('--today', help='YYYYMMDD the data is built on (default: yesterday, UTC); services wholly before it are left out')
 a = ap.parse_args()
@@ -153,7 +154,9 @@ if a.stops_out or a.legacy_out:
         if not head and r['route_short_name'] in hints.get('loops', []): head = 'LOOP'
         row = (mins(st['departure_time']), label(r['route_short_name']), head, base_trip(st['trip_id']))
         if t['service_id'] in svc_index:
-            per_stop.setdefault(st['stop_id'], set()).add(row + (svc_index[t['service_id']],))
+            # The departure's place in its trip, from the agency's own timetable:
+            # a feed that names no stop in its predictions still names this.
+            per_stop.setdefault(st['stop_id'], set()).add(row + (svc_index[t['service_id']], int(st['stop_sequence'])))
         kind = kind_of.get(t['service_id'])
         if kind: per_stop_kind.setdefault(st['stop_id'], {}).setdefault(kind, set()).add(row)
     colours = {label(r['route_short_name']): [r.get('route_color') or '888888', r.get('route_text_color') or '000000']
@@ -210,6 +213,7 @@ system = {
     'data': a.data_url,
 }
 if a.live_url: system['live'] = a.live_url
+if a.live_url and a.live_by == 'trip': system['liveBy'] = 'trip'
 if a.hub:
     system['hub'] = {'name': a.name, 'lat': lat, 'lon': lon}
     system['routes'] = wanted
