@@ -559,6 +559,8 @@ function onFlick() {
               // early. No prediction: the schedule, unmarked.
               var t = dep[0], isLive = false, at = null;
               var trip = !ahead && live && dep[3] && live.trips[dep[3]];
+              // A run the feed says is cancelled isn't coming.
+              if (trip && trip.c) return;
               // By the stop's id, or where the feed names no stop, by the
               // departure's place in its trip.
               for (var i = 0; trip && i < trip.s.length; i++) {
