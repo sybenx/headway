@@ -21,6 +21,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument('gtfs', help='path to a GTFS zip')
 ap.add_argument('--agency', required=True)
 ap.add_argument('--hub', help='lat,lon of the hub, for a system built around one')
+ap.add_argument('--base', help='lat,lon,metres of the yard the buses sleep in: a flick there says how many are still out')
 ap.add_argument('--routes', default='', help='short names of the routes that leave the hub on their own timetable, comma-separated')
 ap.add_argument('--name', default='HUB')
 ap.add_argument('--radius', type=int, default=150, help='metres around the hub that count as its stops')
@@ -220,6 +221,9 @@ if a.live_url: system['live'] = a.live_url
 if a.live_url and a.live_by != 'stop': system['liveBy'] = a.live_by
 if a.hub:
     system['hub'] = {'name': a.name, 'lat': lat, 'lon': lon}
+if a.base:
+    b_lat, b_lon, b_r = (float(v) for v in a.base.split(','))
+    system['base'] = {'lat': b_lat, 'lon': b_lon, 'r': int(b_r)}
     system['routes'] = wanted
     system['days'] = {kind: {'hours': [first[kind], last[kind]],
                              'dep': {r: sorted(v) for r, v in deps.get(kind, {}).items()}}

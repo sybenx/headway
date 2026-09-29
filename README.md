@@ -89,7 +89,20 @@ route would show three of them. There the answer is by time instead: a line
 a departure minute, the time at the outer edge and every route leaving then
 as a badge beside it, in route order, wrapping when a wave is wider than the
 line. Four lines fit where the date was: the loops, the half-hour wave, and
-what follows. A Pebble Classic has no room for it and keeps the board.
+what follows. With the live feed, a flick there asks a different question,
+the one asked standing in the bays: which buses are in? Every route that
+leaves the transit centre that day is a badge on one line, in route order,
+solid where its bus is at a bay now and hollow where it isn't, and under it
+the loops' next departures, `G` and `B`, a line each. With no live answer it
+is the departures by time, since nothing can be said about who is in. A
+Pebble Classic has no room for it and keeps the board.
+
+**At the yard,** Connect's headquarters in North Logan where the buses sleep,
+a flick answers whether they are all back: the stop line reads `3 BUSES OUT`,
+`1 BUS OUT` or `ALL BUSES IN`, counting every bus with a fresh position
+anywhere but the yard, and the one row under it is the stop up the road.
+With no live answer it is that stop, as anywhere else. A system names its
+yard with `--base lat,lon,metres`.
 
 | at the transit centre | light | the minute it leaves |
 |---|---|---|

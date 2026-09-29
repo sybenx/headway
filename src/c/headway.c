@@ -122,10 +122,11 @@ static struct {
 // leaving then as a badge, in route order. live has a bit a badge for a
 // predicted time, away one for a bus not in at its bay yet. Not on
 // aplite: its 24 KB could not hold it and the heap too, so the phone sends a
-// Pebble Classic the board it always had.
+// Pebble Classic the board it always had. A line whose minute is empty (or
+// only a day word) has no time: the flick's line of every route at the hub.
 #ifndef PBL_PLATFORM_APLITE
 #define HAS_WAVE 1
-#define WV_MAX 12
+#define WV_MAX 16
 typedef struct { char when[16]; uint8_t n; char lab[WV_MAX][6]; uint32_t col[WV_MAX]; uint16_t live, away; } WaveLine;
 static WaveLine s_wave[SV_ROWS];
 #endif
@@ -1462,19 +1463,22 @@ static void layout_wave(const struct tm *t, const Frame *fr, int band_top) {
   char tb[8];
   int W = 0;
   for (int i = 0; i < s_sv.n; i++) {
+    if (!isdigit((int)s_wave[i].when[0])) continue;
     sv_clock(tb, sizeof(tb), s_wave[i].when);
     const int w = run_w(tb, sv_font(tb), false, 0);
     if (w > W) W = w;
   }
   s_wl.t_x = fr->end - W;
-  const int bend = s_wl.t_x - sc(SV_BADGE_GAP), room = bend - fr->start;
   s_wl.n = 0;
   for (int i = 0; i < s_sv.n && s_wl.n < rows; i++) {
     const WaveLine *w = &s_wave[i];
+    // A line with no time has the time's column too.
+    const bool timed = isdigit((int)w->when[0]);
+    const int bend = timed ? s_wl.t_x - sc(SV_BADGE_GAP) : fr->end, room = bend - fr->start;
     for (int j = 0; j < w->n && s_wl.n < rows;) {
       const int k = s_wl.n;
       s_wl.l[k].wave = i; s_wl.l[k].first = j; s_wl.l[k].count = 0; s_wl.l[k].t[0] = 0;
-      if (j == 0) sv_clock(s_wl.l[k].t, sizeof(s_wl.l[k].t), w->when);
+      if (j == 0 && timed) sv_clock(s_wl.l[k].t, sizeof(s_wl.l[k].t), w->when);
       int used = 0;
       for (int c = j; c < w->n; c++) {
         // A badge as the board sizes it: square for one glyph, growing past.
@@ -2122,15 +2126,18 @@ static bool flick_asks(void) {
 // read in the same glance.
 static void tap_handler(AccelAxisType axis, int32_t direction) {
   (void)axis; (void)direction;
-  // Every flick is heard: the light, and the seconds, at once. The phone is
-  // asked only where the answer could be worth a fix (flick_asks).
-  if (s_sv.pending) return;
+  // Every flick is heard: the light, and the seconds, at once, even one
+  // made while the phone is still answering an earlier flick (a stray one
+  // from the arm swinging, say), which waits on that same answer rather than
+  // asking again. The phone is asked only where the answer could be worth a
+  // fix (flick_asks).
   s_sv.lit = true;
   light_enable_interaction();
   drain_start();
-  stopview_hold(SV_SHOW_MS);
   retune_tick();
   layer_mark_dirty(s_face);
+  if (s_sv.pending) return;
+  stopview_hold(SV_SHOW_MS);
   if (!flick_asks()) return;
   DictionaryIterator *out;
   if (app_message_outbox_begin(&out) != APP_MSG_OK) return;

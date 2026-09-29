@@ -26,7 +26,7 @@ marked with a small arc where there are any. If you're not, a flick doesn't
 check your location at all.
 
 At Connect's transit centre it counts down to the next departure, with a
-buzz at five minutes. While buses run there, it checks every five minutes
+buzz at five minutes, and a flick shows which routes' buses are in. While buses run there, it checks every five minutes
 nearby so the countdown is on when you arrive, and stops after the last bus.
 
 Your location stays on your phone: the weather service gets it rounded to
@@ -36,6 +36,15 @@ transit off and it never checks your location for transit.
 
 Settings on the phone for modules, theme, accent, wrist, clock and units.
 Round watches aren't supported.
+
+## Release notes (1.17.0)
+
+A flick at Connect's transit centre now shows which buses are in: every
+route that leaves there that day as a badge, solid where its bus is at a
+bay and hollow where it isn't, with the G and B loops' next times under
+them. At Connect's yard in North Logan a flick says how many buses are
+still out, or that they're all in. A flick made while the phone is still
+answering an earlier one shows its seconds at once rather than waiting.
 
 ## Release notes (1.16.0)
 

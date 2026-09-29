@@ -540,6 +540,63 @@ function waves(deps, dayWord, index, routesInNow) {
   });
 }
 
+// A flick at the hub with live positions: which routes have a bus in. Every
+// route that leaves the hub on the day as a badge on one line, in route
+// order, solid where its bus is at a bay now and hollow where it isn't; then
+// the loops' next departures, a line each (one if they leave together), as
+// the room allows. The line of routes has no time, only the day word when
+// the next bus is another day's.
+function hubChips(deps, dayWord, index, stops, inNow, loops, day) {
+  var onDay = activeServices(index.services, day), seen = {}, chips = [];
+  stops.forEach(function (stop) {
+    (stop.deps || []).forEach(function (row) {
+      var stem = routeStem(row[1]);
+      if (onDay[row[4]] && !seen[stem]) { seen[stem] = true; chips.push({ stem: stem, label: row[1] }); }
+    });
+  });
+  chips.sort(function (a, b) { return byRoute(a.label, b.label); });
+  chips = chips.slice(0, 16);
+  var away = 0;
+  chips.forEach(function (c, j) { if (!inNow[c.stem]) away |= 1 << j; });
+  var colour = function (r) { return parseInt((index.routes[r] || ['888888'])[0], 16); };
+  var out = [{
+    when: dayWord ? ' ' + dayWord : '',
+    routes: chips.map(function (c) { return c.stem; }),
+    colors: chips.map(function (c) { return colour(c.label); }),
+    live: 0,
+    away: away,
+  }];
+  var byMin = {};
+  (loops || []).forEach(function (r) {
+    for (var i = 0; i < deps.length && deps[i].route !== r; i++);
+    var dep = deps[i];
+    if (!dep) return;
+    var w = byMin[dep.t];
+    if (!w) { w = byMin[dep.t] = { t: dep.t, when: String(dep.t), routes: [], colors: [], live: 0, away: 0 }; out.push(w); }
+    if (dep.live) w.live |= 1 << w.routes.length;
+    w.routes.push(r); w.colors.push(colour(r));
+  });
+  var head = out.shift();
+  out.sort(function (a, b) { return a.t - b.t; });
+  return [head].concat(out.slice(0, 2));
+}
+
+// Buses still out, for a flick at the yard they sleep in: every bus with a
+// fresh position anywhere but there. A bus that has switched off in the yard
+// stops reporting, one parked with its tracker on sits inside; either way it
+// is in. Null with no live answer, so nothing is claimed on no news.
+function busesOut(live, base) {
+  if (!live || !live.at) return null;
+  var nowS = Date.now() / 1000, n = 0;
+  live.at.forEach(function (b) {
+    if (nowS - b[2] < BUS_FRESH && metres(b[0], b[1], base.lat, base.lon) > base.r) n++;
+  });
+  return n;
+}
+function outWords(n) {
+  return n === 0 ? 'ALL BUSES IN' : n === 1 ? '1 BUS OUT' : n + ' BUSES OUT';
+}
+
 // A Pebble Classic (aplite) has no room for the hub's view; it keeps the board.
 function classic() {
   try { return Pebble.getActiveWatchInfo().platform === 'aplite'; } catch (e) { return false; }
@@ -593,6 +650,7 @@ function onFlick() {
         : ranked.filter(function (st) {
           return metres(best.lat, best.lon, st.lat, st.lon) <= TWIN || (best.station && st.station === best.station);
         }).slice(0, 16);
+      var atBase = sys.base && metres(lat, lon, sys.base.lat, sys.base.lon) <= sys.base.r;
       var now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes();
       var midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
       var byTrip = sys.liveBy === 'trip' || sys.liveBy === 'feed', askedTrips = false;
@@ -667,7 +725,12 @@ function onFlick() {
         }
         // Ties in route order, never in whichever file happened to load first.
         deps.sort(function (a, b) { return a.t - b.t || byRoute(a.route, b.route); });
-        if (atHub && !classic()) return sendWaves(name, waves(deps, dayWord, index, routesIn(group, live, stops)));
+        if (atHub && !classic()) {
+          var inNow = routesIn(group, live, stops);
+          if (!inNow) return sendWaves(name, waves(deps, dayWord, index, null));
+          var day = dayWord ? new Date(now.getFullYear(), now.getMonth(), now.getDate() + (ahead - 1)) : now;
+          return sendWaves(name, hubChips(deps, dayWord, index, stops, inNow, sys.routes, day));
+        }
         // A row a route and direction, in order of its next departure,
         // with its next two times, or its next time and the day. Where a
         // route runs both ways from here — twin stops across a road — the
@@ -690,6 +753,10 @@ function onFlick() {
           var when = word ? [g.times[0], word] : g.times;
           return { route: g.route, head: g.head, when: when.join(' '), color: parseInt(col, 16), live: g.live };
         });
+        // At the yard the question is whether the buses are back: the count
+        // takes the stop's name, and its one row stays.
+        var out = atBase ? busesOut(live, sys.base) : null;
+        if (out !== null) return sendStopView(outWords(out), 0, rows.slice(0, 1));
         sendStopView(name, best.d <= AT_STOP ? 0 : best.d, rows);
       }
     });
