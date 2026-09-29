@@ -37,6 +37,13 @@ transit off and it never checks your location for transit.
 Settings on the phone for modules, theme, accent, wrist, clock and units.
 Round watches aren't supported.
 
+## Release notes (1.18.2)
+
+A flick shows the timetable at once, and live times redraw it when they
+come, rather than waiting on them. Away from a countdown the outer edge is
+bare now: the hairline appears with a flick and drains for as long as its
+answer stays.
+
 ## Release notes (1.18.1)
 
 A flick made while the phone is still answering an earlier one lights the

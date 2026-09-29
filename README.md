@@ -18,8 +18,10 @@ it. The minute digits sit flush to it and survive a cuff that hides the
 hour. The modules and the date hang from it too, the number of the date on
 the edge itself: `SEP 22`. When there is a countdown it takes that edge and
 the date moves to the wrist side, first to go. A rail down the outer edge
-drains as the headway runs out, readable as a shape under any sleeve. On the
-right wrist the whole layout mirrors.
+drains as the headway runs out, readable as a shape under any sleeve. Without
+a countdown the edge is bare, until a flick: then a hairline down it drains
+for as long as the flick's answer stays. On the right wrist the whole layout
+mirrors.
 
 ## Out of the box
 

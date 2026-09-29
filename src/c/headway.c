@@ -791,7 +791,7 @@ static void draw_rail(GContext *ctx, const Schedule *sch, int16_t h) {
   draw_soft_tick(ctx, x0, x1, (h * 3) / 4);
 }
 
-// Away from the hub the rail keeps only its hairline: nothing to drain.
+// Away from the hub the rail is only a hairline, and only through a flick.
 static bool s_quiet_face;   // the plain face is up, so its hairline shows
 // Milliseconds since the flick.
 static int32_t since_flick(void) {
@@ -810,10 +810,12 @@ static int32_t line_left(void) {
 static void draw_hairline(GContext *ctx, int16_t h) {
   const int rail_w = sc(RAIL_W), border = sc(RAIL_BORDER);
   graphics_context_set_fill_color(ctx, s_ink);
-  // From a flick the line shortens from the foot and is gone as the answer
-  // goes; it starts at the flick, not when the phone replies.
+  // Only a flick draws it: the line is the answer's time, full at the
+  // flick, shortening from the foot, gone as the answer goes. At rest the
+  // edge is bare; a line there with nothing to count reads as a gap.
   const int32_t left = line_left();
-  if (left >= 0) h = (int16_t)((int32_t)h * left / 10000);
+  if (left <= 0) return;
+  h = (int16_t)((int32_t)h * left / 10000);
   graphics_fill_rect(ctx, GRect(mapx(s_w - rail_w - border, border), 0, border, h), 0, GCornerNone);
 }
 
