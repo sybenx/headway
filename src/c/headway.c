@@ -1219,10 +1219,14 @@ static void sv_clock(char *out, size_t n, const char *tok) {
   // The minute a bus is due, and the minute after, read NOW: a bus that
   // should be here is the one thing a board must not hide.
   if (m <= s_now_min && m >= s_now_min - 1) { strncpy(out, "NOW", n); out[n - 1] = 0; return; }
+  // The minute before reads 1 MIN, as the countdown says it: the bus isn't
+  // here yet, and a clock time a minute off takes working out.
+  if (m == s_now_min + 1) { strncpy(out, "1 MIN", n); out[n - 1] = 0; return; }
   if (use_24h()) snprintf(out, n, "%d:%02d", h, mm);
   else snprintf(out, n, "%d:%02d%c", display_hour(h), mm, h < 12 ? 'A' : 'P');
 }
-static bool sv_is_now(const char *t) { return t[0] == 'N'; }
+// NOW, or 1 MIN: words, not a clock time.
+static bool sv_is_now(const char *t) { return t[0] == 'N' || t[1] == ' '; }
 // NOW is set in the label font, which has the letters; a time in the board's.
 static GFont sv_font(const char *t) { return sv_is_now(t) ? s_f_label : s_f_board; }
 
@@ -1468,13 +1472,6 @@ static struct {
   uint8_t bw[WV_LINES][WV_MAX], gdx[WV_LINES][WV_MAX];
 } s_wl;
 
-// At the hub a bus is held to its time and boards the minute before, so a
-// line's time reads NOW from then, a minute sooner than at a street stop.
-static void wave_clock(char *out, size_t n, const char *tok) {
-  if (atoi(tok) == s_now_min + 1) { strncpy(out, "NOW", n); out[n - 1] = 0; return; }
-  sv_clock(out, n, tok);
-}
-
 static void layout_wave(const struct tm *t, const Frame *fr, int band_top) __attribute__((noinline));
 static void layout_wave(const struct tm *t, const Frame *fr, int band_top) {
   layout_board_head(t, fr);
@@ -1488,7 +1485,7 @@ static void layout_wave(const struct tm *t, const Frame *fr, int band_top) {
   int W = 0;
   for (int i = 0; i < s_sv.n; i++) {
     if (!isdigit((int)s_wave[i].when[0])) continue;
-    wave_clock(tb, sizeof(tb), s_wave[i].when);
+    sv_clock(tb, sizeof(tb), s_wave[i].when);
     const int w = run_w(tb, sv_font(tb), false, 0);
     if (w > W) W = w;
   }
@@ -1502,7 +1499,7 @@ static void layout_wave(const struct tm *t, const Frame *fr, int band_top) {
     for (int j = 0; j < w->n && s_wl.n < rows;) {
       const int k = s_wl.n;
       s_wl.l[k].wave = i; s_wl.l[k].first = j; s_wl.l[k].count = 0; s_wl.l[k].t[0] = 0;
-      if (j == 0 && timed) wave_clock(s_wl.l[k].t, sizeof(s_wl.l[k].t), w->when);
+      if (j == 0 && timed) sv_clock(s_wl.l[k].t, sizeof(s_wl.l[k].t), w->when);
       int used = 0;
       for (int c = j; c < w->n; c++) {
         // A badge as the board sizes it: square for one glyph, growing past.

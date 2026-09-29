@@ -37,6 +37,12 @@ transit off and it never checks your location for transit.
 Settings on the phone for modules, theme, accent, wrist, clock and units.
 Round watches aren't supported.
 
+## Release notes (1.18.3)
+
+A bus due next minute reads 1 MIN on a flick's answer, at every stop and
+at the transit centre, as the countdown says it. NOW keeps meaning the
+minute it's due.
+
 ## Release notes (1.18.2)
 
 A flick shows the timetable at once, and live times redraw it when they
