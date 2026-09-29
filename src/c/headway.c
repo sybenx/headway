@@ -1468,6 +1468,13 @@ static struct {
   uint8_t bw[WV_LINES][WV_MAX], gdx[WV_LINES][WV_MAX];
 } s_wl;
 
+// At the hub a bus is held to its time and boards the minute before, so a
+// line's time reads NOW from then, a minute sooner than at a street stop.
+static void wave_clock(char *out, size_t n, const char *tok) {
+  if (atoi(tok) == s_now_min + 1) { strncpy(out, "NOW", n); out[n - 1] = 0; return; }
+  sv_clock(out, n, tok);
+}
+
 static void layout_wave(const struct tm *t, const Frame *fr, int band_top) __attribute__((noinline));
 static void layout_wave(const struct tm *t, const Frame *fr, int band_top) {
   layout_board_head(t, fr);
@@ -1481,7 +1488,7 @@ static void layout_wave(const struct tm *t, const Frame *fr, int band_top) {
   int W = 0;
   for (int i = 0; i < s_sv.n; i++) {
     if (!isdigit((int)s_wave[i].when[0])) continue;
-    sv_clock(tb, sizeof(tb), s_wave[i].when);
+    wave_clock(tb, sizeof(tb), s_wave[i].when);
     const int w = run_w(tb, sv_font(tb), false, 0);
     if (w > W) W = w;
   }
@@ -1495,7 +1502,7 @@ static void layout_wave(const struct tm *t, const Frame *fr, int band_top) {
     for (int j = 0; j < w->n && s_wl.n < rows;) {
       const int k = s_wl.n;
       s_wl.l[k].wave = i; s_wl.l[k].first = j; s_wl.l[k].count = 0; s_wl.l[k].t[0] = 0;
-      if (j == 0 && timed) sv_clock(s_wl.l[k].t, sizeof(s_wl.l[k].t), w->when);
+      if (j == 0 && timed) wave_clock(s_wl.l[k].t, sizeof(s_wl.l[k].t), w->when);
       int used = 0;
       for (int c = j; c < w->n; c++) {
         // A badge as the board sizes it: square for one glyph, growing past.
@@ -1725,6 +1732,16 @@ static GColor secs_color(void) {
 #else
   return s_ink;
 #endif
+}
+
+// The plain face keeps no room for a rail: its time sits centred, and
+// everything else hangs from the time's outer edge as ever. The digits are
+// all one width, so the face doesn't shift as the minutes go.
+static void centre_time(Frame *fr) __attribute__((noinline));
+static void centre_time(Frame *fr) {
+  if (!s_quiet_face) return;
+  fr->end = (s_w + s_tm.w) / 2;
+  s_tm.x = fr->end - s_tm.w;
 }
 
 static void paint_time(void) __attribute__((noinline));
@@ -1961,6 +1978,7 @@ static void face_update(Layer *layer, GContext *ctx) {
     // and the countdown step down, and the modules and the second countdown
     // keep their band, as the design reflows it.
     layout_time(t, &fr, peek ? s_f_time_p : s_f_time, peek ? TIME_MARGIN_TOP_P : TIME_MARGIN_TOP);
+    centre_time(&fr);
     if (idle) layout_idle(t, &fr);
     else if (peek) layout_block(t, &sch, &fr, s_f_count_s, BLOCK_ROW_GAP_P, false);
     else layout_block(t, &sch, &fr, s_f_count, BLOCK_ROW_GAP, true);
@@ -1986,6 +2004,7 @@ static void face_update(Layer *layer, GContext *ctx) {
   // With no room for the stop beside the modules the yard keeps its count.
   if (s_sv.valid && !s_sb.show && !yard) {
     layout_time(t, &fr, s_f_time, TIME_MARGIN_TOP);
+    centre_time(&fr);
     layout_secs(t);
     paint_time();
 #ifdef HAS_WAVE

@@ -41,8 +41,9 @@ Round watches aren't supported.
 
 A flick shows the timetable at once, and live times redraw it when they
 come, rather than waiting on them. Away from a countdown the outer edge is
-bare now: the hairline appears with a flick and drains for as long as its
-answer stays.
+bare now, and the face sits centred: the hairline appears with a flick and
+drains for as long as its answer stays. At the transit centre a flick's
+times read NOW from the minute before, while the bus boards.
 
 ## Release notes (1.18.1)
 
