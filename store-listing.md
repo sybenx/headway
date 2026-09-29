@@ -37,6 +37,13 @@ transit off and it never checks your location for transit.
 Settings on the phone for modules, theme, accent, wrist, clock and units.
 Round watches aren't supported.
 
+## Release notes (1.18.1)
+
+A flick made while the phone is still answering an earlier one lights the
+face again rather than staying dark until the answer comes. UTA's live feed
+is asked for at the flick, alongside the timetable, so its times come
+sooner. Small fixes at the yard.
+
 ## Release notes (1.18.0)
 
 At Connect's yard the count of buses still out is big now: it takes the
