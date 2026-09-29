@@ -435,9 +435,19 @@ function withTransit(msg) {
 
 // out: at the yard, how many buses are still out; the watch shows it in the
 // countdown's place, over a big number (0 when they're all in).
+// A flick's answer, sent at most once as it stands: the timetable, then the
+// live answer only where it says something new. lastAnswer is cleared by each
+// flick.
+var lastAnswer = null;
+function sendAnswer(msg) {
+  var key = JSON.stringify(Object.keys(msg).filter(function (k) { return k.indexOf('SV_') === 0; }).map(function (k) { return [k, msg[k]]; }));
+  if (key === lastAnswer) return console.log('headway: live answer changes nothing');
+  lastAnswer = key;
+  Pebble.sendAppMessage(withTransit(msg));
+}
 function sendStopView(name, dist, rows, out) {
   console.log('headway: stop view ' + (name || '(none)') + ' ' + rows.length + ' rows' + (out == null ? '' : ', ' + out + ' out'));
-  var msg = withTransit({ SV_STOP: fitName(name), SV_DIST: Math.round(dist), SV_N: rows.length, SV_MODE: 0 });
+  var msg = { SV_STOP: fitName(name), SV_DIST: Math.round(dist), SV_N: rows.length, SV_MODE: 0 };
   if (out != null) msg.SV_OUT = out;
   for (var i = 0; i < rows.length && i < 3; i++) {
     msg['SV_R' + (i + 1)] = rows[i].route;
@@ -446,7 +456,7 @@ function sendStopView(name, dist, rows, out) {
     msg['SV_T' + (i + 1)] = rows[i].live ? 1 : 0;
     msg['SV_C' + (i + 1)] = rows[i].color;
   }
-  Pebble.sendAppMessage(msg);
+  sendAnswer(msg);
 }
 
 // At the hub the answer is by time, not by route: a line a departure minute,
@@ -458,7 +468,7 @@ function sendWaves(name, waves) {
   console.log('headway: hub view ' + waves.map(function (w) {
     return w.when + ' [' + w.routes.map(function (r, j) { return r + ((w.live >> j) & 1 ? '~' : '') + ((w.away >> j) & 1 ? '(away)' : ''); }).join(' ') + ']';
   }).join(', '));
-  var msg = withTransit({ SV_STOP: fitName(name), SV_DIST: 0, SV_N: waves.length, SV_MODE: 1 });
+  var msg = { SV_STOP: fitName(name), SV_DIST: 0, SV_N: waves.length, SV_MODE: 1 };
   waves.forEach(function (w, i) {
     var k = [];
     w.colors.forEach(function (c) { k.push((c >> 16) & 255, (c >> 8) & 255, c & 255); });
@@ -468,7 +478,7 @@ function sendWaves(name, waves) {
     msg['SV_T' + (i + 1)] = w.live;
     msg['SV_O' + (i + 1)] = w.away;
   });
-  Pebble.sendAppMessage(msg);
+  sendAnswer(msg);
 }
 
 // Which routes have a bus in at the hub: a fresh live position within AT_BAY
@@ -604,6 +614,7 @@ function tripsSoon(stops, services, now, nowMin) {
 
 function onFlick() {
   // The watch only asks when its own setting allows, so no gate here.
+  lastAnswer = null;
   navigator.geolocation.getCurrentPosition(function (pos) {
     var lat = pos.coords.latitude, lon = pos.coords.longitude;
     console.log('headway: fix ' + lat.toFixed(4) + ',' + lon.toFixed(4) + ' +-' + Math.round(pos.coords.accuracy) + 'm');
@@ -634,21 +645,23 @@ function onFlick() {
       var atBase = sys.base && metres(lat, lon, sys.base.lat, sys.base.lon) <= sys.base.r;
       var now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes();
       var midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-      var byFeed = sys.liveBy === 'feed', feed = null;
-      var pending = group.length + 1, name = atHub ? sys.hub.name : '', stops = [], live = null;
-      // The live answer is asked for alongside the schedule and waited on
-      // for at most LIVE_WAIT; the schedule never waits on it beyond that.
-      if (byFeed) askLive(sys.live, true, function (buf) { feed = buf; answer(); });
-      else getLive(sys, group.map(function (st) { return st.id; }), function (l) { live = l; answer(); });
+      var byFeed = sys.liveBy === 'feed', feed = null, live = null;
+      var left = group.length, name = atHub ? sys.hub.name : '', stops = [];
+      // The live answer is asked for alongside the schedule. The schedule
+      // never waits on it: the timetable goes to the watch as soon as the
+      // stop files are in, and a live answer that comes inside LIVE_WAIT
+      // redraws it, if it changes anything.
+      var gotLive = function () { if (!left && (feed || live)) answer(); };
+      if (byFeed) askLive(sys.live, true, function (buf) { feed = buf; gotLive(); });
+      else getLive(sys, group.map(function (st) { return st.id; }), function (l) { live = l; gotLive(); });
       group.forEach(function (st) {
         getJSON(DATA_URL + 'stops/' + st.id + '.json', 'hw2-stop-' + tag + '-' + st.id, STOP_TTL, function (stop) {
           if (stop) { if (!name) name = stop.name; stop.id = stop.id || st.id; stops.push(stop); }
-          answer();
+          if (!--left) answer();
         });
       });
       function answer() {
-        if (--pending) return;
-        if (byFeed) live = readFeed(feed, tripsSoon(stops, index.services, now, nowMin));
+        if (byFeed && feed && !live) live = readFeed(feed, tripsSoon(stops, index.services, now, nowMin));
         // Today's remaining departures; when there are none, the first
         // day ahead with any — tomorrow, or Monday after a Saturday —
         // so the answer is the next bus, whenever that is.
