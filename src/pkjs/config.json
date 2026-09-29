@@ -220,9 +220,13 @@
         "type": "select",
         "messageKey": "UNITS",
         "label": "Units",
-        "description": "The temperature, and how far a stop is.",
-        "defaultValue": "metric",
+        "description": "The temperature, and how far a stop is. Automatic goes by where you are: °F and feet in the United States, °C and metres elsewhere.",
+        "defaultValue": "auto",
         "options": [
+          {
+            "label": "Automatic",
+            "value": "auto"
+          },
           {
             "label": "Metric: °C, metres",
             "value": "metric"

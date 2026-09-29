@@ -44,6 +44,8 @@ come, rather than waiting on them. Away from a countdown the outer edge is
 bare now, and the face sits centred: the hairline appears with a flick and
 drains for as long as its answer stays. At the transit centre a flick's
 times read NOW from the minute before, while the bus boards.
+Units are Automatic by default: °F and feet in the United States, °C and
+metres elsewhere. A choice already saved stays as it was.
 
 ## Release notes (1.18.1)
 

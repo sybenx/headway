@@ -37,7 +37,7 @@ function weatherAt(pos, force) {
   var s = settings();
   if (!weatherWanted()) return;
   if (!force && Date.now() - lastFetch < WEATHER_TTL) return;
-  var unit = s.UNITS === 'imperial' ? 'fahrenheit' : 'celsius';
+  var unit = units() === 'imperial' ? 'fahrenheit' : 'celsius';
   var url = 'https://api.open-meteo.com/v1/forecast' +
     '?latitude=' + pos.coords.latitude.toFixed(3) +
     '&longitude=' + pos.coords.longitude.toFixed(3) +
@@ -54,6 +54,46 @@ function weatherAt(pos, force) {
     } catch (e) {}
   };
   req.send();
+}
+
+// ---- units: the setting, or, left on Automatic, where the wearer is: °F and
+// feet in the United States, °C and metres elsewhere. The watch is told the
+// choice itself, never "auto".
+// The United States, coarsely: the lower 48 by their borders and coasts, a
+// few kilometres either way, then Alaska and Hawaii as boxes. [lat, lon].
+var US = [[48.3, -124.8], [48.25, -123.25], [48.7, -123.0], [49.0, -123.1], [49.0, -95.15], [49.4, -95.15], [48.0, -89.6],
+  [46.51, -84.6], [46.505, -84.2], [46.0, -83.5], [45.3, -82.5], [43.0, -82.42], [42.35, -82.95], [42.05, -83.15], [41.7, -82.7], [42.9, -78.9],
+  [43.3, -79.05], [43.6, -77.0], [44.2, -76.3], [45.0, -74.7], [45.0, -71.5], [46.4, -70.0],
+  [47.45, -69.2], [47.1, -67.8], [45.2, -67.4], [44.8, -66.9], [41.0, -69.8], [35.2, -75.3],
+  [30.5, -80.9], [25.2, -80.0], [24.4, -81.9], [28.9, -89.0], [25.95, -97.15], [25.885, -97.5], [26.1, -98.3],
+  [27.5, -99.5], [29.4, -100.9], [29.8, -101.4], [29.1, -103.2], [30.6, -104.9], [31.75, -106.5],
+  [31.78, -108.2], [31.33, -108.2], [31.33, -111.07], [32.49, -114.8], [32.72, -114.72],
+  [32.53, -117.12], [32.4, -117.3], [34.4, -120.7], [40.4, -124.5], [46.2, -124.1], [48.4, -124.8]];
+function inUS(lat, lon) {
+  if (lat > 51 && lat < 72 && lon > -170 && lon < -141) return true;                 // Alaska
+  if (lat > 54.5 && lat < 60.5 && lon >= -141 && lon < -130) return true;             // its panhandle, and a few Canadian towns
+  if (lat > 18.5 && lat < 22.5 && lon > -161 && lon < -154.5) return true;           // Hawaii
+  var inside = false;
+  for (var i = 0, j = US.length - 1; i < US.length; j = i++) {
+    var a = US[i], b = US[j];
+    if ((a[1] > lon) !== (b[1] > lon) && lat < (b[0] - a[0]) * (lon - a[1]) / (b[1] - a[1]) + a[0]) inside = !inside;
+  }
+  return inside;
+}
+function units() {
+  var u = settings().UNITS;
+  if (u === 'metric' || u === 'imperial') return u;
+  return localStorage.getItem('hw-units-here') || 'metric';
+}
+var unitsTold = null;
+// True when the watch was told something new.
+function tellUnits() {
+  var u = units();
+  if (u === unitsTold) return false;
+  unitsTold = u;
+  lastFetch = 0;   // the watch drops a reading in the other unit; fetch it anew
+  Pebble.sendAppMessage({ UNITS: u });
+  return true;
 }
 
 // ---- transit: is the wearer at the hub, and what leaves it next.
@@ -203,10 +243,14 @@ function hubRunning(sys) {
   var day = sys && sys.days ? dayTable(sys, now) : null;
   return !!day && nowMin >= day.hours[0] - 15 && nowMin <= day.hours[1];
 }
+// True when the fix changed the units, so the weather wants fetching anew.
 function sawFix(lat, lon) {
   lastLook = Date.now();
+  try { localStorage.setItem('hw-units-here', inUS(lat, lon) ? 'imperial' : 'metric'); } catch (e) { /* the last word stands */ }
+  var changed = tellUnits();
   lastSys = systemAt(lat, lon);
   lastHubM = lastSys && lastSys.hub ? metres(lat, lon, lastSys.hub.lat, lastSys.hub.lon) : Infinity;
+  return changed;
 }
 
 // A walking look near the hub is precise once the last fix is within
@@ -620,7 +664,7 @@ function onFlick() {
     console.log('headway: fix ' + lat.toFixed(4) + ',' + lon.toFixed(4) + ' +-' + Math.round(pos.coords.accuracy) + 'm');
     flickTransit = transitState(lat, lon);
     // The flick's fix answers the background question too.
-    sawFix(lat, lon);
+    if (sawFix(lat, lon)) weatherAt(pos, true);
     var sys = systemAt(lat, lon);
     if (!sys || !sys.data) return sendStopView('', 0, []);
     var DATA_URL = sys.data, tag = sys.agency.toLowerCase();

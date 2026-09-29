@@ -163,7 +163,7 @@ From the Pebble app.
 - **Wrist** — left or right.
 - **Time format** — the system's, 12-hour or 24-hour.
 - **Modules** — three slots, and captions, icons or icons in colour.
-- **Units** — °C or °F, metres or feet.
+- **Units** — °C or °F, metres or feet. Automatic, the default, goes by where you are: °F and feet in the United States, °C and metres elsewhere.
 
 ## Data
 

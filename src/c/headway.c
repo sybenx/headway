@@ -2359,7 +2359,8 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
   if ((tp = dict_find(iter, MESSAGE_KEY_SECONDS))) {
     s_set.final_seconds = tp->value->int32 != 0;
   }
-  if ((tp = dict_find(iter, MESSAGE_KEY_UNITS))) {
+  // "auto" is the phone's to resolve: it sends metric or imperial itself.
+  if ((tp = dict_find(iter, MESSAGE_KEY_UNITS)) && tp->value->cstring[0] != 'a') {
     const bool imperial = (strcmp(tp->value->cstring, "imperial") == 0);
     // The stored reading is in the old unit. Showing it under the new label
     // would be wrong by 30-odd degrees, so drop it until the next fetch.
