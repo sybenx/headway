@@ -99,10 +99,18 @@ typedef struct {
 #define SV_WAIT_MS 15000
 #define SV_MIN_MS 8000    // an answer that lands late still gets this long
 typedef struct { char route[8], head[20], when[24]; uint32_t color; bool live; } SvRow;
+// Not on the Classic: its 24 KB holds neither the hub's view nor the yard's
+// count and the heap too, so the phone sends it the board it always had.
+#ifndef PBL_PLATFORM_APLITE
+#define HAS_WAVE 1
+#define HAS_YARD 1   // the yard's count in the countdown's place
+#endif
 static struct {
   bool valid, pending, lit;   // lit: a flick was heard; the seconds show until the answer's time is up
   bool wave;                  // the hub's answer: lines by departure time, not rows by route
-  int8_t out;                 // at the yard (HAS_YARD): how many buses are still out, -1 elsewhere
+#ifdef HAS_YARD
+  int8_t out;                 // at the yard: how many buses are still out, -1 elsewhere
+#endif
   // The hairline's countdown, from the flick: it drains from seg_f (in
   // ten-thousandths of the line) at seg_at to nothing at end_at, both in ms
   // since the flick at t0. An answer starts a new segment from where the line
@@ -118,6 +126,11 @@ static struct {
   AppTimer *timer;
   AppTimer *drain;            // repaints the hairline as it shortens
 } s_sv;
+#ifdef HAS_YARD
+#define AT_YARD() (s_sv.valid && s_sv.out >= 0)
+#else
+#define AT_YARD() false
+#endif
 
 // The hub's answer, a line a departure minute: the minute, and every route
 // leaving then as a badge, in route order. live has a bit a badge for a
@@ -126,8 +139,6 @@ static struct {
 // Pebble Classic the board it always had. A line whose minute is empty (or
 // only a day word) has no time: the flick's line of every route at the hub.
 #ifndef PBL_PLATFORM_APLITE
-#define HAS_WAVE 1
-#define HAS_YARD 1   // the yard's count in the countdown's place; the Classic gets it as the stop line
 #define WV_MAX 16
 typedef struct { char when[16]; uint8_t n; char lab[WV_MAX][6]; uint32_t col[WV_MAX]; uint16_t live, away; } WaveLine;
 static WaveLine s_wave[SV_ROWS];
@@ -364,6 +375,7 @@ static Metrics barlow_metrics(int boxh) {
   Metrics m = { boxh * BARLOW_BEARING / 100, boxh * BARLOW_CAP / 100 };
   return m;
 }
+static Metrics s_m_cap;   // the small caps', measured once the font loads
 
 // Draw text with its measured box placed at a logical origin. Inlined: the
 // caller stores the arguments and drops straight to the leaf.
@@ -1282,7 +1294,7 @@ static inline __attribute__((always_inline)) void layout_board_head(const struct
   s_svl.date_x = fr->start;
   // The stop line and the badges in the caption font, the times in the
   // board font: the board is a small thing under a full-size time.
-  s_svl.m_lab = barlow_metrics(measure("B", s_f_cap).h);
+  s_svl.m_lab = s_m_cap;
   s_svl.m_val = barlow_metrics(measure("8", s_f_board).h);
   s_svl.m_bad = barlow_metrics(measure("8", s_f_label).h);
   s_svl.dist_w = 0;
@@ -1571,7 +1583,7 @@ static void layout_sideblock(const Frame *fr, int band_top, int band_bot, int le
   s_sb.show = false;
   if (s_sv.n != 1 || s_sv.wave) return;
   const SvRow *row = &s_sv.row[0];
-  s_sb.m_lab = barlow_metrics(measure("B", s_f_cap).h);
+  s_sb.m_lab = s_m_cap;
   s_sb.m_val = barlow_metrics(measure("8", s_f_board).h);
   s_sb.m_bad = barlow_metrics(measure("8", s_f_label).h);
   const int room = right - left - sc(8);
@@ -1737,16 +1749,13 @@ static void paint_time(void) {
 
 // ---- zone 02: the countdown, and zone 04: weekday and date.
 static struct {
-  char dow[8], date[12], label[20], num[8], secs[5];
-#ifdef HAS_YARD
-  char yard[16];
-  int yard_x, yard_y;
-#endif
+  char dow[8], date[12], num[8], secs[5];
   const char *unit;
+  const char *label;          // over the block, at the yard; none elsewhere
   bool now, solid, bare;
   GSize z_num;
-  Metrics m_lab, m_min, m_num, m_dow, m_date;
-  int label_w, num_w, num_row_w, inner_w, inner_x, label_y, num_y;
+  Metrics m_min, m_num, m_dow, m_date;
+  int num_w, num_row_w, inner_w, inner_x, num_y, label_x, label_y;
   int block_x, block_y, block_w, block_h, date_y, dow_y, top;   // top: where the band above ends
   GFont f_num;
   bool show_date;
@@ -1762,13 +1771,12 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
   s_bk.now = sch->is_now;
   s_bk.solid = sch->is_now || sch->is_boarding;
   s_bk.unit = "MIN";
+  // The block is the number and its unit; the departure's clock time is
+  // the chips' to say, and the face at the hub is busy enough.
+  s_bk.label = NULL;
   if (sch->is_now) {
-    strncpy(s_bk.label, "DEPARTS", sizeof(s_bk.label));
     strncpy(s_bk.num, "NOW", sizeof(s_bk.num));
   } else {
-    snprintf(s_bk.label, sizeof(s_bk.label), "%s %d:%02d",
-             sch->is_boarding ? "LEAVES" : "NEXT",
-             display_hour(sch->next_h), sch->next_m);
     if (sch->is_final) {
       snprintf(s_bk.num, sizeof(s_bk.num), "%d", sch->secs);
       s_bk.unit = "SEC";
@@ -1786,12 +1794,11 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
 
   // At the yard the block is the count of buses still out, a label over it.
 #ifdef HAS_YARD
-  s_bk.yard[0] = 0;
-  if (s_sv.valid && s_sv.out >= 0) {
+  if (AT_YARD()) {
     s_bk.now = s_bk.solid = false;
     snprintf(s_bk.num, sizeof(s_bk.num), "%d", s_sv.out);
     s_bk.unit = "OUT";
-    strncpy(s_bk.yard, s_sv.out == 0 ? "ALL BUSES IN" : s_sv.out == 1 ? "BUS STILL OUT" : "BUSES STILL OUT", sizeof(s_bk.yard));
+    s_bk.label = s_sv.out == 0 ? "ALL BUSES IN" : s_sv.out == 1 ? "BUS STILL OUT" : "BUSES STILL OUT";
   }
 #endif
 
@@ -1799,13 +1806,8 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
   const GFont f_label = s_f_label, f_date = s_f_date;
   s_bk.f_num = f_num; s_bk.show_date = date;
   s_bk.z_num = measure(s_bk.num, f_num);
-  // The block is the number and its unit; the departure's clock time is
-  // the chips' to say, and the face at the hub is busy enough.
-  s_bk.label[0] = 0;
-  s_bk.label_w = 0;
   const bool bare = s_bk.now;   // NOW carries no unit
   const int min_w = bare ? 0 : run_w(s_bk.unit, f_label, false, TRACK);
-  s_bk.m_lab = barlow_metrics(0);
   s_bk.m_min = barlow_metrics(bare ? 0 : measure(s_bk.unit, f_label).h);
   s_bk.m_num = barlow_metrics(s_bk.z_num.h);
   s_bk.m_dow = barlow_metrics(measure(s_bk.dow, f_date).h);
@@ -1816,7 +1818,7 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
   s_bk.num_w = s_bk.now ? s_bk.z_num.w : run_w(s_bk.num, f_num, true, 0);
   s_bk.num_row_w = s_bk.num_w + (bare ? 0 : sc(LABEL_GAP) + min_w);
   s_bk.bare = bare;
-  int inner_w = s_bk.num_row_w > s_bk.label_w ? s_bk.num_row_w : s_bk.label_w;
+  int inner_w = s_bk.num_row_w;
   const int min_inner = sc(BLOCK_MIN_W) - sc(BLOCK_PAD_IN) - sc(BLOCK_PAD_OUT);
   if (inner_w < min_inner) inner_w = min_inner;
 
@@ -1851,19 +1853,17 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
   // here. The estimated cap of the label runs a pixel long, hence eight in
   // the constant.
   s_bk.inner_x = s_bk.block_x + pad_in;
-  s_bk.label_y = s_bk.block_y + sc(BLOCK_PAD_T);
-  s_bk.num_y = s_bk.label_y;
+  s_bk.num_y = s_bk.block_y + sc(BLOCK_PAD_T);
   // Weekday and date sit on the wrist side: first to disappear.
   s_bk.date_y = fr->bot - sc(DATE_PAD_BOT) - s_bk.m_date.cap;
   s_bk.dow_y = s_bk.date_y - sc(DOW_GAP) - s_bk.m_dow.cap;
-  // The yard's label stands over the block, and the band above ends there.
+  // A label stands over the block, and the band above ends there.
   s_bk.top = s_bk.block_y;
 #ifdef HAS_YARD
-  if (s_bk.yard[0]) {
-    const Metrics m = barlow_metrics(measure("B", s_f_cap).h);
-    s_bk.yard_y = s_bk.block_y + sc(BLOCK_PAD_T) - sc(YARD_GAP) - m.cap - m.bearing;
-    s_bk.yard_x = fr->end - run_w(s_bk.yard, s_f_cap, false, TRACK);
-    s_bk.top = s_bk.yard_y + m.bearing - sc(4);
+  if (s_bk.label) {
+    s_bk.label_y = s_bk.num_y - sc(YARD_GAP) - s_m_cap.cap - s_m_cap.bearing;
+    s_bk.label_x = fr->end - run_w(s_bk.label, s_f_cap, false, TRACK);
+    s_bk.top = s_bk.label_y + s_m_cap.bearing - sc(4);
   }
 #endif
 }
@@ -1891,9 +1891,9 @@ static void paint_block(int fr_start) {
                  s_bk.num_y + s_bk.m_num.cap - s_bk.m_min.cap - s_bk.m_min.bearing, false, TRACK);
   }
 #ifdef HAS_YARD
-  if (s_bk.yard[0]) {
+  if (s_bk.label) {
     graphics_context_set_text_color(s_ctx, s_ink);
-    draw_run(s_bk.yard, s_f_cap, s_bk.yard_x, s_bk.yard_y, false, TRACK);
+    draw_run(s_bk.label, s_f_cap, s_bk.label_x, s_bk.label_y, false, TRACK);
   }
 #endif
   if (!s_bk.show_date) return;
@@ -1912,7 +1912,7 @@ static void face_update(Layer *layer, GContext *ctx) {
   static Schedule sch;
   static struct tm *t;
   static Frame fr;
-  static bool quiet, at_hub, peek, yard, idle;
+  static bool at_hub, peek, yard, idle;
   s_ctx = ctx;
   full = layer_get_bounds(layer);
   b = layer_get_unobstructed_bounds(layer);
@@ -1929,14 +1929,12 @@ static void face_update(Layer *layer, GContext *ctx) {
   at_hub = transit_fresh(now) && s_tr.state == 1;
   // The countdown is earned by being at the hub. Anywhere else the face is
   // a plain watch — unless the countdown is asked for everywhere.
-  quiet = !at_hub && s_set.transit != TRANSIT_CHIPS;
   // At the yard a flick's answer takes the countdown's place: the count of
   // buses still out in the block, the stop up the road beside the modules.
-#ifdef HAS_YARD
-  yard = s_sv.valid && s_sv.out >= 0;
-#endif
-  idle = quiet && !yard;
-  s_quiet_face = quiet || yard;
+  // Either way the edge is the hairline, not the rail.
+  yard = AT_YARD();
+  idle = !at_hub && s_set.transit != TRANSIT_CHIPS && !yard;
+  s_quiet_face = idle || yard;
 
   theme_apply(t->tm_hour);
   graphics_context_set_fill_color(ctx, s_ground);
@@ -1956,7 +1954,7 @@ static void face_update(Layer *layer, GContext *ctx) {
   // a small date at the foot. Laid out first, so a one-row answer with no
   // room beside the modules can still take the board.
   s_sb.show = false;
-  if (!s_sv.valid || s_sv.n == 1) {
+  if (!s_sv.valid || s_sv.n == 1 || yard) {
     // A timeline peek covers the bottom third. The date goes first, the time
     // and the countdown step down, and the modules and the second countdown
     // keep their band, as the design reflows it.
@@ -2010,7 +2008,7 @@ static void face_update(Layer *layer, GContext *ctx) {
   // ---- boarding buzz, once on the transition into the solid block: at the
   // hub by default, or wherever the countdown runs.
   const bool buzz = s_set.buzz == BUZZ_ALWAYS || (s_set.buzz == BUZZ_HUB && at_hub);
-  if (!quiet && buzz && sch.remaining == THRESHOLD && s_last_remaining != THRESHOLD
+  if (!s_quiet_face && buzz && sch.remaining == THRESHOLD && s_last_remaining != THRESHOLD
       && !quiet_time_is_active()) {
     vibes_short_pulse();
   }
@@ -2137,9 +2135,6 @@ static void stopview_done(void *data) {
   s_sv.timer = NULL;
   if (s_sv.drain) { app_timer_cancel(s_sv.drain); s_sv.drain = NULL; }
   s_sv.valid = false;
-#ifdef HAS_YARD
-  s_sv.out = -1;
-#endif
   s_sv.pending = false;
   s_sv.lit = false;
   s_sv.draining = false;
@@ -2170,18 +2165,18 @@ static bool flick_asks(void) {
 // read in the same glance.
 static void tap_handler(AccelAxisType axis, int32_t direction) {
   (void)axis; (void)direction;
-  // Every flick is heard: the light, and the seconds, at once, even one
-  // made while the phone is still answering an earlier flick (a stray one
-  // from the arm swinging, say), which waits on that same answer rather than
-  // asking again. The phone is asked only where the answer could be worth a
-  // fix (flick_asks).
-  s_sv.lit = true;
+  // Every flick is heard: the light, and the seconds, at once. One made
+  // while the phone is still answering an earlier flick (a stray one from
+  // the arm swinging, say) lights the face again and waits on that answer.
+  // The phone is asked only where the answer could be worth a fix
+  // (flick_asks).
   light_enable_interaction();
+  if (s_sv.pending) return;
+  s_sv.lit = true;
   drain_start();
+  stopview_hold(SV_SHOW_MS);
   retune_tick();
   layer_mark_dirty(s_face);
-  if (s_sv.pending) return;
-  stopview_hold(SV_SHOW_MS);
   if (!flick_asks()) return;
   DictionaryIterator *out;
   if (app_message_outbox_begin(&out) != APP_MSG_OK) return;
@@ -2422,6 +2417,10 @@ static void init(void) {
   s_f_date = fonts_load_custom_font(resource_get_handle(RES_DATE));
   s_f_board = fonts_load_custom_font(resource_get_handle(RES_BOARD));
   s_f_cap = fonts_load_custom_font(resource_get_handle(RES_CAP));
+  s_m_cap = barlow_metrics(measure("B", s_f_cap).h);
+#ifdef HAS_YARD
+  s_sv.out = -1;   // no yard until the phone says so
+#endif
   s_f_bigdate = fonts_load_custom_font(resource_get_handle(RES_BIGDATE));
 #ifdef PBL_PLATFORM_APLITE
   // The Classic has no timeline peek, so the peek's smaller time and

@@ -287,24 +287,17 @@ function dirWord(head) {
 var LIVE_WAIT = 3000, LIVE_FRESH = 90;
 // A bus this close to its bay, by a position this fresh, is in and waiting.
 var AT_BAY = 60, BUS_FRESH = 180;
-// Asked by stop ids ('stops=a,b'), or by trip and place in it ('trips=5912862:12,...')
-// for a feed whose predictions name no stop (liveBy: 'trip').
-function getLive(sys, query, cb) {
-  if (!sys.live || !query) return cb(null);
+// One request for a live answer, of either shape: the body, or null on any
+// failure inside LIVE_WAIT. binary asks for a GTFS-realtime feed's bytes.
+function askLive(url, binary, cb) {
   var done = false;
   function finish(v) { if (!done) { done = true; cb(v); } }
   var req = new XMLHttpRequest();
-  req.open('GET', sys.live + '?' + query, true);
+  req.open('GET', url, true);
+  if (binary) req.responseType = 'arraybuffer';
   req.onload = function () {
-    if (req.status !== 200) return finish(null);
-    try {
-      var d = JSON.parse(req.responseText);
-      // The relay passes the feed's own clock through; a feed that has
-      // stopped moving still answers, so its age is checked here.
-      var age = Date.now() / 1000 - d.t;
-      console.log('headway: live ' + Object.keys(d.trips || {}).length + ' trips, age ' + Math.round(age) + 's');
-      finish(d.trips && age < LIVE_FRESH ? d : null);
-    } catch (e) { finish(null); }
+    var body = binary ? req.response : req.responseText;
+    finish(req.status === 200 && body && (!binary || typeof body !== 'string') ? body : null);
   };
   req.onerror = function () { finish(null); };
   req.timeout = LIVE_WAIT;
@@ -312,36 +305,31 @@ function getLive(sys, query, cb) {
   setTimeout(function () { finish(null); }, LIVE_WAIT + 250);   // not every phone honours XHR timeouts
   req.send();
 }
-
-// A feed the phone reads itself (liveBy: 'feed'): the agency's own
-// GTFS-realtime TripUpdate, where its server turns relays away. Only the
-// asked trips are unpacked, so the whole feed costs a few milliseconds, and
-// the answer takes the relay's shape, so the overlay is the same.
-function getFeed(sys, pairs, cb) {
-  var want = {};
-  pairs.forEach(function (p) {
-    var at = p.lastIndexOf(':'), id = p.slice(0, at);
-    (want[id] = want[id] || {})[Number(p.slice(at + 1))] = true;
+// An answer fresh enough to lay over the schedule, else null. A feed that
+// has stopped moving still answers, so its own clock is checked.
+function fresh(d, what) {
+  if (!d || !d.trips) return null;
+  var age = Date.now() / 1000 - d.t;
+  console.log('headway: ' + what + ' ' + Object.keys(d.trips).length + ' trips, age ' + Math.round(age) + 's');
+  return age < LIVE_FRESH ? d : null;
+}
+// The relay, asked by stop ids.
+function getLive(sys, ids, cb) {
+  if (!sys.live) return cb(null);
+  askLive(sys.live + '?stops=' + ids.join(','), false, function (text) {
+    var d = null;
+    try { d = text && JSON.parse(text); } catch (e) { /* the schedule it is */ }
+    cb(fresh(d, 'live'));
   });
-  var done = false;
-  function finish(v) { if (!done) { done = true; cb(v); } }
-  var req = new XMLHttpRequest();
-  req.open('GET', sys.live, true);
-  req.responseType = 'arraybuffer';
-  req.onload = function () {
-    if (req.status !== 200 || !req.response || typeof req.response === 'string') return finish(null);
-    try {
-      var d = skimTrips(new Uint8Array(req.response.buffer || req.response), want);
-      var age = Date.now() / 1000 - d.t;
-      console.log('headway: feed ' + Object.keys(d.trips).length + ' trips, age ' + Math.round(age) + 's');
-      finish(age < LIVE_FRESH ? d : null);
-    } catch (e) { finish(null); }
-  };
-  req.onerror = function () { finish(null); };
-  req.timeout = LIVE_WAIT;
-  req.ontimeout = function () { finish(null); };
-  setTimeout(function () { finish(null); }, LIVE_WAIT + 250);
-  req.send();
+}
+// A feed the phone reads itself (liveBy: 'feed'): the agency's own
+// GTFS-realtime TripUpdate, where its server turns relays away and its
+// predictions name no stop, only each trip's place in it. The bytes are
+// asked for with the stop files; once those say which trips leave soon,
+// only those are unpacked, into the relay's shape so the overlay is shared.
+function readFeed(buf, want) {
+  if (!buf) return null;
+  try { return fresh(skimTrips(new Uint8Array(buf.buffer || buf), want), 'feed'); } catch (e) { return null; }
 }
 
 // A lean protobuf walk. Numbers stay plain numbers: the times and sequences
@@ -448,9 +436,9 @@ function withTransit(msg) {
 // out: at the yard, how many buses are still out; the watch shows it in the
 // countdown's place, over a big number (0 when they're all in).
 function sendStopView(name, dist, rows, out) {
-  console.log('headway: stop view ' + (name || '(none)') + ' ' + rows.length + ' rows' + (out === undefined ? '' : ', ' + out + ' out'));
+  console.log('headway: stop view ' + (name || '(none)') + ' ' + rows.length + ' rows' + (out == null ? '' : ', ' + out + ' out'));
   var msg = withTransit({ SV_STOP: fitName(name), SV_DIST: Math.round(dist), SV_N: rows.length, SV_MODE: 0 });
-  if (out !== undefined) msg.SV_OUT = out;
+  if (out != null) msg.SV_OUT = out;
   for (var i = 0; i < rows.length && i < 3; i++) {
     msg['SV_R' + (i + 1)] = rows[i].route;
     msg['SV_H' + (i + 1)] = rows[i].head;
@@ -503,16 +491,16 @@ function routesIn(group, live, stops) {
   });
   return out;
 }
+function routeColour(index, r) { return parseInt((index.routes[r] || ['888888'])[0], 16); }
 // A route's stem, to match a trip id's: 16 AM and 16 PM are 16, B1 is B.
 function routeStem(r) { var m = /^(\d+|[A-Z])/.exec(r || ''); return m ? m[1] : r; }
 
 // The hub's answer: the next three departure minutes, each with every route
 // leaving then, once, in route order, twelve at most. After the day's last
-// bus the first line carries the day word. With live positions, a route's
-// first badge says whether its bus is in yet; later ones say nothing, since
-// the bus at the bay is the one leaving first.
-function waves(deps, dayWord, index, routesInNow) {
-  var out = [], byMin = {}, firstSeen = {};
+// bus the first line carries the day word. With live positions the hub's
+// flick shows which buses are in instead (hubChips).
+function waves(deps, dayWord, index) {
+  var out = [], byMin = {};
   deps.forEach(function (dep) {
     var w = byMin[dep.t];
     if (!w) {
@@ -520,25 +508,20 @@ function waves(deps, dayWord, index, routesInNow) {
       w = byMin[dep.t] = { t: dep.t, list: [], seen: {} };
       out.push(w);
     }
-    var here = !routesInNow || !!routesInNow[routeStem(dep.route)];
-    if (w.seen[dep.route]) { var x = w.seen[dep.route]; x.live = x.live || dep.live; x.here = x.here || here; return; }
+    if (w.seen[dep.route]) { w.seen[dep.route].live = w.seen[dep.route].live || dep.live; return; }
     if (w.list.length === 12) return;
-    w.list.push(w.seen[dep.route] = { route: dep.route, live: dep.live, here: here, first: !firstSeen[dep.route] });
-    firstSeen[dep.route] = true;
+    w.list.push(w.seen[dep.route] = { route: dep.route, live: dep.live });
   });
   return out.map(function (w, i) {
     w.list.sort(function (a, b) { return byRoute(a.route, b.route); });
-    var bits = 0, away = 0;
-    w.list.forEach(function (x, j) {
-      if (x.live) bits |= 1 << j;
-      if (x.first && !x.here) away |= 1 << j;
-    });
+    var bits = 0;
+    w.list.forEach(function (x, j) { if (x.live) bits |= 1 << j; });
     return {
       when: String(w.t) + (i === 0 && dayWord ? ' ' + dayWord : ''),
       routes: w.list.map(function (x) { return x.route; }),
-      colors: w.list.map(function (x) { return parseInt((index.routes[x.route] || ['888888'])[0], 16); }),
+      colors: w.list.map(function (x) { return routeColour(index, x.route); }),
       live: bits,
-      away: away,
+      away: 0,
     };
   });
 }
@@ -549,39 +532,33 @@ function waves(deps, dayWord, index, routesInNow) {
 // the loops' next departures, a line each (one if they leave together), as
 // the room allows. The line of routes has no time, only the day word when
 // the next bus is another day's.
-function hubChips(deps, dayWord, index, stops, inNow, loops, day) {
-  var onDay = activeServices(index.services, day), seen = {}, chips = [];
+function hubChips(deps, dayWord, index, stops, inNow, loops, onDay) {
+  var seen = {}, chips = [];
   stops.forEach(function (stop) {
     (stop.deps || []).forEach(function (row) {
+      if (!onDay[row[4]]) return;
       var stem = routeStem(row[1]);
-      if (onDay[row[4]] && !seen[stem]) { seen[stem] = true; chips.push({ stem: stem, label: row[1] }); }
+      if (!seen[stem]) { seen[stem] = true; chips.push({ stem: stem, label: row[1] }); }
     });
   });
   chips.sort(function (a, b) { return byRoute(a.label, b.label); });
-  chips = chips.slice(0, 16);
+  chips = chips.slice(0, 16);   // the watch's WV_MAX
   var away = 0;
   chips.forEach(function (c, j) { if (!inNow[c.stem]) away |= 1 << j; });
-  var colour = function (r) { return parseInt((index.routes[r] || ['888888'])[0], 16); };
-  var out = [{
+  var line = {
     when: dayWord ? ' ' + dayWord : '',
     routes: chips.map(function (c) { return c.stem; }),
-    colors: chips.map(function (c) { return colour(c.label); }),
+    colors: chips.map(function (c) { return routeColour(index, c.label); }),
     live: 0,
     away: away,
-  }];
-  var byMin = {};
-  (loops || []).forEach(function (r) {
-    for (var i = 0; i < deps.length && deps[i].route !== r; i++);
-    var dep = deps[i];
-    if (!dep) return;
-    var w = byMin[dep.t];
-    if (!w) { w = byMin[dep.t] = { t: dep.t, when: String(dep.t), routes: [], colors: [], live: 0, away: 0 }; out.push(w); }
-    if (dep.live) w.live |= 1 << w.routes.length;
-    w.routes.push(r); w.colors.push(colour(r));
+  };
+  // Each loop's next departure, by time as the hub's lines always are.
+  var next = {};
+  var firsts = deps.filter(function (d) {
+    if ((loops || []).indexOf(d.route) < 0 || next[d.route]) return false;
+    return (next[d.route] = true);
   });
-  var head = out.shift();
-  out.sort(function (a, b) { return a.t - b.t; });
-  return [head].concat(out.slice(0, 2));
+  return [line].concat(waves(firsts, '', index).slice(0, 2));
 }
 
 // Buses still out, for a flick at the yard they sleep in: every bus with a
@@ -602,23 +579,27 @@ function classic() {
   try { return Pebble.getActiveWatchInfo().platform === 'aplite'; } catch (e) { return false; }
 }
 
-// The trips worth asking a feed about, by trip and place: today's departures
-// from these stops in the next ninety minutes, soonest first, forty at most.
+// A departure's minute on the day whose services are onDay, the evening
+// before's being onEve (GTFS writes 12:53 AM as 24:53 on the evening's
+// service), or -1 when it doesn't run then.
+function depMinute(row, onDay, onEve) {
+  return row[0] >= 1440 && onEve[row[4]] ? row[0] - 1440 : onDay[row[4]] ? row[0] : -1;
+}
+
+// The trips worth unpacking from a feed, by trip and place in it: today's
+// departures from these stops in the next ninety minutes, as { trip: { seq: true } }.
 function tripsSoon(stops, services, now, nowMin) {
   var today = activeServices(services, now);
   var eve = activeServices(services, new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
-  var soon = [], seen = {};
+  var want = {};
   stops.forEach(function (stop) {
     (stop.deps || []).forEach(function (row) {
       if (!row[3] || row[5] === undefined) return;
-      var t = row[0] >= 1440 && eve[row[4]] ? row[0] - 1440 : (today[row[4]] ? row[0] : -1);
-      if (t < nowMin - 1 || t > nowMin + 90) return;
-      var key = row[3] + ':' + row[5];
-      if (!seen[key]) { seen[key] = true; soon.push({ t: t, key: key }); }
+      var t = depMinute(row, today, eve);
+      if (t >= nowMin - 1 && t <= nowMin + 90) (want[row[3]] = want[row[3]] || {})[row[5]] = true;
     });
   });
-  soon.sort(function (a, b) { return a.t - b.t; });
-  return soon.slice(0, 40).map(function (x) { return x.key; });
+  return want;
 }
 
 function onFlick() {
@@ -653,12 +634,12 @@ function onFlick() {
       var atBase = sys.base && metres(lat, lon, sys.base.lat, sys.base.lon) <= sys.base.r;
       var now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes();
       var midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-      var byTrip = sys.liveBy === 'trip' || sys.liveBy === 'feed', askedTrips = false;
-      var pending = group.length + (byTrip ? 0 : 1), name = atHub ? sys.hub.name : '', stops = [], live = null;
+      var byFeed = sys.liveBy === 'feed', feed = null;
+      var pending = group.length + 1, name = atHub ? sys.hub.name : '', stops = [], live = null;
       // The live answer is asked for alongside the schedule and waited on
-      // for at most LIVE_WAIT; the schedule never waits on it beyond that. A
-      // system asked by trip is asked once the stop files say which trips.
-      if (!byTrip) getLive(sys, 'stops=' + group.map(function (st) { return st.id; }).join(','), function (l) { live = l; answer(); });
+      // for at most LIVE_WAIT; the schedule never waits on it beyond that.
+      if (byFeed) askLive(sys.live, true, function (buf) { feed = buf; answer(); });
+      else getLive(sys, group.map(function (st) { return st.id; }), function (l) { live = l; answer(); });
       group.forEach(function (st) {
         getJSON(DATA_URL + 'stops/' + st.id + '.json', 'hw2-stop-' + tag + '-' + st.id, STOP_TTL, function (stop) {
           if (stop) { if (!name) name = stop.name; stop.id = stop.id || st.id; stops.push(stop); }
@@ -667,15 +648,7 @@ function onFlick() {
       });
       function answer() {
         if (--pending) return;
-        if (byTrip && !askedTrips) {
-          askedTrips = true;
-          var pairs = tripsSoon(stops, index.services, now, nowMin);
-          if (pairs.length) {
-            pending = 1;
-            var got = function (l) { live = l; answer(); };
-            return sys.liveBy === 'feed' ? getFeed(sys, pairs, got) : getLive(sys, 'trips=' + pairs.join(','), got);
-          }
-        }
+        if (byFeed) live = readFeed(feed, tripsSoon(stops, index.services, now, nowMin));
         // Today's remaining departures; when there are none, the first
         // day ahead with any — tomorrow, or Monday after a Saturday —
         // so the answer is the next bus, whenever that is.
@@ -683,18 +656,17 @@ function onFlick() {
         for (var ahead = 0; ahead < 8 && !deps.length; ahead++) {
           var date = new Date(now.getFullYear(), now.getMonth(), now.getDate() + ahead);
           // A day's buses are its own services' departures, and the ones the
-          // day before's services run past midnight (GTFS writes 12:53 AM as
-          // 24:53 on the evening's service). Today's list keeps the minute
-          // just gone: a bus due a minute ago may still be pulling in, and
-          // the watch reads it as NOW.
+          // day before's services run past midnight. Today's list keeps the
+          // minute just gone: a bus due a minute ago may still be pulling
+          // in, and the watch reads it as NOW.
           var onDay = activeServices(index.services, date);
           var onEve = activeServices(index.services, new Date(date.getFullYear(), date.getMonth(), date.getDate() - 1));
           var from = ahead ? 0 : nowMin - 1;
           stops.forEach(function (stop) {
             (stop.deps || []).forEach(function (row) {
-              var shift = row[0] >= 1440 && onEve[row[4]] ? 1440 : 0;
-              if (!shift && !onDay[row[4]]) return;
-              var dep = [row[0] - shift, row[1], row[2], row[3]];
+              var m = depMinute(row, onDay, onEve);
+              if (m < 0) return;
+              var dep = [m, row[1], row[2], row[3]];
               // Today's departures take the live prediction for this trip
               // at this stop where there is one. A stop the bus will skip
               // drops out; at the hub a bus is held to its time, never
@@ -727,9 +699,9 @@ function onFlick() {
         deps.sort(function (a, b) { return a.t - b.t || byRoute(a.route, b.route); });
         if (atHub && !classic()) {
           var inNow = routesIn(group, live, stops);
-          if (!inNow) return sendWaves(name, waves(deps, dayWord, index, null));
-          var day = dayWord ? new Date(now.getFullYear(), now.getMonth(), now.getDate() + (ahead - 1)) : now;
-          return sendWaves(name, hubChips(deps, dayWord, index, stops, inNow, sys.routes, day));
+          if (!inNow) return sendWaves(name, waves(deps, dayWord, index));
+          // onDay: the services of the day these departures are from.
+          return sendWaves(name, hubChips(deps, dayWord, index, stops, inNow, sys.routes, onDay));
         }
         // A row a route and direction, in order of its next departure,
         // with its next two times, or its next time and the day. Where a
@@ -748,17 +720,15 @@ function onFlick() {
         // you can't catch today is the costliest thing to misread; then
         // the direction at a merged pair; else the second time.
         var rows = groups.slice(0, 3).map(function (g) {
-          var col = (index.routes[g.route] || ['888888'])[0];
           var word = dayWord || (perRoute[g.route] > 1 ? dirWord(g.head) : '');
           var when = word ? [g.times[0], word] : g.times;
-          return { route: g.route, head: g.head, when: when.join(' '), color: parseInt(col, 16), live: g.live };
+          return { route: g.route, head: g.head, when: when.join(' '), color: routeColour(index, g.route), live: g.live };
         });
         // At the yard the question is whether the buses are back: the count,
         // and the stop up the road in one row. Not on a Pebble Classic,
         // which has no room for it and answers as at any stop.
         var out = atBase && !classic() ? busesOut(live, sys.base) : null;
-        if (out !== null) return sendStopView(name, best.d <= AT_STOP ? 0 : best.d, rows.slice(0, 1), out);
-        sendStopView(name, best.d <= AT_STOP ? 0 : best.d, rows);
+        sendStopView(name, best.d <= AT_STOP ? 0 : best.d, out === null ? rows : rows.slice(0, 1), out);
       }
     });
   }, function (err) {

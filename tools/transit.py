@@ -31,7 +31,7 @@ ap.add_argument('--stops-out', help='directory for the per-stop departure files 
 ap.add_argument('--legacy-out', help='also write the day-type stop files the phones of 1.13.0 and before read (<site>/data/<agency>)')
 ap.add_argument('--data-url', default='', help='where the per-stop files are served from, for the phone')
 ap.add_argument('--live-url', default='', help='where the phone gets predictions: a relay, or with --live-by feed the agency\'s own feed (optional; the schedule never needs it)')
-ap.add_argument('--live-by', choices=['stop', 'trip', 'feed'], default='stop', help='how live times are got: a relay asked by stop ids, or by trip and place in it for a feed whose predictions name no stop, or (feed) the agency\'s own GTFS-realtime TripUpdate, read by the phone and matched by trip and place')
+ap.add_argument('--live-by', choices=['stop', 'feed'], default='stop', help='how live times are got: a relay asked by stop ids, or (feed) the agency\'s own GTFS-realtime TripUpdate, read by the phone and matched by trip and place in it')
 ap.add_argument('--margin', type=float, default=3000, help='metres around the outermost stops that still count as the system\'s area')
 ap.add_argument('--today', help='YYYYMMDD the data is built on (default: yesterday, UTC); services wholly before it are left out')
 a = ap.parse_args()
@@ -221,13 +221,13 @@ if a.live_url: system['live'] = a.live_url
 if a.live_url and a.live_by != 'stop': system['liveBy'] = a.live_by
 if a.hub:
     system['hub'] = {'name': a.name, 'lat': lat, 'lon': lon}
-if a.base:
-    b_lat, b_lon, b_r = (float(v) for v in a.base.split(','))
-    system['base'] = {'lat': b_lat, 'lon': b_lon, 'r': int(b_r)}
     system['routes'] = wanted
     system['days'] = {kind: {'hours': [first[kind], last[kind]],
                              'dep': {r: sorted(v) for r, v in deps.get(kind, {}).items()}}
                       for kind in sorted(first)}
+if a.base:
+    b_lat, b_lon, b_r = (float(v) for v in a.base.split(','))
+    system['base'] = {'lat': b_lat, 'lon': b_lon, 'r': int(b_r)}
 # One file, many systems: replace this agency's entry, keep the others.
 try:
     existing = json.load(open(a.out))
