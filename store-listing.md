@@ -37,6 +37,11 @@ transit off and it never checks your location for transit.
 Settings on the phone for modules, theme, accent, wrist, clock and units.
 Round watches aren't supported.
 
+## Release notes (1.18.0)
+
+At Connect's yard the count of buses still out is big now: it takes the
+countdown's place, 3 OUT, or 0 OUT when they're all in.
+
 ## Release notes (1.17.0)
 
 A flick at Connect's transit centre now shows which buses are in: every

@@ -98,11 +98,12 @@ is the departures by time, since nothing can be said about who is in. A
 Pebble Classic has no room for it and keeps the board.
 
 **At the yard,** Connect's headquarters in North Logan where the buses sleep,
-a flick answers whether they are all back: the stop line reads `3 BUSES OUT`,
-`1 BUS OUT` or `ALL BUSES IN`, counting every bus with a fresh position
-anywhere but the yard, and the one row under it is the stop up the road.
-With no live answer it is that stop, as anywhere else. A system names its
-yard with `--base lat,lon,metres`.
+a flick answers whether they are all back. The count takes the countdown's
+place, as big: `3 OUT` under `BUSES STILL OUT`, or `0 OUT` under `ALL BUSES
+IN`, counting every bus with a fresh position anywhere but the yard. The stop
+up the road sits beside the modules in one row. With no live answer it is
+that stop, as anywhere else; a Pebble Classic has no room for the count and
+always answers so. A system names its yard with `--base lat,lon,metres`.
 
 | at the transit centre | light | the minute it leaves |
 |---|---|---|

@@ -79,7 +79,8 @@
       "TR_AREA",
       "TR_KM",
       "TR_NEAR",
-      "LOOK"
+      "LOOK",
+      "SV_OUT"
     ],
     "resources": {
       "media": [

@@ -445,9 +445,12 @@ function withTransit(msg) {
   return msg;
 }
 
-function sendStopView(name, dist, rows) {
-  console.log('headway: stop view ' + (name || '(none)') + ' ' + rows.length + ' rows');
+// out: at the yard, how many buses are still out; the watch shows it in the
+// countdown's place, over a big number (0 when they're all in).
+function sendStopView(name, dist, rows, out) {
+  console.log('headway: stop view ' + (name || '(none)') + ' ' + rows.length + ' rows' + (out === undefined ? '' : ', ' + out + ' out'));
   var msg = withTransit({ SV_STOP: fitName(name), SV_DIST: Math.round(dist), SV_N: rows.length, SV_MODE: 0 });
+  if (out !== undefined) msg.SV_OUT = out;
   for (var i = 0; i < rows.length && i < 3; i++) {
     msg['SV_R' + (i + 1)] = rows[i].route;
     msg['SV_H' + (i + 1)] = rows[i].head;
@@ -592,9 +595,6 @@ function busesOut(live, base) {
     if (nowS - b[2] < BUS_FRESH && metres(b[0], b[1], base.lat, base.lon) > base.r) n++;
   });
   return n;
-}
-function outWords(n) {
-  return n === 0 ? 'ALL BUSES IN' : n === 1 ? '1 BUS OUT' : n + ' BUSES OUT';
 }
 
 // A Pebble Classic (aplite) has no room for the hub's view; it keeps the board.
@@ -753,10 +753,11 @@ function onFlick() {
           var when = word ? [g.times[0], word] : g.times;
           return { route: g.route, head: g.head, when: when.join(' '), color: parseInt(col, 16), live: g.live };
         });
-        // At the yard the question is whether the buses are back: the count
-        // takes the stop's name, and its one row stays.
-        var out = atBase ? busesOut(live, sys.base) : null;
-        if (out !== null) return sendStopView(outWords(out), 0, rows.slice(0, 1));
+        // At the yard the question is whether the buses are back: the count,
+        // and the stop up the road in one row. Not on a Pebble Classic,
+        // which has no room for it and answers as at any stop.
+        var out = atBase && !classic() ? busesOut(live, sys.base) : null;
+        if (out !== null) return sendStopView(name, best.d <= AT_STOP ? 0 : best.d, rows.slice(0, 1), out);
         sendStopView(name, best.d <= AT_STOP ? 0 : best.d, rows);
       }
     });

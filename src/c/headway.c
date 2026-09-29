@@ -102,6 +102,7 @@ typedef struct { char route[8], head[20], when[24]; uint32_t color; bool live; }
 static struct {
   bool valid, pending, lit;   // lit: a flick was heard; the seconds show until the answer's time is up
   bool wave;                  // the hub's answer: lines by departure time, not rows by route
+  int8_t out;                 // at the yard (HAS_YARD): how many buses are still out, -1 elsewhere
   // The hairline's countdown, from the flick: it drains from seg_f (in
   // ten-thousandths of the line) at seg_at to nothing at end_at, both in ms
   // since the flick at t0. An answer starts a new segment from where the line
@@ -126,6 +127,7 @@ static struct {
 // only a day word) has no time: the flick's line of every route at the hub.
 #ifndef PBL_PLATFORM_APLITE
 #define HAS_WAVE 1
+#define HAS_YARD 1   // the yard's count in the countdown's place; the Classic gets it as the stop line
 #define WV_MAX 16
 typedef struct { char when[16]; uint8_t n; char lab[WV_MAX][6]; uint32_t col[WV_MAX]; uint16_t live, away; } WaveLine;
 static WaveLine s_wave[SV_ROWS];
@@ -279,6 +281,7 @@ static int transit_next(const uint16_t *list, int now_min) {
   #define BLOCK_ROW_GAP 8
 #endif
 #define DOW_GAP       5
+#define YARD_GAP      6   // the yard's label, above the count's digits
 #define ROW_GAP       2
 #define MOD_GAP       9
 #define MOD_LABEL_GAP 4
@@ -1735,12 +1738,16 @@ static void paint_time(void) {
 // ---- zone 02: the countdown, and zone 04: weekday and date.
 static struct {
   char dow[8], date[12], label[20], num[8], secs[5];
+#ifdef HAS_YARD
+  char yard[16];
+  int yard_x, yard_y;
+#endif
   const char *unit;
   bool now, solid, bare;
   GSize z_num;
   Metrics m_lab, m_min, m_num, m_dow, m_date;
   int label_w, num_w, num_row_w, inner_w, inner_x, label_y, num_y;
-  int block_x, block_y, block_w, block_h, date_y, dow_y;
+  int block_x, block_y, block_w, block_h, date_y, dow_y, top;   // top: where the band above ends
   GFont f_num;
   bool show_date;
 } s_bk;
@@ -1777,6 +1784,17 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
     }
   }
 
+  // At the yard the block is the count of buses still out, a label over it.
+#ifdef HAS_YARD
+  s_bk.yard[0] = 0;
+  if (s_sv.valid && s_sv.out >= 0) {
+    s_bk.now = s_bk.solid = false;
+    snprintf(s_bk.num, sizeof(s_bk.num), "%d", s_sv.out);
+    s_bk.unit = "OUT";
+    strncpy(s_bk.yard, s_sv.out == 0 ? "ALL BUSES IN" : s_sv.out == 1 ? "BUS STILL OUT" : "BUSES STILL OUT", sizeof(s_bk.yard));
+  }
+#endif
+
   // NOW is set in the countdown face itself, as the design draws it.
   const GFont f_label = s_f_label, f_date = s_f_date;
   s_bk.f_num = f_num; s_bk.show_date = date;
@@ -1785,7 +1803,7 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
   // the chips' to say, and the face at the hub is busy enough.
   s_bk.label[0] = 0;
   s_bk.label_w = 0;
-  const bool bare = sch->is_now;   // NOW carries no unit
+  const bool bare = s_bk.now;   // NOW carries no unit
   const int min_w = bare ? 0 : run_w(s_bk.unit, f_label, false, TRACK);
   s_bk.m_lab = barlow_metrics(0);
   s_bk.m_min = barlow_metrics(bare ? 0 : measure(s_bk.unit, f_label).h);
@@ -1795,7 +1813,7 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
   const int dow_w = run_w(s_bk.dow, f_date, false, TRACK);
   const int date_w2 = run_w(s_bk.date, f_date, false, TRACK);
 
-  s_bk.num_w = sch->is_now ? s_bk.z_num.w : run_w(s_bk.num, f_num, true, 0);
+  s_bk.num_w = s_bk.now ? s_bk.z_num.w : run_w(s_bk.num, f_num, true, 0);
   s_bk.num_row_w = s_bk.num_w + (bare ? 0 : sc(LABEL_GAP) + min_w);
   s_bk.bare = bare;
   int inner_w = s_bk.num_row_w > s_bk.label_w ? s_bk.num_row_w : s_bk.label_w;
@@ -1838,6 +1856,16 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
   // Weekday and date sit on the wrist side: first to disappear.
   s_bk.date_y = fr->bot - sc(DATE_PAD_BOT) - s_bk.m_date.cap;
   s_bk.dow_y = s_bk.date_y - sc(DOW_GAP) - s_bk.m_dow.cap;
+  // The yard's label stands over the block, and the band above ends there.
+  s_bk.top = s_bk.block_y;
+#ifdef HAS_YARD
+  if (s_bk.yard[0]) {
+    const Metrics m = barlow_metrics(measure("B", s_f_cap).h);
+    s_bk.yard_y = s_bk.block_y + sc(BLOCK_PAD_T) - sc(YARD_GAP) - m.cap - m.bearing;
+    s_bk.yard_x = fr->end - run_w(s_bk.yard, s_f_cap, false, TRACK);
+    s_bk.top = s_bk.yard_y + m.bearing - sc(4);
+  }
+#endif
 }
 
 static void paint_block(int fr_start) __attribute__((noinline));
@@ -1862,6 +1890,12 @@ static void paint_block(int fr_start) {
       draw_run_s(s_bk.unit, s_f_label, x + s_bk.num_w + sc(LABEL_GAP),
                  s_bk.num_y + s_bk.m_num.cap - s_bk.m_min.cap - s_bk.m_min.bearing, false, TRACK);
   }
+#ifdef HAS_YARD
+  if (s_bk.yard[0]) {
+    graphics_context_set_text_color(s_ctx, s_ink);
+    draw_run(s_bk.yard, s_f_cap, s_bk.yard_x, s_bk.yard_y, false, TRACK);
+  }
+#endif
   if (!s_bk.show_date) return;
   graphics_context_set_text_color(s_ctx, s_ink);
   draw_run(s_bk.dow, s_f_date, fr_start, s_bk.dow_y - s_bk.m_dow.bearing, false, TRACK);
@@ -1878,7 +1912,7 @@ static void face_update(Layer *layer, GContext *ctx) {
   static Schedule sch;
   static struct tm *t;
   static Frame fr;
-  static bool quiet, at_hub, peek;
+  static bool quiet, at_hub, peek, yard, idle;
   s_ctx = ctx;
   full = layer_get_bounds(layer);
   b = layer_get_unobstructed_bounds(layer);
@@ -1896,13 +1930,19 @@ static void face_update(Layer *layer, GContext *ctx) {
   // The countdown is earned by being at the hub. Anywhere else the face is
   // a plain watch — unless the countdown is asked for everywhere.
   quiet = !at_hub && s_set.transit != TRANSIT_CHIPS;
-  s_quiet_face = quiet;
+  // At the yard a flick's answer takes the countdown's place: the count of
+  // buses still out in the block, the stop up the road beside the modules.
+#ifdef HAS_YARD
+  yard = s_sv.valid && s_sv.out >= 0;
+#endif
+  idle = quiet && !yard;
+  s_quiet_face = quiet || yard;
 
   theme_apply(t->tm_hour);
   graphics_context_set_fill_color(ctx, s_ground);
   graphics_fill_rect(ctx, full, 0, GCornerNone);
 
-  if (quiet) draw_hairline(ctx, b.size.h);
+  if (s_quiet_face) draw_hairline(ctx, b.size.h);
   else draw_rail(ctx, &sch, b.size.h);
 
   fr.start = sc(PAD_WRIST);                                       // logical left
@@ -1921,29 +1961,30 @@ static void face_update(Layer *layer, GContext *ctx) {
     // and the countdown step down, and the modules and the second countdown
     // keep their band, as the design reflows it.
     layout_time(t, &fr, peek ? s_f_time_p : s_f_time, peek ? TIME_MARGIN_TOP_P : TIME_MARGIN_TOP);
-    if (quiet) layout_idle(t, &fr);
+    if (idle) layout_idle(t, &fr);
     else if (peek) layout_block(t, &sch, &fr, s_f_count_s, BLOCK_ROW_GAP_P, false);
     else layout_block(t, &sch, &fr, s_f_count, BLOCK_ROW_GAP, true);
-    const int band_bot = quiet ? s_id.top : s_bk.block_y;
+    const int band_bot = idle ? s_id.top : s_bk.top;
     if (at_hub) layout_gb(fr.start, fr.end - fr.start, s_tm.band_top, band_bot, t->tm_hour * 60 + t->tm_min, t->tm_sec);
     else s_gb.show = false;
     layout_modules(s_f_mod, s_f_cap, fr.start, fr.end - fr.start - (s_gb.show ? s_gb.w + s_gb.gap : 0),
                    s_tm.band_top, band_bot);
     // The quiet face has nothing at the outer end: the modules go there too,
     // in their order, out from under the sleeve.
-    if (quiet && s_md.n) s_md.x0 = fr.end - s_md.total;
+    if (idle && s_md.n) s_md.x0 = fr.end - s_md.total;
     if (s_sv.valid && !s_gb.show) {
       // Beside the modules: on the quiet face to their wrist side, on the
       // countdown face at the outer end past them.
-      if (quiet) layout_sideblock(&fr, s_tm.band_top, band_bot, fr.start - sc(8), s_md.n ? s_md.x0 - sc(8) : fr.end);
+      if (idle) layout_sideblock(&fr, s_tm.band_top, band_bot, fr.start - sc(8), s_md.n ? s_md.x0 - sc(8) : fr.end);
       else layout_sideblock(&fr, s_tm.band_top, band_bot, s_md.n ? s_md.x0 + s_md.total : fr.start - sc(8), fr.end);
       if (s_sb.show) layout_secs(t);
     }
     // A flick with nothing to show, or one still waiting on the phone: the
     // seconds alone, under the time, so the gesture is seen to have landed.
-    if (s_sv.lit && !s_tm.secs && quiet) layout_secs(t);
+    if (s_sv.lit && !s_tm.secs && s_quiet_face) layout_secs(t);
   }
-  if (s_sv.valid && !s_sb.show) {
+  // With no room for the stop beside the modules the yard keeps its count.
+  if (s_sv.valid && !s_sb.show && !yard) {
     layout_time(t, &fr, s_f_time, TIME_MARGIN_TOP);
     layout_secs(t);
     paint_time();
@@ -1959,7 +2000,7 @@ static void face_update(Layer *layer, GContext *ctx) {
     }
   } else {
     paint_time();
-    if (quiet) paint_idle();
+    if (idle) paint_idle();
     else paint_block(fr.start);
     paint_modules();
     if (s_gb.show) paint_gb();
@@ -2096,6 +2137,9 @@ static void stopview_done(void *data) {
   s_sv.timer = NULL;
   if (s_sv.drain) { app_timer_cancel(s_sv.drain); s_sv.drain = NULL; }
   s_sv.valid = false;
+#ifdef HAS_YARD
+  s_sv.out = -1;
+#endif
   s_sv.pending = false;
   s_sv.lit = false;
   s_sv.draining = false;
@@ -2220,6 +2264,10 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
     if (s_sv.n < 0) s_sv.n = 0;
     strncpy(s_sv.stop, ts ? ts->value->cstring : "", sizeof(s_sv.stop) - 1); s_sv.stop[sizeof(s_sv.stop) - 1] = 0;
     s_sv.dist = td ? (int)td->value->int32 : 0;
+#ifdef HAS_YARD
+    Tuple *tout = dict_find(iter, MESSAGE_KEY_SV_OUT);
+    s_sv.out = tout ? (int8_t)(tout->value->int32 > 99 ? 99 : tout->value->int32) : -1;
+#endif
 #ifdef HAS_WAVE
     Tuple *tm = dict_find(iter, MESSAGE_KEY_SV_MODE);
     s_sv.wave = tm && tm->value->int32 == 1 && s_sv.n > 0;
