@@ -822,15 +822,16 @@ static int32_t line_left(void) {
   return (int32_t)s_sv.seg_f * (s_sv.end_at - t) / (s_sv.end_at - s_sv.seg_at);
 }
 static void draw_hairline(GContext *ctx, int16_t h) {
-  const int rail_w = sc(RAIL_W), border = sc(RAIL_BORDER);
+  const int border = sc(RAIL_BORDER);
   graphics_context_set_fill_color(ctx, s_ink);
   // Only a flick draws it: the line is the answer's time, full at the
   // flick, shortening from the foot, gone as the answer goes. At rest the
-  // edge is bare; a line there with nothing to count reads as a gap.
+  // edge is bare; a line there with nothing to count reads as a gap. It runs
+  // down the rail's column, near its outer end, clear of the centred face.
   const int32_t left = line_left();
   if (left <= 0) return;
   h = (int16_t)((int32_t)h * left / 10000);
-  graphics_fill_rect(ctx, GRect(mapx(s_w - rail_w - border, border), 0, border, h), 0, GCornerNone);
+  graphics_fill_rect(ctx, GRect(mapx(s_w - border - sc(2), border), 0, border, h), 0, GCornerNone);
 }
 
 // A module is a caption over a value, as the design draws them — BPM 72,
@@ -1837,17 +1838,20 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
   const int out = yard_out();
   if (out >= 0) {
     s_bk.now = s_bk.solid = false;
+    // The feed drops a bus as its last trip ends, not at the gate, so none on
+    // a trip isn't all in: the last may still be driving back. In the hour
+    // after the last trip the phone knows when it ended, and the face says
+    // how long ago, flick or not, so the wearer judges; otherwise a bare 0.
     s_bk.unit = "OUT";
-    if (out == 0 && !AT_YARD() && s_yd.end) {
-      // None on a trip isn't all in: the last may still be driving back, so
-      // the face says how long ago its trip ended and the wearer judges.
+    if (out == 0 && s_yd.end && time(NULL) < s_yd.until) {
       const int ago = (int)((time(NULL) - s_yd.end) / 60);
       snprintf(s_bk.num, sizeof(s_bk.num), "%d", ago < 0 ? 0 : ago);
       s_bk.unit = "MIN AGO";
       s_bk.label = "LAST TRIP ENDED";
     } else {
       snprintf(s_bk.num, sizeof(s_bk.num), "%d", out);
-      s_bk.label = out == 0 ? "ALL BUSES IN" : out == 1 ? "BUS STILL OUT" : "BUSES STILL OUT";
+      if (!out) s_bk.unit = "";
+      s_bk.label = out == 0 ? "NONE ON TRIPS" : out == 1 ? "BUS STILL OUT" : "BUSES STILL OUT";
     }
   }
 #endif

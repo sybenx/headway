@@ -102,24 +102,25 @@ Pebble Classic has no room for it and keeps the board.
 
 **At the yard,** Connect's headquarters in North Logan where the buses sleep,
 a flick answers whether they are all back. The count takes the countdown's
-place, as big: `3 OUT` under `BUSES STILL OUT`, or `0 OUT` under `ALL BUSES
-IN`, counting every bus with a fresh position anywhere but the yard,
-detoured ones included. The stop up the road sits beside the modules in one
-row. With no live answer it is that stop, as anywhere else.
+place, as big: `3 OUT` under `BUSES STILL OUT`, counting every bus on a trip
+anywhere but the yard, detoured ones included, or a bare `0` under `NONE ON
+TRIPS`. The stop up the road sits beside the modules in one row. With no live
+answer it is that stop, as anywhere else.
 
 For an hour after the day's last trip the yard needs no flick: the face shows
 the buses coming home by itself, the count in the countdown's place while
 any are still on a trip, then `LAST TRIP ENDED` over `12 MIN AGO`, counting
-up. The feed lists a bus only while it's on a trip, so none on one isn't all
-in: the last bus may still be driving back, ten minutes or so, and the
-minutes let the one at the gate judge. The hour is the timetable's, from the
-latest arrival of the services running that day (9:03 PM on weekdays, 6:59
-on Saturdays), and the minutes run from when the last bus was last seen on
-its trip, or from the timetable's end if it was never seen. Only a phone last
-seen within a kilometre of the yard looks, every two minutes through that
-hour; anywhere else nothing changes. A Pebble Classic has no room for the
-count and answers as at any stop. A system names its yard with `--base
-lat,lon,metres`, and the stop index then carries each service's end.
+up, and a flick there says the same. The feed lists a bus only while it's on
+a trip, so none on one isn't all in: the last bus may still be driving back,
+ten minutes or so, and the minutes let the one at the gate judge. The hour is
+the timetable's, from the latest arrival of the services running that day
+(9:03 PM on weekdays, 6:59 on Saturdays), and the minutes run from when the
+last bus was last seen on its trip, or from the timetable's end if it was
+never seen. Only a phone last seen within a kilometre of the yard looks,
+every two minutes through that hour; anywhere else nothing changes. A Pebble
+Classic has no room for the count and answers as at any stop. A system names
+its yard with `--base lat,lon,metres`, and the stop index then carries each
+service's end.
 
 | at the transit centre | light | the minute it leaves |
 |---|---|---|
