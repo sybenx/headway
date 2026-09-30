@@ -812,8 +812,10 @@ function onFlick() {
               // Today's departures take the live prediction for this trip
               // at this stop where there is one. A stop the bus will skip
               // drops out; at the hub a bus is held to its time, never
-              // early, and so is it at a timepoint, where the bus waits for
-              // its time. No prediction: the schedule, unmarked.
+              // early. Elsewhere an early time stands, a timepoint's too:
+              // most early buses wait there, but showing one held costs the
+              // wearer the bus the times it doesn't, and early only a wait.
+              // No prediction: the schedule, unmarked.
               var t = dep[0], isLive = false, at = null;
               var trip = !ahead && live && dep[3] && live.trips[dep[3]];
               // A run the feed says is cancelled isn't coming.
@@ -840,7 +842,7 @@ function onFlick() {
                 // listing older than that is the feed's leftover, not a bus.
                 var past = now.getTime() - at[2] * 1000;
                 var boarding = past > 30000 && past < ((sys.routes || []).indexOf(dep[1]) >= 0 ? 600000 : 1800000) ? nowMin : -1;
-                t = atHub ? Math.max(t, p, boarding) : row[6] ? Math.max(t, p) : p; isLive = true;
+                t = atHub ? Math.max(t, p, boarding) : p; isLive = true;
               }
               if (t >= from) deps.push({ t: t, route: dep[1], head: dep[2], live: isLive, near: !!near[stop.id] });
             });

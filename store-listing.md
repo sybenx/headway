@@ -38,6 +38,13 @@ transit.
 Settings on the phone for modules, theme, accent, wrist, clock and units.
 Round watches aren't supported.
 
+## Release notes (1.19.3)
+
+A one-row answer beside the modules reads as a list: its lines start
+together. A bus running early shows early at a timepoint too: most wait
+there, but a time held to the timetable could cost you the bus when one
+doesn't. At the transit centre buses are still never shown leaving early.
+
 ## Release notes (1.19.2)
 
 At the transit centre a bus still listed at its bay after its time reads NOW

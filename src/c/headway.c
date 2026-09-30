@@ -1601,8 +1601,9 @@ static void paint_wave(int fr_start) {
 // band beside the modules, three short lines hung from one edge: the stop,
 // the badge and its time, then the distance, or the row's second column
 // when stood at the stop. Date and modules stay; twelve seconds later the
-// block is gone. Right-aligned to `right` in logical x; `left` is where the
-// modules end on that side, so the block can decline if it would overlap.
+// block is gone. Its lines start together at the start of the space left
+// over, `left` (where the modules end on that side, less the gap), so they
+// read as a list; `right` bounds it, and the block declines if it can't fit.
 #define SB_GAP 3
 static struct {
   bool show, q_day;
@@ -1644,14 +1645,15 @@ static void layout_sideblock(const Frame *fr, int band_top, int band_bot, int le
   const int h = s_sb.m_lab.cap + sc(SB_GAP) + badge_h + (s_sb.q[0] ? sc(SB_GAP) + (s_sb.q_day ? s_sb.m_lab.cap : s_sb.m_val.cap) : 0);
   if (h > band_bot - band_top) return;
   const int top = band_top + (band_bot - band_top - h) / 2;
-  s_sb.stop_x = right - run_w(s_sb.stop, s_f_cap, false, TRACK);
+  const int x0 = left + sc(8);
+  s_sb.stop_x = x0;
   s_sb.stop_y = top - s_sb.m_lab.bearing;
   s_sb.rule_y = top + s_sb.m_lab.cap + sc(2);
   const int by = top + s_sb.m_lab.cap + sc(SB_GAP);
-  s_sb.row_x = right - s_sb.row_w;
+  s_sb.row_x = x0;
   s_sb.glyph_y = by + (badge_h - s_sb.m_bad.cap) / 2 - s_sb.m_bad.bearing;
   s_sb.t_y = by + (badge_h + s_sb.m_bad.cap) / 2 - s_sb.m_val.cap - s_sb.m_val.bearing;
-  s_sb.q_x = right - q_w;
+  s_sb.q_x = x0;
   s_sb.q_y = by + badge_h + sc(SB_GAP) - (s_sb.q_day ? s_sb.m_lab.bearing : s_sb.m_val.bearing);
   s_sb.show = true;
 }

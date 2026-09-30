@@ -130,9 +130,11 @@ service's end.
 for predictions, and a predicted time carries a small arc in the accent: the
 board's first time, the side block's time, a badge at the hub. A late bus
 moves to the minute it will really leave; a bus that will skip the stop
-drops out; a cancelled run drops out too; at the hub, and at any timepoint
-where the timetable has the bus wait for its time, a bus is never shown
-leaving early. A time without the
+drops out; a cancelled run drops out too; at the hub a bus is never shown
+leaving early, since buses lay over there and leave together. Elsewhere an
+early time stands, at a timepoint too: most early buses wait there, but a
+time held to the timetable costs you the bus the times one doesn't, where
+an early one costs only a wait. A time without the
 arc is the timetable's. At the hub the live feed also says which buses are
 in: a route whose bus hasn't reached the transit centre yet has its badge
 hollow, and solid once it's there. Only the next departure of each route is
@@ -210,10 +212,7 @@ the stop in the next ninety minutes, matched by trip and `stop_sequence`
 waits three seconds for it at most, drops it if the feed's own clock is more
 than ninety seconds old, and on any failure shows exactly the schedule it
 would have shown without it. A system names its relay or feed with
-`--live-url`, or has none. How live times are laid over the timetable (the
-holds at the hub and at timepoints, boarding, skipped and cancelled runs) is
-written down in [LIVE-RULES.md](LIVE-RULES.md), the rules Cache Rider keeps
-too, each in its own code.
+`--live-url`, or has none.
 
 A stop goes by the landmark the feed gives it where the agency writes them
 and one fits the watch's 23 characters (`--landmarks`): Connect's say what
