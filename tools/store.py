@@ -9,6 +9,11 @@ the text in store-listing.md.
 
     ~/.local/share/uv/tools/pebble-tool/bin/python tools/store.py        # show what the store has
     ~/.local/share/uv/tools/pebble-tool/bin/python tools/store.py push   # send the listing
+    ~/.local/share/uv/tools/pebble-tool/bin/python tools/store.py shots DIR   # replace the screenshots
+
+The screenshots in DIR are named <platform>_<order>_<anything>.png. The new
+ones go up first, a platform at a time, and only once they're there are the
+old ones deleted, so the page is never left without.
 
 Needs the pebble tool's Python, for its saved login.
 """
@@ -67,18 +72,45 @@ class Dashboard:
             sys.exit("dashboard refused: %s %s" % (status, body[:200]))
         return json.loads(body)["app"]
 
-    def patch(self, fields):
+    def patch(self, fields, files=()):
+        """fields as form values; files as (field name, path) PNG parts."""
         boundary = "----headway" + uuid.uuid4().hex
         body = b""
         for key, value in fields.items():
             body += ("--%s\r\nContent-Disposition: form-data; name=\"%s\"\r\n\r\n%s\r\n" % (boundary, key, value)).encode()
+        for key, path in files:
+            body += ("--%s\r\nContent-Disposition: form-data; name=\"%s\"; filename=\"%s\"\r\nContent-Type: image/png\r\n\r\n"
+                     % (boundary, key, os.path.basename(path))).encode() + open(path, "rb").read() + b"\r\n"
         body += ("--%s--\r\n" % boundary).encode()
         return self.call("PATCH", "/api/dashboard/apps/" + APP_ID, body,
                          {"Content-Type": "multipart/form-data; boundary=" + boundary})
 
 
+def shots(dash, folder):
+    by = {}
+    for name in sorted(os.listdir(folder)):
+        if name.endswith(".png") and "_" in name:
+            by.setdefault(name.split("_")[0], []).append(os.path.join(folder, name))
+    for platform, paths in sorted(by.items()):
+        old = next((a["screenshots"] for a in dash.app()["assets"] if a["platform"] == platform), [])
+        status, body = dash.patch(listing(), [("screenshots_" + platform, p) for p in paths])
+        now = next((a["screenshots"] for a in dash.app()["assets"] if a["platform"] == platform), [])
+        added = [p for p in now if p not in old]
+        if status != 200 or len(added) != len(paths):
+            sys.exit("%s: upload failed (%s, %d of %d there): %s" % (platform, status, len(added), len(paths), body[:200]))
+        if old:
+            status, body = dash.patch(dict(listing(), deletedScreenshots=json.dumps({platform: old})))
+            left = next((a["screenshots"] for a in dash.app()["assets"] if a["platform"] == platform), [])
+            if status != 200 or left != added:
+                sys.exit("%s: old ones not removed (%s): %s" % (platform, status, body[:200]))
+        print(platform, len(added), "up,", len(old), "replaced")
+    return 0
+
+
 def main(argv):
     dash = Dashboard()
+    if argv[1:2] == ["shots"] and len(argv) == 3:
+        return shots(dash, argv[2])
     app = dash.app()
     if argv[1:] == ["push"]:
         want = listing()
