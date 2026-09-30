@@ -835,8 +835,11 @@ function onFlick() {
                 if (at[3] === 1) return;
                 var p = Math.floor((at[2] * 1000 - midnight) / 60000);
                 // A bus still listed at its hub bay after the feed's time for
-                // it is still there, boarding: it leaves now, not already.
-                var boarding = at[2] * 1000 < now.getTime() - 30000 ? nowMin : -1;
+                // it is still there, boarding: it leaves now, not already. For
+                // ten minutes past its time on a loop, thirty on a route: a
+                // listing older than that is the feed's leftover, not a bus.
+                var past = now.getTime() - at[2] * 1000;
+                var boarding = past > 30000 && past < ((sys.routes || []).indexOf(dep[1]) >= 0 ? 600000 : 1800000) ? nowMin : -1;
                 t = atHub ? Math.max(t, p, boarding) : row[6] ? Math.max(t, p) : p; isLive = true;
               }
               if (t >= from) deps.push({ t: t, route: dep[1], head: dep[2], live: isLive, near: !!near[stop.id] });
