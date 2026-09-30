@@ -38,6 +38,15 @@ transit.
 Settings on the phone for modules, theme, accent, wrist, clock and units.
 Round watches aren't supported.
 
+## Release notes (1.19.0)
+
+At Connect's yard in North Logan, for an hour after the day's last trip, the
+face shows the buses coming home without a flick: how many are still on
+trips, then how long ago the last trip ended, counting up. The feed drops a
+bus when its last trip ends, not at the gate, so the minutes are for you to
+judge by. Only a phone near the yard checks, and only in that hour. Detoured
+buses are counted too.
+
 ## Release notes (1.18.9)
 
 At Connect's yard a count of none reads NONE ON TRIPS rather than ALL BUSES
