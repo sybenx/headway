@@ -113,8 +113,9 @@ any are still on a trip, then `LAST TRIP ENDED` over `12 MIN AGO`, counting
 up. The feed lists a bus only while it's on a trip, so none on one isn't all
 in: the last bus may still be driving back, ten minutes or so, and the
 minutes let the one at the gate judge. The hour is the timetable's, from the
-latest arrival of the services running that day (9:03 PM on weekdays, 6:59
-on Saturdays), and the minutes run from when the last bus was last seen on
+latest arrival of the services running that day to the nearest quarter hour
+(9 PM on weekdays, 7 on Saturdays: the loops' last lap back to the transit
+centre runs a few minutes past), and the minutes run from when the last bus was last seen on
 its trip, or from the timetable's end if it was never seen. Only a phone last
 seen within a kilometre of the yard looks, every two minutes through that
 hour; anywhere else nothing changes. A Pebble Classic has no room for the
