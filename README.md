@@ -102,8 +102,10 @@ Pebble Classic has no room for it and keeps the board.
 
 **At the yard,** Connect's headquarters in North Logan where the buses sleep,
 a flick answers whether they are all back. The count takes the countdown's
-place, as big: `3 OUT` under `BUSES STILL OUT`, or `0 OUT` under `ALL BUSES
-IN`, counting every bus with a fresh position anywhere but the yard. The stop
+place, as big: `3 OUT` under `BUSES STILL OUT`, counting every bus on a trip
+anywhere but the yard, or a bare `0` under `NONE ON TRIPS`. The feed drops a
+bus as its last trip ends, not at the gate, so none on a trip isn't all in:
+the last may still be driving back. The stop
 up the road sits beside the modules in one row. With no live answer it is
 that stop, as anywhere else; a Pebble Classic has no room for the count and
 always answers so. A system names its yard with `--base lat,lon,metres`.

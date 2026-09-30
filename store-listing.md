@@ -38,6 +38,14 @@ transit.
 Settings on the phone for modules, theme, accent, wrist, clock and units.
 Round watches aren't supported.
 
+## Release notes (1.18.9)
+
+At Connect's yard a count of none reads NONE ON TRIPS rather than ALL BUSES
+IN: the feed drops a bus as its last trip ends, not at the gate. A rough
+location never pushes the stop you're at off the board; its routes come
+first. With no signal and a timetable kept from days ago, the stop reads
+OLD, since the schedule may have changed since.
+
 ## Release notes (1.18.8)
 
 A flick after the last bus takes a fresh location again, so the next day's

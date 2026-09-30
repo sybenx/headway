@@ -338,13 +338,16 @@ function fetchJSON(url, cb) {
   req.send();
 }
 // The index: the kept one while it's a day old at most, else the network's,
-// else the kept one however old.
+// else the kept one however old. cb(index, old): old when that last is more
+// than INDEX_OLD past its fetch, so the answer can say its timetable may
+// have changed since.
+var INDEX_OLD = 3 * 24 * 60 * 60 * 1000;
 function getIndex(sys, cb) {
   var key = 'hw2-stops-' + sys.agency.toLowerCase(), entry = kept(key);
-  if (entry && Date.now() - entry.at < INDEX_TTL) return cb(entry.data);
+  if (entry && Date.now() - entry.at < INDEX_TTL) return cb(entry.data, false);
   fetchJSON(sys.data + 'stops.json', function (d) {
-    if (d && d.stops) { remember(key, d); return cb(d); }
-    cb(entry ? entry.data : null);
+    if (d && d.stops) { remember(key, d); return cb(d, false); }
+    cb(entry ? entry.data : null, !!entry && Date.now() - entry.at > INDEX_OLD);
   });
 }
 // A stop's file: the kept one when it answers for this index, else the
@@ -738,7 +741,7 @@ function onFlick() {
     if (sawFix(lat, lon)) weatherAt(pos, true);
     var sys = systemAt(lat, lon);
     if (!sys || !sys.data) return sendStopView('', 0, []);
-    getIndex(sys, function (index) {
+    getIndex(sys, function (index, old) {
       if (!index) return sendStopView('', 0, []);
       Object.keys(index.routes || {}).forEach(function (r, i) { routeRank[r] = i; });
       var ranked = index.stops.map(function (st) {
@@ -759,6 +762,10 @@ function onFlick() {
         : ranked.filter(function (st) {
           return st.d <= best.d + reach || metres(best.lat, best.lon, st.lat, st.lon) <= TWIN || (best.station && st.station === best.station);
         }).slice(0, 16);
+      var near = {};
+      group.forEach(function (st) {
+        if (atHub || metres(best.lat, best.lon, st.lat, st.lon) <= TWIN || (best.station && st.station === best.station)) near[st.id] = true;
+      });
       var atBase = sys.base && metres(lat, lon, sys.base.lat, sys.base.lon) <= sys.base.r;
       var now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes();
       var midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -824,18 +831,21 @@ function onFlick() {
                 var boarding = at[2] * 1000 < now.getTime() - 30000 ? nowMin : -1;
                 t = atHub ? Math.max(t, p, boarding) : row[6] ? Math.max(t, p) : p; isLive = true;
               }
-              if (t >= from) deps.push({ t: t, route: dep[1], head: dep[2], live: isLive });
+              if (t >= from) deps.push({ t: t, route: dep[1], head: dep[2], live: isLive, near: !!near[stop.id] });
             });
           });
           if (deps.length && ahead) dayWord = ahead === 1 ? 'TOMORROW' : ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'][date.getDay()];
         }
         // Ties in route order, never in whichever file happened to load first.
         deps.sort(function (a, b) { return a.t - b.t || byRoute(a.route, b.route); });
+        // A timetable kept from days ago, with no network to check it, says so
+        // first: the stop's name keeps its first words however it's cut.
+        var title = old && name ? 'OLD ' + name : name;
         if (atHub && !classic()) {
           var inNow = routesIn(group, live, stops);
-          if (!inNow) return sendWaves(name, waves(deps, dayWord, index));
+          if (!inNow) return sendWaves(title, waves(deps, dayWord, index));
           // onDay: the services of the day these departures are from.
-          return sendWaves(name, hubChips(deps, dayWord, index, stops, inNow, sys.routes, onDay));
+          return sendWaves(title, hubChips(deps, dayWord, index, stops, inNow, sys.routes, onDay));
         }
         // A row a route and direction, in order of its next departure,
         // with its next two times, or its next time and the day. Where a
@@ -845,9 +855,14 @@ function onFlick() {
         var groups = [], byKey = {}, perRoute = {};
         deps.forEach(function (dep) {
           var key = dep.route + '|' + dep.head, g = byKey[key];
-          if (!g) { g = byKey[key] = { route: dep.route, head: dep.head, times: [], live: dep.live }; groups.push(g); perRoute[dep.route] = (perRoute[dep.route] || 0) + 1; }
+          if (!g) { g = byKey[key] = { route: dep.route, head: dep.head, times: [], live: dep.live, near: false }; groups.push(g); perRoute[dep.route] = (perRoute[dep.route] || 0) + 1; }
           if (g.times.length < 2) g.times.push(dep.t);
+          g.near = g.near || dep.near;
         });
+        // The nearest stop's routes, with its twin and its station, take the
+        // rows first; the stops the fix's accuracy adds only fill what's left,
+        // so a rough fix never pushes the stop the wearer is at off the board.
+        groups = groups.filter(function (g) { return g.near; }).concat(groups.filter(function (g) { return !g.near; }));
         // Every row, near or far: the watch counts rows, not metres, and
         // seats one row beside the modules and more on the board. The
         // second column holds one qualifier: the day first, since a bus
@@ -863,7 +878,7 @@ function onFlick() {
         // which has no room for it and answers as at any stop.
         var out = atBase && !classic() ? busesOut(live, sys.base) : null;
         // Within the fix's own accuracy of the stop, the wearer may well be at it.
-        sendStopView(name, best.d <= Math.max(AT_STOP, reach) ? 0 : best.d, out === null ? rows : rows.slice(0, 1), out);
+        sendStopView(title, best.d <= Math.max(AT_STOP, reach) ? 0 : best.d, out === null ? rows : rows.slice(0, 1), out);
       }
     });
   }, function (err) {

@@ -1824,8 +1824,10 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
   if (AT_YARD()) {
     s_bk.now = s_bk.solid = false;
     snprintf(s_bk.num, sizeof(s_bk.num), "%d", s_sv.out);
-    s_bk.unit = "OUT";
-    s_bk.label = s_sv.out == 0 ? "ALL BUSES IN" : s_sv.out == 1 ? "BUS STILL OUT" : "BUSES STILL OUT";
+    // The feed drops a bus as its last trip ends, not at the gate, so none on
+    // a trip isn't all in: the last may still be driving back.
+    s_bk.unit = s_sv.out ? "OUT" : "";
+    s_bk.label = s_sv.out == 0 ? "NONE ON TRIPS" : s_sv.out == 1 ? "BUS STILL OUT" : "BUSES STILL OUT";
   }
 #endif
 
