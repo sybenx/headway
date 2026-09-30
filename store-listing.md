@@ -38,6 +38,12 @@ transit.
 Settings on the phone for modules, theme, accent, wrist, clock and units.
 Round watches aren't supported.
 
+## Release notes (1.19.1)
+
+Live times at stops a trip both leaves from and comes back to, like the
+transit centre's bays and the loops' ends, are the departure's, not the
+arrival back half an hour later.
+
 ## Release notes (1.19.0)
 
 At Connect's yard in North Logan, for an hour after the day's last trip, the
