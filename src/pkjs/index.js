@@ -818,12 +818,19 @@ function onFlick() {
               var trip = !ahead && live && dep[3] && live.trips[dep[3]];
               // A run the feed says is cancelled isn't coming.
               if (trip && trip.c) return;
-              // By the stop's id, or where the feed names no stop, by the
-              // departure's place in its trip.
+              // By the stop and the departure's place in its trip: most of
+              // Connect's trips leave from and come back to the same bay, so
+              // the stop alone would take the arrival back for the departure.
+              // A feed that names no stop is matched by place alone; one that
+              // gives no place, by the stop where the trip passes it once.
+              var once = null, seen = 0;
               for (var i = 0; trip && i < trip.s.length; i++) {
                 var pr = trip.s[i];
-                if (pr[0] === stop.id || (pr[0] === null && pr[1] === row[5])) at = pr;
+                if (pr[0] !== null && pr[0] !== stop.id) continue;
+                if (pr[1] !== null && pr[1] !== undefined && row[5] !== undefined) { if (pr[1] === row[5]) at = pr; }
+                else if (pr[0] !== null) { once = pr; seen++; }
               }
+              if (!at && seen === 1) at = once;
               if (at) {
                 if (at[3] === 1) return;
                 var p = Math.floor((at[2] * 1000 - midnight) / 60000);
