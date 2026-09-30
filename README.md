@@ -210,7 +210,10 @@ the stop in the next ninety minutes, matched by trip and `stop_sequence`
 waits three seconds for it at most, drops it if the feed's own clock is more
 than ninety seconds old, and on any failure shows exactly the schedule it
 would have shown without it. A system names its relay or feed with
-`--live-url`, or has none.
+`--live-url`, or has none. How live times are laid over the timetable (the
+holds at the hub and at timepoints, boarding, skipped and cancelled runs) is
+written down in [LIVE-RULES.md](LIVE-RULES.md), the rules Cache Rider keeps
+too, each in its own code.
 
 A stop goes by the landmark the feed gives it where the agency writes them
 and one fits the watch's 23 characters (`--landmarks`): Connect's say what

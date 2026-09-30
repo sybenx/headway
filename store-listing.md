@@ -38,6 +38,13 @@ transit.
 Settings on the phone for modules, theme, accent, wrist, clock and units.
 Round watches aren't supported.
 
+## Release notes (1.19.2)
+
+At the transit centre a bus still listed at its bay after its time reads NOW
+for ten minutes on a loop and thirty on a route, not indefinitely. Connect's
+stops go by their landmarks, like FIRE STATION or KEY BANK, where the feed
+gives one.
+
 ## Release notes (1.19.1)
 
 Live times at stops a trip both leaves from and comes back to, like the
