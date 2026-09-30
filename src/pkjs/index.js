@@ -187,7 +187,7 @@ function kmToSystem(lat, lon) {
 // knows, and whether it is at that system's hub in its hours, with the next
 // departures of the routes on their own timetable. Null when there is
 // nothing to say. The background check and a flick both ask this, a flick
-// with its own precise fix, so walking up to the hub and flicking starts the
+// with its own fresh fix, so walking up to the hub and flicking starts the
 // countdown then and there.
 function transitState(lat, lon) {
   var mode = hubMode();
@@ -253,11 +253,12 @@ function sawFix(lat, lon) {
   return changed;
 }
 
-// A walking look near the hub is precise once the last fix is within
-// PRECISE_NEAR of it, where the countdown's hundred metres is decided;
-// further out a rough fix tells closer from farther well enough.
-var PRECISE_NEAR = 400;
-function look(force, precise) {
+// A walking look near the hub takes a fresh fix once the last one is within
+// FRESH_NEAR of it, where the countdown's hundred metres is decided; further
+// out one a few minutes old tells closer from farther well enough. Nothing
+// here asks for high accuracy: the phone's everyday fix is the one used.
+var FRESH_NEAR = 400;
+function look(force, fresh) {
   var mode = hubMode(), since = Date.now() - lastLook;
   // Inside a hub's system out of its hours, transit has nothing to ask.
   var transitWants = mode !== MODE_OFF && (force || !(lastSys && lastSys.hub && !hubRunning(lastSys)));
@@ -275,15 +276,16 @@ function look(force, precise) {
     Pebble.sendAppMessage(transitMsg(st));
   }, function () {
     // No fix: say nothing, and the watch keeps its last word until it is stale.
-  }, precise ? { enableHighAccuracy: true, timeout: 9000, maximumAge: 20000 }
-             : { timeout: 10000, maximumAge: 4 * 60 * 1000 });
+  }, fresh ? { timeout: 9000, maximumAge: 20000 }
+           : { timeout: 10000, maximumAge: 4 * 60 * 1000 });
 }
 
 // ---- the flick: the nearest stop and what leaves it next.
 //
 // The stop index and the per-stop files come from the repo's own pages,
-// written nightly by tools/transit.py. A precise fix picks the stop; twin
-// stops across a road are merged, since the headsign tells them apart.
+// written nightly by tools/transit.py. The fix picks the stop, and every stop
+// it could be at by its own accuracy is read with it; twin stops across a road
+// are merged, since the headsign tells them apart.
 //
 // Both are kept on the phone, and whatever is kept answers when the network
 // doesn't: a flick at a stop with no signal still gets its timetable. The
@@ -295,6 +297,9 @@ var INDEX_TTL = 24 * 60 * 60 * 1000, STOP_TTL = 6 * 60 * 60 * 1000;
 // At a stop, the board; off it, the board with its distance; further than
 // two kilometres from any stop, nothing.
 var AT_STOP = 60, TWIN = 80, HUB = 100, FAR = 2000;
+// However rough the fix, the stops within this much further than the nearest
+// are the most a flick reads: past it the board is a neighbourhood, not a stop.
+var MAX_REACH = 150;
 
 function kept(key) {
   try { return JSON.parse(localStorage.getItem(key)); } catch (e) { return null; }
@@ -741,15 +746,18 @@ function onFlick() {
       }).sort(function (a, b) { return a.d - b.d; });
       if (!ranked.length || ranked[0].d > FAR) return sendStopView('', 0, []);
       var best = ranked[0];
-      // Twins across a road are read as one stop, and so is a station: every
-      // stop the index marks with the nearest one's station number. At the
-      // hub, every bay is: the group is the whole hub, and it goes by the
-      // hub's own name rather than whichever bay happened to be nearest.
+      // A fix is only as good as the phone says: every stop within its
+      // accuracy of the nearest could be the one the wearer is at, so all of
+      // them answer, and so do twins across a road and a station: every stop
+      // the index marks with the nearest one's station number. At the hub,
+      // every bay does: the group is the whole hub, and it goes by the hub's
+      // own name rather than whichever bay happened to be nearest.
+      var reach = Math.min(Math.max(pos.coords.accuracy || 0, 0), MAX_REACH);
       var atHub = sys.hub && metres(best.lat, best.lon, sys.hub.lat, sys.hub.lon) <= HUB;
       var group = atHub
         ? ranked.filter(function (st) { return metres(sys.hub.lat, sys.hub.lon, st.lat, st.lon) <= HUB; }).slice(0, 16)
         : ranked.filter(function (st) {
-          return metres(best.lat, best.lon, st.lat, st.lon) <= TWIN || (best.station && st.station === best.station);
+          return st.d <= best.d + reach || metres(best.lat, best.lon, st.lat, st.lon) <= TWIN || (best.station && st.station === best.station);
         }).slice(0, 16);
       var atBase = sys.base && metres(lat, lon, sys.base.lat, sys.base.lon) <= sys.base.r;
       var now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes();
@@ -765,7 +773,8 @@ function onFlick() {
       else getLive(sys, group.map(function (st) { return st.id; }), function (l) { live = l; gotLive(); });
       group.forEach(function (st) {
         getStop(sys, index, st.id, function (stop) {
-          if (stop) { if (!name) name = stop.name; stop.id = stop.id || st.id; stops.push(stop); }
+          // The board goes by the nearest stop's name, whichever file comes first.
+          if (stop) { if (!atHub && (!name || st.id === best.id)) name = stop.name; stop.id = stop.id || st.id; stops.push(stop); }
           if (!--left) answer();
         });
       });
@@ -853,13 +862,14 @@ function onFlick() {
         // and the stop up the road in one row. Not on a Pebble Classic,
         // which has no room for it and answers as at any stop.
         var out = atBase && !classic() ? busesOut(live, sys.base) : null;
-        sendStopView(name, best.d <= AT_STOP ? 0 : best.d, out === null ? rows : rows.slice(0, 1), out);
+        // Within the fix's own accuracy of the stop, the wearer may well be at it.
+        sendStopView(name, best.d <= Math.max(AT_STOP, reach) ? 0 : best.d, out === null ? rows : rows.slice(0, 1), out);
       }
     });
   }, function (err) {
     console.log('headway: no fix ' + (err && err.message));
     sendStopView('', 0, []);
-  }, { enableHighAccuracy: true, timeout: 9000, maximumAge: 20000 });
+  }, { timeout: 9000, maximumAge: 20000 });
 }
 
 // The watch asks for a look as the wearer walks near a hub; the phone takes
@@ -869,7 +879,7 @@ function onLook() {
   if (Date.now() - lastLook < 60 * 1000) return;
   console.log('headway: look (walking near the hub)');
   lastLook = 0;
-  look(false, lastHubM <= PRECISE_NEAR);
+  look(false, lastHubM <= FRESH_NEAR);
 }
 
 Pebble.addEventListener('appmessage', function (e) {

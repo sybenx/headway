@@ -62,9 +62,10 @@ beside them, and their last minute counts in seconds too.
 |---|---|---|
 | ![waiting](screenshots/hub.png) | ![boarding](screenshots/boarding.png) | ![departing](screenshots/departing.png) |
 
-**A flick of the wrist** anywhere inside the system asks the phone for a
-precise fix and, for twelve seconds, lit, the face answers with the nearest
-stop. The answer is counted in rows, not metres. One row — one route, one
+**A flick of the wrist** anywhere inside the system asks the phone where it
+is and, for twelve seconds, lit, the face answers with the nearest stop. The
+face never asks for high accuracy; it takes the phone's everyday fix at its
+word, and reads every stop within that fix's accuracy of the nearest one. The answer is counted in rows, not metres. One row — one route, one
 direction — sits in the band beside the modules as three short lines: the
 stop, the badge and its next time, then how far, or the time after when you
 are standing there. The rest of the face stays. Two or three rows take the

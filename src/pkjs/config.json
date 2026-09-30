@@ -269,7 +269,7 @@
             "value": "0"
           }
         ],
-        "description": "Automatic: a plain watch; a flick of the wrist inside a transit system the face knows shows the nearest stop, and near its transit centre the countdown comes on. The phone checks roughly where you are every half hour, every five minutes only near a transit centre while its buses run; a flick takes one precise fix, and only where you could be in a system. Countdown everywhere: the countdown wherever you are, set below. Off: a plain watch, and the phone never checks your location for transit."
+        "description": "Automatic: a plain watch; a flick of the wrist inside a transit system the face knows shows the nearest stop, and near its transit centre the countdown comes on. The phone checks roughly where you are every half hour, every five minutes only near a transit centre while its buses run; a flick takes one fix, never a high-accuracy one, and only where you could be in a system. Countdown everywhere: the countdown wherever you are, set below. Off: a plain watch, and the phone never checks your location for transit."
       },
       {
         "type": "slider",

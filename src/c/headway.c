@@ -2164,7 +2164,7 @@ static void stopview_hold(uint32_t ms) {
   else s_sv.timer = app_timer_register(ms, stopview_done, NULL);
 }
 
-// Whether a flick asks the phone, and so takes a precise fix. Not with transit
+// Whether a flick asks the phone, and so takes a fix. Not with transit
 // off. In the chosen modes, always. Automatic: inside a system, or where the
 // wearer could have driven into one since the phone last looked, at highway
 // speed; nobody drives from the next state into Logan in half an hour, so a

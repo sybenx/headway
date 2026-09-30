@@ -29,13 +29,21 @@ At Connect's transit centre it counts down to the next departure, with a
 buzz at five minutes, and a flick shows which routes' buses are in. While buses run there, it checks every five minutes
 nearby so the countdown is on when you arrive, and stops after the last bus.
 
-Your location stays on your phone: the weather service gets it rounded to
-about 100 m, and live times are asked for by stop number (UTA's come from
-its own feed, whole, so nothing is asked). No accounts. Turn
-transit off and it never checks your location for transit.
+Your location stays on your phone, and it never asks for a high-accuracy
+fix: the weather service gets it rounded to about 100 m, and live times are
+asked for by stop number (UTA's come from its own feed, whole, so nothing is
+asked). No accounts. Turn transit off and it never checks your location for
+transit.
 
 Settings on the phone for modules, theme, accent, wrist, clock and units.
 Round watches aren't supported.
+
+## Release notes (1.18.5)
+
+The face never asks the phone for a high-accuracy fix. A flick takes the
+phone's everyday one at its word: every stop within its accuracy of the
+nearest answers, so a rough fix shows the stop you're at among them rather
+than the wrong one alone.
 
 ## Release notes (1.18.4)
 
