@@ -38,6 +38,12 @@ transit.
 Settings on the phone for modules, theme, accent, wrist, clock and units.
 Round watches aren't supported.
 
+## Release notes (1.18.6)
+
+The time sits centred as it looks, even at 10:11. At the transit centre a
+flick's seconds are in the colon, as everywhere else. The weather's degree
+sign hangs past the edge, so its number lines up with the date.
+
 ## Release notes (1.18.5)
 
 The face never asks the phone for a high-accuracy fix. A flick takes the

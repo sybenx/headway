@@ -1062,6 +1062,18 @@ static void layout_modules(GFont f_val, GFont f_cap, int c_start, int avail_w,
   s_md.total = total;
 }
 
+// How far the row may run past the outer edge: a degree sign ending it hangs
+// there, as a mark in a margin does, since it's air to the eye and the 12
+// would otherwise read as set in from the date and time beside it. Only on
+// the left wrist, where the value's end is the outer edge.
+static int modules_hang(void) __attribute__((noinline));
+static int modules_hang(void) {
+  if (s_set.wrist_right || !s_md.n) return 0;
+  const Module *m = &s_md.m[s_md.n - 1];
+  if (m->kind != MODULE_WEATHER || !module_uses_icon(m)) return 0;   // a caption (PARTLY) may be the wider
+  return measure("\u00B0", s_md.f_val).w;
+}
+
 static void paint_modules(void) __attribute__((noinline));
 static void paint_modules(void) {
   int x = s_md.x0;
@@ -1745,14 +1757,19 @@ static GColor secs_color(void) {
 #endif
 }
 
-// The plain face keeps no room for a rail: its time sits centred, and
-// everything else hangs from the time's outer edge as ever. The digits are
-// all one width, so the face doesn't shift as the minutes go.
+// The plain face keeps no room for a rail: its time sits centred as it's
+// seen, and everything else hangs from the time's outer edge as ever. The
+// digits each take a zero's width, drawn from its start, so a narrow last
+// digit (10:11) leaves the end of its cell empty: that part isn't counted,
+// and the face moves a few pixels as such a minute comes and goes.
 static void centre_time(Frame *fr) __attribute__((noinline));
 static void centre_time(Frame *fr) {
   if (!s_quiet_face) return;
-  fr->end = (s_w + s_tm.w) / 2;
-  s_tm.x = fr->end - s_tm.w;
+  const char last[2] = { s_tm.mm[1], 0 };
+  const int seen = s_tm.w - (measure("0", s_tm.f).w - measure(last, s_tm.f).w);
+  const int px = (s_w - seen) / 2;   // where the time starts on the screen
+  s_tm.x = s_set.wrist_right ? s_w - s_tm.w - px : px;
+  fr->end = s_set.wrist_right ? s_tm.x + s_tm.w : s_tm.x + seen;
 }
 
 static void paint_time(void) __attribute__((noinline));
@@ -1779,7 +1796,7 @@ static void paint_time(void) {
 
 // ---- zone 02: the countdown, and zone 04: weekday and date.
 static struct {
-  char dow[8], date[12], num[8], secs[5];
+  char dow[8], date[12], num[8];
   const char *unit;
   const char *label;          // over the block, at the yard; none elsewhere
   bool now, solid, bare;
@@ -1810,13 +1827,6 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
     if (sch->is_final) {
       snprintf(s_bk.num, sizeof(s_bk.num), "%d", sch->secs);
       s_bk.unit = "SEC";
-    } else if (s_sv.lit) {
-      // Through a flick the countdown shows its seconds where MIN was: what
-      // is truly left, so 19 MIN at eighteen seconds past reads 18:42.
-      const int left = sch->remaining * 60 - (60 - sch->secs);
-      snprintf(s_bk.num, sizeof(s_bk.num), "%d", left / 60);
-      snprintf(s_bk.secs, sizeof(s_bk.secs), ":%02d", left % 60);
-      s_bk.unit = s_bk.secs;
     } else {
       snprintf(s_bk.num, sizeof(s_bk.num), "%d", sch->remaining);
     }
@@ -2010,7 +2020,7 @@ static void face_update(Layer *layer, GContext *ctx) {
                    s_tm.band_top, band_bot);
     // The quiet face has nothing at the outer end: the modules go there too,
     // in their order, out from under the sleeve.
-    if (idle && s_md.n) s_md.x0 = fr.end - s_md.total;
+    if (idle && s_md.n) s_md.x0 = fr.end - s_md.total + modules_hang();
     if (s_sv.valid && !s_gb.show) {
       // Beside the modules: on the quiet face to their wrist side, on the
       // countdown face at the outer end past them.
@@ -2019,8 +2029,9 @@ static void face_update(Layer *layer, GContext *ctx) {
       if (s_sb.show) layout_secs(t);
     }
     // A flick with nothing to show, or one still waiting on the phone: the
-    // seconds alone, under the time, so the gesture is seen to have landed.
-    if (s_sv.lit && !s_tm.secs && s_quiet_face) layout_secs(t);
+    // seconds in the colon, on every face, so the gesture is seen to have
+    // landed; the countdown keeps its minutes.
+    if (s_sv.lit && !s_tm.secs) layout_secs(t);
   }
   // With no room for the stop beside the modules the yard keeps its count.
   if (s_sv.valid && !s_sb.show && !yard) {
