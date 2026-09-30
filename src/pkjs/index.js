@@ -267,7 +267,6 @@ function look(force, precise) {
   navigator.geolocation.getCurrentPosition(function (pos) {
     var lat = pos.coords.latitude, lon = pos.coords.longitude;
     sawFix(lat, lon);
-    keepNear(lastSys, lat, lon);
     if (wx) weatherAt(pos, force);
     if (!transitWants) return;
     var st = transitState(lat, lon);
@@ -303,6 +302,19 @@ function kept(key) {
 function remember(key, data, v) {
   try { localStorage.setItem(key, JSON.stringify({ at: Date.now(), v: v, data: data })); } catch (e) {}
 }
+// The kept stop files, most recently used last, KEPT_MAX at most: the oldest
+// gives way, so a phone that has flicked across a whole city doesn't fill.
+var KEPT_MAX = 150;
+function useKept(key) {
+  try {
+    var list = JSON.parse(localStorage.getItem('hw2-kept')) || [], at = list.indexOf(key);
+    if (at === list.length - 1 && at >= 0) return;
+    if (at >= 0) list.splice(at, 1);
+    list.push(key);
+    while (list.length > KEPT_MAX) localStorage.removeItem(list.shift());
+    localStorage.setItem('hw2-kept', JSON.stringify(list));
+  } catch (e) { /* kept as it is */ }
+}
 // A kept stop file that answers for this index as it stands.
 function stopKept(entry, index) {
   if (!entry) return false;
@@ -335,17 +347,18 @@ function getIndex(sys, cb) {
 // however old.
 function getStop(sys, index, id, cb) {
   var key = 'hw2-stop-' + sys.agency.toLowerCase() + '-' + id, entry = kept(key);
-  if (stopKept(entry, index)) return cb(entry.data);
+  if (stopKept(entry, index)) { useKept(key); return cb(entry.data); }
   fetchJSON(sys.data + 'stops/' + id + '.json', function (d) {
-    if (d) { remember(key, d, index.v); return cb(d); }
+    if (d) { remember(key, d, index.v); useKept(key); return cb(d); }
     cb(entry && !index.v ? entry.data : null);
   });
 }
 
-// The stops around wherever the phone last looked, kept before they're asked
-// for: the flick at a stop the wearer walks to finds its timetable on the
-// phone. One file at a time, only those not already kept for this cut of the
-// timetable, so a day spent in the same few places asks for nothing more.
+// The stops around a flick, kept before they're asked for: the next flick
+// nearby finds its timetable on the phone, signal or not. Only after a flick,
+// which has already asked for this place's stop, so it tells no one anything
+// new; the background looks never ask for stop files. One file at a time,
+// only those not already kept for this cut of the timetable.
 var KEEP_NEAR = 400, KEEP_MAX = 24, keeping = false;
 function keepNear(sys, lat, lon) {
   if (keeping || !sys || !sys.data || hubMode() === MODE_OFF) return;

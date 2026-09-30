@@ -37,6 +37,13 @@ transit off and it never checks your location for transit.
 Settings on the phone for modules, theme, accent, wrist, clock and units.
 Round watches aren't supported.
 
+## Release notes (1.18.4)
+
+A flick with no signal still has its timetable. Every stop you flick at, and
+the stops around it, stays on the phone until the agency publishes a new
+timetable, and answers when the network doesn't. Only a flick ever asks for
+stop timetables; the background checks never do.
+
 ## Release notes (1.18.3)
 
 A bus due next minute reads 1 MIN on a flick's answer, at every stop and

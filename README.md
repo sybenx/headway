@@ -180,8 +180,9 @@ nightly workflow rebuilds from the feeds and replaces whole, so old
 timetables never pile up in the history. The index carries a version of
 the timetable it was cut from, the same night after night until the agency
 publishes a new feed; the phone keeps each stop's file until that version
-changes, and keeps the stops within a few hundred metres of wherever it last
-looked, so a flick at a stop with no signal still has its timetable.
+changes, and after a flick keeps the stops within a few hundred metres of it,
+so a flick there with no signal still has its timetable. Only a flick asks for
+stop files; the background looks never do. The last 150 stops used are kept.
 
 Each departure names its trip, from the agency's own GTFS, so live
 predictions can be laid over it. For Connect they come from the relay at
