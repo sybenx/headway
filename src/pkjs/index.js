@@ -869,15 +869,7 @@ function onFlick() {
   }, function (err) {
     console.log('headway: no fix ' + (err && err.message));
     sendStopView('', 0, []);
-  }, { timeout: 9000, maximumAge: flickAge() });
-}
-
-// A flick's fix is fresh while the buses run. Once a system's timetable says
-// they're done (Connect's hours), the answer is the next day's first buses,
-// and where the phone last knew it was, half an hour ago at most, does for
-// that without asking for a new fix. A system without hours always asks.
-function flickAge() {
-  return lastSys && lastSys.hub && !hubRunning(lastSys) ? 30 * 60 * 1000 : 20000;
+  }, { timeout: 9000, maximumAge: 20000 });
 }
 
 // The watch asks for a look as the wearer walks near a hub; the phone takes

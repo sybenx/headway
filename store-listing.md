@@ -38,6 +38,11 @@ transit.
 Settings on the phone for modules, theme, accent, wrist, clock and units.
 Round watches aren't supported.
 
+## Release notes (1.18.8)
+
+A flick after the last bus takes a fresh location again, so the next day's
+first buses are for the stop you're at, not one you passed half an hour ago.
+
 ## Release notes (1.18.7)
 
 The flick's hairline runs nearer the edge, clear of the centred time and
