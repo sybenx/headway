@@ -808,15 +808,16 @@ static int32_t line_left(void) {
   return (int32_t)s_sv.seg_f * (s_sv.end_at - t) / (s_sv.end_at - s_sv.seg_at);
 }
 static void draw_hairline(GContext *ctx, int16_t h) {
-  const int rail_w = sc(RAIL_W), border = sc(RAIL_BORDER);
+  const int border = sc(RAIL_BORDER);
   graphics_context_set_fill_color(ctx, s_ink);
   // Only a flick draws it: the line is the answer's time, full at the
   // flick, shortening from the foot, gone as the answer goes. At rest the
-  // edge is bare; a line there with nothing to count reads as a gap.
+  // edge is bare; a line there with nothing to count reads as a gap. It runs
+  // down the rail's column, near its outer end, clear of the centred face.
   const int32_t left = line_left();
   if (left <= 0) return;
   h = (int16_t)((int32_t)h * left / 10000);
-  graphics_fill_rect(ctx, GRect(mapx(s_w - rail_w - border, border), 0, border, h), 0, GCornerNone);
+  graphics_fill_rect(ctx, GRect(mapx(s_w - border - sc(2), border), 0, border, h), 0, GCornerNone);
 }
 
 // A module is a caption over a value, as the design draws them — BPM 72,

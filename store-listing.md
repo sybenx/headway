@@ -38,6 +38,13 @@ transit.
 Settings on the phone for modules, theme, accent, wrist, clock and units.
 Round watches aren't supported.
 
+## Release notes (1.18.7)
+
+The flick's hairline runs nearer the edge, clear of the centred time and
+the weather at any minute. After Connect's last bus a flick doesn't ask for
+a new location: where the phone last knew you were, half an hour ago at
+most, does for the next day's first buses.
+
 ## Release notes (1.18.6)
 
 The time sits centred as it looks, even at 10:11. At the transit centre a
