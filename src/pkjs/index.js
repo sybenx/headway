@@ -250,6 +250,7 @@ function sawFix(lat, lon) {
   var changed = tellUnits();
   lastSys = systemAt(lat, lon);
   lastHubM = lastSys && lastSys.hub ? metres(lat, lon, lastSys.hub.lat, lastSys.hub.lon) : Infinity;
+  lastBaseM = lastSys && lastSys.base ? metres(lat, lon, lastSys.base.lat, lastSys.base.lon) : Infinity;
   return changed;
 }
 
@@ -893,3 +894,77 @@ Pebble.addEventListener('webviewclosed', function () {
   setTimeout(function () { look(true); }, 500);
 });
 setInterval(function () { look(false); }, 5 * 60 * 1000);
+
+// ---- the yard, coming home. For an hour after the day's last trip, at the
+// yard its buses sleep in, the watch shows how many are still on trips and,
+// once none are, how long ago the last trip ended, with no flick. The feed
+// lists a bus only while it's on a trip, so "none out" isn't "all in": the
+// last one may still be driving back, and the wearer judges from the minutes.
+// The window is the timetable's: the latest end of the services running
+// that day (or, past midnight, the day before), and an hour after it.
+// Only a phone last seen within YARD_NEAR of the yard looks every two minutes;
+// anywhere else the half-hourly look (or a flick there) has to bring it near.
+var YARD_HOUR = 60, YARD_EVERY = 2 * 60 * 1000, YARD_NEAR = 1000, lastBaseM = Infinity;
+var yard = { told: null, asked: 0, start: 0, seen: 0 };
+// [start, until] in epoch seconds around now, or null outside it.
+function yardWindow(index, now) {
+  var ends = index.ends || [];
+  var midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000;
+  var cands = [];
+  [0, -1].forEach(function (back) {
+    var day = new Date(now.getFullYear(), now.getMonth(), now.getDate() + back);
+    var on = activeServices(index.services, day), end = -1;
+    Object.keys(on).forEach(function (i) { if (on[i] && ends[i] > end) end = ends[i]; });
+    if (end >= 0) cands.push(midnight + (back * 1440 + end) * 60);
+  });
+  var t = now.getTime() / 1000;
+  for (var i = 0; i < cands.length; i++) {
+    if (t >= cands[i] && t < cands[i] + YARD_HOUR * 60) return { start: cands[i], until: cands[i] + YARD_HOUR * 60 };
+  }
+  return null;
+}
+function tellYard(msg) {
+  var key = JSON.stringify(msg);
+  if (key === yard.told) return;
+  yard.told = key;
+  console.log('headway: yard ' + key);
+  Pebble.sendAppMessage(msg);
+}
+function yardTick() {
+  var sys = lastSys;
+  if (!sys || !sys.base || hubMode() === MODE_OFF || classic() || lastBaseM > YARD_NEAR) return yardOff();
+  getIndex(sys, function (index) {
+    var w = index && index.ends && yardWindow(index, new Date());
+    if (!w) return yardOff();
+    if (w.start !== yard.start) { yard.start = w.start; yard.seen = 0; }
+    if (Date.now() - yard.asked < YARD_EVERY) return;
+    yard.asked = Date.now();
+    navigator.geolocation.getCurrentPosition(function (pos) {
+      var lat = pos.coords.latitude, lon = pos.coords.longitude;
+      sawFix(lat, lon);
+      if (metres(lat, lon, sys.base.lat, sys.base.lon) > sys.base.r) return yardOff();
+      // The relay answers for a stop; the base's nearest will do, since only
+      // where the buses are is wanted.
+      var near = null;
+      index.stops.forEach(function (st) {
+        var d = metres(sys.base.lat, sys.base.lon, st[1], st[2]);
+        if (!near || d < near.d) near = { id: st[0], d: d };
+      });
+      getLive(sys, [near.id], function (live) {
+        var out = busesOut(live, sys.base);
+        if (out === null) return;   // no news: the watch keeps its last word
+        var nowS = Date.now() / 1000;
+        live.at.forEach(function (b) {
+          if (nowS - b[2] < BUS_FRESH && metres(b[0], b[1], sys.base.lat, sys.base.lon) > sys.base.r && b[2] > yard.seen) yard.seen = b[2];
+        });
+        // When the last trip ended only matters once none are out.
+        tellYard({ YD_OUT: out, YD_END: out ? 0 : Math.round(yard.seen || w.start), YD_UNTIL: Math.round(w.until) });
+      });
+    }, function () { /* no fix: the watch keeps its last word until the window ends */ },
+    { timeout: 10000, maximumAge: 4 * 60 * 1000 });
+  });
+}
+function yardOff() {
+  if (yard.told !== null && yard.told !== '{"YD_OUT":-1}') tellYard({ YD_OUT: -1 });
+}
+setInterval(yardTick, 60 * 1000);

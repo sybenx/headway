@@ -128,8 +128,22 @@ static struct {
 } s_sv;
 #ifdef HAS_YARD
 #define AT_YARD() (s_sv.valid && s_sv.out >= 0)
+// Coming home: for an hour after the day's last trip, at the yard, the phone
+// says without a flick how many buses are still on trips (out), when the
+// last trip ended (end) and when to stop saying so (until), in epoch seconds.
+#define YARD_KEY 4
+static struct { int8_t out; int32_t end, until; } s_yd;
+// The buses out, from a flick's answer while it's up, else from the phone's
+// word in its window; -1 when neither.
+static int yard_out(void) {
+  if (AT_YARD()) return s_sv.out;
+  if (s_yd.out >= 0 && time(NULL) < s_yd.until) return s_yd.out;
+  return -1;
+}
+#define YARD_ON() (yard_out() >= 0)
 #else
 #define AT_YARD() false
+#define YARD_ON() false
 #endif
 
 // The hub's answer, a line a departure minute: the minute, and every route
@@ -1810,11 +1824,21 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
 
   // At the yard the block is the count of buses still out, a label over it.
 #ifdef HAS_YARD
-  if (AT_YARD()) {
+  const int out = yard_out();
+  if (out >= 0) {
     s_bk.now = s_bk.solid = false;
-    snprintf(s_bk.num, sizeof(s_bk.num), "%d", s_sv.out);
     s_bk.unit = "OUT";
-    s_bk.label = s_sv.out == 0 ? "ALL BUSES IN" : s_sv.out == 1 ? "BUS STILL OUT" : "BUSES STILL OUT";
+    if (out == 0 && !AT_YARD() && s_yd.end) {
+      // None on a trip isn't all in: the last may still be driving back, so
+      // the face says how long ago its trip ended and the wearer judges.
+      const int ago = (int)((time(NULL) - s_yd.end) / 60);
+      snprintf(s_bk.num, sizeof(s_bk.num), "%d", ago < 0 ? 0 : ago);
+      s_bk.unit = "MIN AGO";
+      s_bk.label = "LAST TRIP ENDED";
+    } else {
+      snprintf(s_bk.num, sizeof(s_bk.num), "%d", out);
+      s_bk.label = out == 0 ? "ALL BUSES IN" : out == 1 ? "BUS STILL OUT" : "BUSES STILL OUT";
+    }
   }
 #endif
 
@@ -1948,7 +1972,7 @@ static void face_update(Layer *layer, GContext *ctx) {
   // At the yard a flick's answer takes the countdown's place: the count of
   // buses still out in the block, the stop up the road beside the modules.
   // Either way the edge is the hairline, not the rail.
-  yard = AT_YARD();
+  yard = YARD_ON();
   idle = !at_hub && s_set.transit != TRANSIT_CHIPS && !yard;
   s_quiet_face = idle || yard;
 
@@ -2269,6 +2293,16 @@ static void take_transit(DictionaryIterator *iter) {
 static void inbox_received(DictionaryIterator *iter, void *ctx) {
   Tuple *tp;
   take_transit(iter);
+#ifdef HAS_YARD
+  if ((tp = dict_find(iter, MESSAGE_KEY_YD_OUT))) {
+    Tuple *te = dict_find(iter, MESSAGE_KEY_YD_END), *tu = dict_find(iter, MESSAGE_KEY_YD_UNTIL);
+    s_yd.out = (int8_t)(tp->value->int32 > 99 ? 99 : tp->value->int32 < -1 ? -1 : tp->value->int32);
+    s_yd.end = te ? te->value->int32 : 0;
+    s_yd.until = tu ? tu->value->int32 : 0;
+    persist_write_data(YARD_KEY, &s_yd, sizeof(s_yd));
+    layer_mark_dirty(s_face);
+  }
+#endif
   if ((tp = dict_find(iter, MESSAGE_KEY_SV_N))) {
     Tuple *ts = dict_find(iter, MESSAGE_KEY_SV_STOP);
     Tuple *td = dict_find(iter, MESSAGE_KEY_SV_DIST);
@@ -2429,6 +2463,10 @@ static void init(void) {
   settings_load();
   weather_load();
   transit_load();
+#ifdef HAS_YARD
+  s_yd.out = -1;
+  if (persist_exists(YARD_KEY) && persist_get_size(YARD_KEY) == (int)sizeof(s_yd)) persist_read_data(YARD_KEY, &s_yd, sizeof(s_yd));
+#endif
   s_f_time = fonts_load_custom_font(resource_get_handle(RES_TIME));
   s_f_count = fonts_load_custom_font(resource_get_handle(RES_COUNT));
   s_f_mod = fonts_load_custom_font(resource_get_handle(RES_MOD));

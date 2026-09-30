@@ -208,7 +208,17 @@ if a.stops_out or a.legacy_out:
         print('stops', len(index), 'files,', size, 'bytes, in', os.path.normpath(out))
 
     if a.stops_out:
-        write(a.stops_out, per_stop, lambda rows: {'deps': [list(x) for x in sorted(rows)]}, {'services': services}, True)
+        extra = {'services': services}
+        if a.base:
+            # When each service's day is done: the latest arrival of any of its
+            # trips, so the phone knows when the buses start coming home to the yard.
+            ends = [0] * len(services)
+            for st in stop_times:
+                i = svc_index.get(trips[st['trip_id']]['service_id'])
+                hms = st.get('arrival_time') or st.get('departure_time')
+                if i is not None and hms: ends[i] = max(ends[i], mins(hms))
+            extra['ends'] = ends
+        write(a.stops_out, per_stop, lambda rows: {'deps': [list(x) for x in sorted(rows)]}, extra, True)
     if a.legacy_out:
         write(a.legacy_out, per_stop_kind,
               lambda kinds: {'days': {k: [list(x) for x in sorted(v)] for k, v in kinds.items()}}, {}, False)
