@@ -210,17 +210,14 @@ if a.stops_out or a.legacy_out:
     if a.stops_out:
         extra = {'services': services}
         if a.base:
-            # When each service's day is done, so the phone knows when the buses
-            # start coming home to the yard: the latest arrival of any of its
-            # trips, to the nearest quarter hour. The latest is the loops'
-            # last lap back to the transit centre, a few minutes past the hour
-            # the day really ends at (9:03 PM for 9:00, 6:59 for 7:00).
+            # When each service's day is done: the latest arrival of any of its
+            # trips, so the phone knows when the buses start coming home to the yard.
             ends = [0] * len(services)
             for st in stop_times:
                 i = svc_index.get(trips[st['trip_id']]['service_id'])
                 hms = st.get('arrival_time') or st.get('departure_time')
                 if i is not None and hms: ends[i] = max(ends[i], mins(hms))
-            extra['ends'] = [(e + 7) // 15 * 15 for e in ends]
+            extra['ends'] = ends
         write(a.stops_out, per_stop, lambda rows: {'deps': [list(x) for x in sorted(rows)]}, extra, True)
     if a.legacy_out:
         write(a.legacy_out, per_stop_kind,
