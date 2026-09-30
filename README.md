@@ -212,6 +212,12 @@ than ninety seconds old, and on any failure shows exactly the schedule it
 would have shown without it. A system names its relay or feed with
 `--live-url`, or has none.
 
+A stop goes by the landmark the feed gives it where the agency writes them
+and one fits the watch's 23 characters (`--landmarks`): Connect's say what
+the bus announces, `FIRE STATION`, `ECCLES ICE CENTER` for "Across from
+Eccles Ice Center", since twins across a road are read as one stop anyway.
+Elsewhere, and where there's none, the address.
+
 To add a system: add its feed to `.github/workflows/transit.yml` with a line
 running `tools/transit.py` (the feed, the agency, and a hints file for short
 names and badge labels), and ship the new `transit.json` in a release. A hub

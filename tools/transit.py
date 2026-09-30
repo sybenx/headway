@@ -27,6 +27,7 @@ ap.add_argument('--name', default='HUB')
 ap.add_argument('--radius', type=int, default=150, help='metres around the hub that count as its stops')
 ap.add_argument('--out', default=os.path.join(os.path.dirname(__file__), '..', 'src', 'pkjs', 'transit.json'))
 ap.add_argument('--hints', help='JSON of headsign and stop-name abbreviations and route labels for this agency')
+ap.add_argument('--landmarks', action='store_true', help="name stops by the landmark in the feed's stop_desc where it has one that fits (Connect's: 'Fire Station'), not by the address")
 ap.add_argument('--stops-out', help='directory for the per-stop departure files and the stop index (<site>/data/v2/<agency>)')
 ap.add_argument('--legacy-out', help='also write the day-type stop files the phones of 1.13.0 and before read (<site>/data/<agency>)')
 ap.add_argument('--data-url', default='', help='where the per-stop files are served from, for the phone')
@@ -139,6 +140,30 @@ def short(text, table):
     text = re.sub(r'\s*\([^)]*\)', '', text)   # a stop code or a bay in brackets says nothing on a watch
     return re.sub(r'\s+', ' ', text).strip().upper()
 
+# A stop's name on the watch: the landmark the feed gives it in stop_desc, what
+# the bus announces ('Across from Eccles Ice Center'), where the agency writes
+# them and one fits; else its address. The cleaning is Cache Rider's, done
+# here from the feed rather than taken from it, so neither build leans on the
+# other. 'Across from' goes: twins across a road are read as one stop anyway.
+NAME_MAX = 23
+def landmark(desc, name):
+    d = re.sub(r'\s*\((?:Timepoint|Detour)\)\s*', ' ', desc or '', flags=re.I)
+    d = re.sub(r'\s*added \d+/\d+/\d+.*$', '', d, flags=re.I).strip(' -–·,')
+    if d.count('(') > d.count(')'): d += ')'
+    while d.count(')') > d.count('(') and ')' in d:
+        i = d.rindex(')'); d = (d[:i] + d[i + 1:]).strip()
+    if not d or re.fullmatch(r'(temp stop|timepoint|intermodal transit center)', d, re.I): return ''
+    plain = lambda x: re.sub(r'\W', '', x).lower()
+    if plain(d) in (plain(name), plain(name.rsplit(',', 1)[-1])): return ''
+    d = re.sub(r'^across from\s+', '', d, flags=re.I)
+    return d.split(' / ')[0].strip()
+def stop_name(s_):
+    address = short(s_['stop_name'], hints.get('stops', {}))
+    if a.landmarks:
+        by = short(landmark(s_.get('stop_desc', ''), s_['stop_name']), hints.get('stops', {}))
+        if by and len(by) <= NAME_MAX: return by
+    return address
+
 # The trip a departure belongs to, as GTFS-realtime names it: the agency's
 # trip_id without the -N its variants carry. Only used to lay live
 # predictions over the schedule when there are any.
@@ -193,7 +218,7 @@ if a.stops_out or a.legacy_out:
         for s_ in stops_all:
             sid = s_['stop_id']
             if sid not in rows_of: continue
-            text = json.dumps(dict({'id': sid, 'name': short(s_['stop_name'], hints.get('stops', {}))}, **body(rows_of[sid])),
+            text = json.dumps(dict({'id': sid, 'name': stop_name(s_)}, **body(rows_of[sid])),
                               separators=(',', ':'))
             open(os.path.join(out, 'stops', sid + '.json'), 'w').write(text)
             version.update(text.encode())
