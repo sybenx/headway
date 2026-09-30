@@ -267,6 +267,7 @@ function look(force, precise) {
   navigator.geolocation.getCurrentPosition(function (pos) {
     var lat = pos.coords.latitude, lon = pos.coords.longitude;
     sawFix(lat, lon);
+    keepNear(lastSys, lat, lon);
     if (wx) weatherAt(pos, force);
     if (!transitWants) return;
     var st = transitState(lat, lon);
@@ -284,34 +285,86 @@ function look(force, precise) {
 // The stop index and the per-stop files come from the repo's own pages,
 // written nightly by tools/transit.py. A precise fix picks the stop; twin
 // stops across a road are merged, since the headsign tells them apart.
+//
+// Both are kept on the phone, and whatever is kept answers when the network
+// doesn't: a flick at a stop with no signal still gets its timetable. The
+// index says which cut of the timetable it is (v); a stop file kept from the
+// same cut is good until the agency publishes a new one, and never mixed with
+// another cut's index, whose services it wouldn't match. An index without a
+// version (pages built before it had one) goes by time, as before.
 var INDEX_TTL = 24 * 60 * 60 * 1000, STOP_TTL = 6 * 60 * 60 * 1000;
 // At a stop, the board; off it, the board with its distance; further than
 // two kilometres from any stop, nothing.
 var AT_STOP = 60, TWIN = 80, HUB = 100, FAR = 2000;
 
-function cached(key, ttl) {
-  try {
-    var v = JSON.parse(localStorage.getItem(key));
-    if (v && Date.now() - v.at < ttl) return v.data;
-  } catch (e) {}
-  return null;
+function kept(key) {
+  try { return JSON.parse(localStorage.getItem(key)); } catch (e) { return null; }
 }
-function remember(key, data) {
-  try { localStorage.setItem(key, JSON.stringify({ at: Date.now(), data: data })); } catch (e) {}
+function remember(key, data, v) {
+  try { localStorage.setItem(key, JSON.stringify({ at: Date.now(), v: v, data: data })); } catch (e) {}
 }
-function getJSON(url, key, ttl, cb) {
-  var hit = cached(key, ttl);
-  if (hit) return cb(hit);
+// A kept stop file that answers for this index as it stands.
+function stopKept(entry, index) {
+  if (!entry) return false;
+  return index.v ? entry.v === index.v : Date.now() - entry.at < STOP_TTL;
+}
+function fetchJSON(url, cb) {
   var req = new XMLHttpRequest();
   req.open('GET', url, true);
   req.onload = function () {
     if (req.status !== 200) return cb(null);
-    try { var d = JSON.parse(req.responseText); remember(key, d); cb(d); } catch (e) { cb(null); }
+    try { cb(JSON.parse(req.responseText)); } catch (e) { cb(null); }
   };
   req.onerror = function () { cb(null); };
   req.timeout = 8000;
   req.ontimeout = function () { cb(null); };
   req.send();
+}
+// The index: the kept one while it's a day old at most, else the network's,
+// else the kept one however old.
+function getIndex(sys, cb) {
+  var key = 'hw2-stops-' + sys.agency.toLowerCase(), entry = kept(key);
+  if (entry && Date.now() - entry.at < INDEX_TTL) return cb(entry.data);
+  fetchJSON(sys.data + 'stops.json', function (d) {
+    if (d && d.stops) { remember(key, d); return cb(d); }
+    cb(entry ? entry.data : null);
+  });
+}
+// A stop's file: the kept one when it answers for this index, else the
+// network's, else, with an index that doesn't say its cut, the kept one
+// however old.
+function getStop(sys, index, id, cb) {
+  var key = 'hw2-stop-' + sys.agency.toLowerCase() + '-' + id, entry = kept(key);
+  if (stopKept(entry, index)) return cb(entry.data);
+  fetchJSON(sys.data + 'stops/' + id + '.json', function (d) {
+    if (d) { remember(key, d, index.v); return cb(d); }
+    cb(entry && !index.v ? entry.data : null);
+  });
+}
+
+// The stops around wherever the phone last looked, kept before they're asked
+// for: the flick at a stop the wearer walks to finds its timetable on the
+// phone. One file at a time, only those not already kept for this cut of the
+// timetable, so a day spent in the same few places asks for nothing more.
+var KEEP_NEAR = 400, KEEP_MAX = 24, keeping = false;
+function keepNear(sys, lat, lon) {
+  if (keeping || !sys || !sys.data || hubMode() === MODE_OFF) return;
+  keeping = true;
+  getIndex(sys, function (index) {
+    if (!index) { keeping = false; return; }
+    var tag = sys.agency.toLowerCase();
+    var todo = index.stops.map(function (st) { return { id: st[0], d: metres(lat, lon, st[1], st[2]) }; })
+      .filter(function (st) { return st.d <= KEEP_NEAR; })
+      .sort(function (a, b) { return a.d - b.d; })
+      .slice(0, KEEP_MAX)
+      .filter(function (st) { return !stopKept(kept('hw2-stop-' + tag + '-' + st.id), index); });
+    if (todo.length) console.log('headway: keeping ' + todo.length + ' stops nearby');
+    (function next() {
+      var st = todo.shift();
+      if (!st) { keeping = false; return; }
+      getStop(sys, index, st.id, function () { next(); });
+    })();
+  });
 }
 
 // A direction word that fits the board's second column: the compass word
@@ -667,8 +720,7 @@ function onFlick() {
     if (sawFix(lat, lon)) weatherAt(pos, true);
     var sys = systemAt(lat, lon);
     if (!sys || !sys.data) return sendStopView('', 0, []);
-    var DATA_URL = sys.data, tag = sys.agency.toLowerCase();
-    getJSON(DATA_URL + 'stops.json', 'hw2-stops-' + tag, INDEX_TTL, function (index) {
+    getIndex(sys, function (index) {
       if (!index) return sendStopView('', 0, []);
       Object.keys(index.routes || {}).forEach(function (r, i) { routeRank[r] = i; });
       var ranked = index.stops.map(function (st) {
@@ -699,11 +751,14 @@ function onFlick() {
       if (byFeed) askLive(sys.live, true, function (buf) { feed = buf; gotLive(); });
       else getLive(sys, group.map(function (st) { return st.id; }), function (l) { live = l; gotLive(); });
       group.forEach(function (st) {
-        getJSON(DATA_URL + 'stops/' + st.id + '.json', 'hw2-stop-' + tag + '-' + st.id, STOP_TTL, function (stop) {
+        getStop(sys, index, st.id, function (stop) {
           if (stop) { if (!name) name = stop.name; stop.id = stop.id || st.id; stops.push(stop); }
           if (!--left) answer();
         });
       });
+      // Once the answer and its live word are in, the stops around are kept
+      // for the next flick.
+      setTimeout(function () { keepNear(sys, lat, lon); }, LIVE_WAIT + 1000);
       function answer() {
         if (byFeed && feed && !live) live = readFeed(feed, tripsSoon(stops, index.services, now, nowMin));
         // Today's remaining departures; when there are none, the first

@@ -177,7 +177,11 @@ also writes the hub, its hours and the departures of the routes on their own
 timetable. The app's entry for each system goes in `src/pkjs/transit.json`;
 the stop files are served by GitHub Pages from the `pages` branch, which a
 nightly workflow rebuilds from the feeds and replaces whole, so old
-timetables never pile up in the history.
+timetables never pile up in the history. The index carries a version of
+the timetable it was cut from, the same night after night until the agency
+publishes a new feed; the phone keeps each stop's file until that version
+changes, and keeps the stops within a few hundred metres of wherever it last
+looked, so a flick at a stop with no signal still has its timetable.
 
 Each departure names its trip, from the agency's own GTFS, so live
 predictions can be laid over it. For Connect they come from the relay at

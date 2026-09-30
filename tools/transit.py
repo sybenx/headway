@@ -15,7 +15,7 @@ next.
   python3 tools/transit.py gtfs.zip --agency CVTD --hub 41.7406,-111.8309 --routes G,B \
       --name "TRANSIT CTR" ...
 """
-import argparse, csv, datetime, io, json, math, os, re, sys, zipfile
+import argparse, csv, datetime, hashlib, io, json, math, os, re, sys, zipfile
 
 ap = argparse.ArgumentParser()
 ap.add_argument('gtfs', help='path to a GTFS zip')
@@ -187,17 +187,22 @@ if a.stops_out or a.legacy_out:
     def write(out, rows_of, body, extra, grouped):
         os.makedirs(os.path.join(out, 'stops'), exist_ok=True)
         index = []
+        # The version of this cut of the timetable, from what it says: the same feed gives the same version night
+        # after night, so the phone keeps its stop files until the agency publishes a new one.
+        version = hashlib.sha1(json.dumps(extra, sort_keys=True).encode())
         for s_ in stops_all:
             sid = s_['stop_id']
             if sid not in rows_of: continue
-            json.dump(dict({'id': sid, 'name': short(s_['stop_name'], hints.get('stops', {}))}, **body(rows_of[sid])),
-                      open(os.path.join(out, 'stops', sid + '.json'), 'w'), separators=(',', ':'))
+            text = json.dumps(dict({'id': sid, 'name': short(s_['stop_name'], hints.get('stops', {}))}, **body(rows_of[sid])),
+                              separators=(',', ':'))
+            open(os.path.join(out, 'stops', sid + '.json'), 'w').write(text)
+            version.update(text.encode())
             entry = [sid, round(float(s_['stop_lat']), 5), round(float(s_['stop_lon']), 5)]
             if grouped and sid in group: entry.append(group[sid])
             index.append(entry)
         head = {'agency': a.agency}
         if a.hub: head['hub'] = {'lat': lat, 'lon': lon}
-        json.dump(dict(head, routes=colours, stops=index, **extra),
+        json.dump(dict(head, v=version.hexdigest()[:12], routes=colours, stops=index, **extra),
                   open(os.path.join(out, 'stops.json'), 'w'), separators=(',', ':'))
         size = sum(os.path.getsize(os.path.join(out, 'stops', f)) for f in os.listdir(os.path.join(out, 'stops')))
         print('stops', len(index), 'files,', size, 'bytes, in', os.path.normpath(out))
