@@ -34,20 +34,19 @@ Your location stays on your phone, and it never asks for a high-accuracy
 fix: the weather service gets it rounded to about 100 m, and live times are
 asked for by stop number (UTA's come from its own feed, whole, so nothing is
 asked). No accounts. Turn transit off and it never checks your location for
-transit. Only Transitous, if you turn it on, is sent your location for transit.
+transit.
 
 When rain is due within the hour, the face says RAIN IN 15 MIN, large, in
 the free column beside the modules, from the same weather check.
 
-Elsewhere, a flick can ask Transitous (transitous.org), a free,
-volunteer-run service built on open transit data, for the stops and
-departures near you. It is off unless you turn it on, and the setting says
-what it costs: a location fix on every flick, sent rounded to about 100 m,
-and about 50 KB of data. Departures from transitous.org/sources, stops from
-OpenStreetMap.
-
 Settings on the phone for modules, theme, accent, wrist, clock and units.
 Round watches aren't supported.
+
+## Release notes (1.23.2)
+
+Flick anywhere is held back for now, and its setting is gone until it
+returns. Stop names with a slash or an apostrophe read cleanly on every
+watch: 400 W & 300 S.
 
 ## Release notes (1.23.1)
 

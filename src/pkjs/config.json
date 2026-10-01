@@ -287,13 +287,6 @@
         "label": "Flick for the nearest stop",
         "defaultValue": true,
         "description": "A flick of the wrist shows the nearest stop and what leaves it next, for twelve seconds. Off, a flick still shows the seconds."
-      },
-      {
-        "type": "toggle",
-        "messageKey": "ANYWHERE",
-        "label": "Flick anywhere, with Transitous",
-        "defaultValue": false,
-        "description": "Off unless you turn it on. Outside the systems above, a flick asks Transitous, a free, volunteer-run service built on open transit data (transitous.org), for the stops and departures near you. With this on: a flick takes a location fix wherever you are, not only in a system the face knows; your location goes to Transitous, rounded to about 100 m, and its servers keep request logs for two days; each flick downloads about 50 KB over the phone’s data, up to 250 KB in the largest cities. Times are live where the agency publishes them, the timetable elsewhere, and only as good as the feeds behind them. The systems above always answer from their own timetable."
       }
     ]
   },

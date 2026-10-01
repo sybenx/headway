@@ -879,7 +879,10 @@ function board(o) {
 // the wearer is at, if the first answer is thin there, by that stop alone.
 var ANY_URL = 'https://api.transitous.org/api/v6/stoptimes', ANY_RADIUS = 500, ANY_N = 24, ANY_STOP_N = 12;
 var ANY_WAIT = 6000, VERSION = require('../../package.json').version;
+// Held back until Transitous has heard from us: off whatever was saved.
+var ANY_READY = false;
 function anywhere() {
+  if (!ANY_READY) return false;
   var v = settings().ANYWHERE;
   return v === true || v === 1 || v === '1' || v === 'true';
 }
@@ -888,9 +891,13 @@ function askAnywhere(query, cb) {
   function finish(v) { if (!done) { done = true; cb(v); } }
   var req = new XMLHttpRequest();
   req.open('GET', ANY_URL + '?' + query, true);
-  // Transitous asks every client to say who it is; a phone that won't let a
-  // page set the header sends its own.
-  try { req.setRequestHeader('User-Agent', 'Headway/' + VERSION + ' (https://github.com/sybenx/headway)'); } catch (e) {}
+  // Transitous asks every client to say who it is, in the User-Agent. The
+  // phone's web view drops a User-Agent set by a page without a word (Core's
+  // Android app sends its own, and no Referer), so the same words go in
+  // X-Client too, which it does send.
+  var who = 'Headway/' + VERSION + ' (support@cacherider.com; https://github.com/sybenx/headway)';
+  try { req.setRequestHeader('User-Agent', who); } catch (e) {}
+  req.setRequestHeader('X-Client', who);
   req.onload = function () {
     var d = null;
     try { d = req.status === 200 ? JSON.parse(req.responseText) : null; } catch (e) {}

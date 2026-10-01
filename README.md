@@ -171,22 +171,6 @@ Provo, is the stops kind: TRAX, FrontRunner and the buses, with the rail
 lines by the names riders use (`BLUE`, `RED`, `GRN`, `S`, `FR`) and every bay
 of a station answering as one. Adding another is a GTFS feed; see Data below.
 
-### Anywhere, if you ask
-
-Outside those two, a flick can ask [Transitous](https://transitous.org), the
-free, volunteer-run routing service built on every open transit feed it can
-find, for the stops near you and what leaves them, with live times where
-the agency publishes them. It answers in the same screens as the face's own
-systems: at a stop, its routes and times; away from one, the stops near and
-their next buses. It is **off unless you turn it on**, and stays so:
-with it on, a flick takes a location fix wherever you are, sends it to
-Transitous rounded to about 100 m (and, at a stop with few departures in
-the first answer, the stop's id alone), and downloads about 50 KB a flick,
-more in the largest cities. Where the face knows a system it answers from
-that system's own timetable, and Transitous is never asked. Departure data
-from [Transitous's sources](https://transitous.org/sources/), stops from
-[OpenStreetMap](https://www.openstreetmap.org/copyright).
-
 ## Countdown everywhere
 
 The face began as a countdown for any fixed-headway service — a train every
@@ -201,8 +185,7 @@ and a departure offset you set, with the hub's extras when you are at one.
 From the Pebble app.
 
 - **Transit** — automatic (default), countdown everywhere, or off. With it:
-  how near the hub counts as at it, and a switch for the flick. **Flick
-  anywhere, with Transitous** is off unless you turn it on; see above.
+  how near the hub counts as at it, and a switch for the flick.
 - **Headway** and **departure offset** — for the countdown: 30, 20 or 15
   minutes, and minutes past the hour.
 - **Boarding buzz** — one pulse at five minutes: at the transit centre

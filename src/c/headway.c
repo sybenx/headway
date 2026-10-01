@@ -64,6 +64,7 @@ typedef struct {
 #define BUZZ_HUB    1   // only at the hub, where a countdown is a bus to catch
 #define BUZZ_ALWAYS 2   // wherever the countdown runs
 
+#define ANY_READY 0   // Transitous held back: a saved on asks nowhere new
 #define SETTINGS_KEY 1
 #define SETTINGS_VERSION 6
 #define WEATHER_KEY  2
@@ -2573,7 +2574,7 @@ static void stopview_hold(uint32_t ms) {
 #define DRIVE_KMH 130
 static bool flick_asks(void) {
   if (s_set.transit == TRANSIT_OFF || !s_set.flick) return false;
-  if (s_set.anywhere) return true;
+  if (ANY_READY && s_set.anywhere) return true;
   if (s_set.transit != TRANSIT_AUTO && s_set.transit != TRANSIT_NEAR) return true;
   if (s_tr.area || !s_tr.at || !s_tr.km) return true;
   const int32_t gone = (int32_t)(time(NULL) - s_tr.at);
