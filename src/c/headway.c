@@ -133,7 +133,8 @@ static struct {
 // says without a flick how many buses are still on trips (out), when the
 // last trip ended (end) and when to stop saying so (until), in epoch seconds.
 #define YARD_KEY 4
-static struct { int8_t out; int32_t end, until; } s_yd;
+static struct { int8_t out; int32_t end, until; int32_t from, wuntil; bool near; } s_yd;
+static time_t s_yd_asked;   // when the watch last asked the phone to look at the yard
 // The buses out, from a flick's answer while it's up, else from the phone's
 // word in its window; -1 when neither.
 static int yard_out(void) {
@@ -2373,9 +2374,27 @@ static void walk_look(void) {
   if (app_message_outbox_send() == APP_MSG_OK) looked();
 }
 
+#ifdef HAS_YARD
+// Through the yard's hour, while the phone last saw the wearer near it, the
+// watch asks the phone to look every two minutes: the phone's own timer can
+// be held back in the background, a message from the watch wakes it.
+#define YARD_EVERY 120
+static void yard_ask(void) {
+  const time_t now = time(NULL);
+  if (!s_yd.near || now < s_yd.from || now >= s_yd.wuntil || now - s_yd_asked < YARD_EVERY) return;
+  DictionaryIterator *out;
+  if (app_message_outbox_begin(&out) != APP_MSG_OK) return;
+  dict_write_uint8(out, MESSAGE_KEY_YARD, 1);
+  if (app_message_outbox_send() == APP_MSG_OK) s_yd_asked = now;
+}
+#endif
+
 static void tick_handler(struct tm *tick_time, TimeUnits units) {
   retune_tick();
   if (units & MINUTE_UNIT) walk_look();
+#ifdef HAS_YARD
+  yard_ask();
+#endif
   layer_mark_dirty(s_face);
 }
 
@@ -2555,6 +2574,14 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
   Tuple *tp;
   take_transit(iter);
 #ifdef HAS_YARD
+  if ((tp = dict_find(iter, MESSAGE_KEY_YD_FROM))) {
+    Tuple *tu = dict_find(iter, MESSAGE_KEY_YD_UNTIL), *tn = dict_find(iter, MESSAGE_KEY_YD_NEAR);
+    s_yd.from = tp->value->int32;
+    s_yd.wuntil = tu ? tu->value->int32 : 0;
+    s_yd.near = tn && tn->value->int32 != 0;
+    persist_write_data(YARD_KEY, &s_yd, sizeof(s_yd));
+    yard_ask();
+  }
   if ((tp = dict_find(iter, MESSAGE_KEY_YD_OUT))) {
     Tuple *te = dict_find(iter, MESSAGE_KEY_YD_END), *tu = dict_find(iter, MESSAGE_KEY_YD_UNTIL);
     s_yd.out = (int8_t)(tp->value->int32 > 99 ? 99 : tp->value->int32 < -1 ? -1 : tp->value->int32);

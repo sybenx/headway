@@ -84,7 +84,10 @@
       "YD_OUT",
       "YD_END",
       "YD_UNTIL",
-      "SV_LIST"
+      "SV_LIST",
+      "YD_FROM",
+      "YD_NEAR",
+      "YARD"
     ],
     "resources": {
       "media": [

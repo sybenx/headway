@@ -275,6 +275,7 @@ function look(force, fresh) {
   navigator.geolocation.getCurrentPosition(function (pos) {
     var lat = pos.coords.latitude, lon = pos.coords.longitude;
     sawFix(lat, lon);
+    tellYardWindow();
     if (wx) weatherAt(pos, force);
     if (!transitWants) return;
     var st = transitState(lat, lon);
@@ -988,6 +989,7 @@ function onLook() {
 Pebble.addEventListener('appmessage', function (e) {
   if (e.payload && e.payload.FLICK) { console.log('headway: flick'); onFlick(); }
   else if (e.payload && e.payload.LOOK) onLook();
+  else if (e.payload && e.payload.YARD) { console.log('headway: yard asked by the watch'); yardTick(); }
 });
 
 Pebble.addEventListener('ready', function () { look(true); });
@@ -1024,6 +1026,36 @@ function yardWindow(index, now) {
     if (t >= cands[i] && t < cands[i] + YARD_HOUR * 60) return { start: cands[i], until: cands[i] + YARD_HOUR * 60 };
   }
   return null;
+}
+// Today's window ahead or under way (null when there's none left today), for
+// the watch to keep: through it the watch asks the phone to look, every two
+// minutes, while the phone was last seen near the yard. A message from the
+// watch wakes the phone's script where its own timer may be held back.
+function yardAhead(index, now) {
+  var ends = index.ends || [], midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000;
+  var t = now.getTime() / 1000, best = null;
+  [-1, 0].forEach(function (back) {
+    var day = new Date(now.getFullYear(), now.getMonth(), now.getDate() + back);
+    var on = activeServices(index.services, day), end = -1;
+    Object.keys(on).forEach(function (i) { if (on[i] && ends[i] > end) end = ends[i]; });
+    var start = midnight + (back * 1440 + end) * 60;
+    if (end >= 0 && t < start + YARD_HOUR * 60 && !best) best = { start: start, until: start + YARD_HOUR * 60 };
+  });
+  return best;
+}
+var windowTold = null;
+function tellYardWindow() {
+  var sys = lastSys;
+  if (!sys || !sys.base || classic() || hubMode() === MODE_OFF) return;
+  getIndex(sys, function (index) {
+    var w = index && index.ends && yardAhead(index, new Date());
+    var msg = { YD_FROM: w ? Math.round(w.start) : 0, YD_UNTIL: w ? Math.round(w.until) : 0, YD_NEAR: lastBaseM <= YARD_NEAR ? 1 : 0 };
+    var key = JSON.stringify(msg);
+    if (key === windowTold) return;
+    windowTold = key;
+    console.log('headway: yard window ' + key);
+    Pebble.sendAppMessage(msg);
+  });
 }
 function tellYard(msg) {
   var key = JSON.stringify(msg);
