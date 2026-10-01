@@ -556,8 +556,10 @@ function activeServices(services, d) {
 // its own clock style, 12-hour with A or P, or 24-hour.
 
 // The watch keeps 23 characters of a stop's name; cut at a word, never in one.
+// Names go through plain() first: the nightly data keeps the agency's '/' and
+// '-', which basalt's hand-drawn caption font has no letters for.
 function fitName(name) {
-  name = name || '';
+  name = plain(name, true);
   if (name.length <= 23) return name;
   var cut = name.slice(0, 24).lastIndexOf(' ');
   return name.slice(0, cut > 0 ? cut : 23);
