@@ -10,44 +10,24 @@ Headway
 
 ## Short description
 
-A watch that reads past your sleeve, and knows when you're near the bus.
+A sleeve-aware transit watch.
 
 ## Description
 
-A plain watch that reads past your sleeve: the time, heart rate, weather and
-date hang from the outer edge, so the part a cuff uncovers first is the part
-you need. Dark at night, light by day.
+A sleeve-aware transit watch: the time, heart rate, weather and date hang
+from the outer edge, the part a cuff uncovers first. Rain due within the
+hour shows on the face.
 
-It knows two transit systems: Connect in Logan, Utah, and UTA from Ogden to
-Provo. The half-hourly check that fetches the weather also tells it whether
-you're near one. If you are, flick your wrist at a stop to see what leaves
-next: each route as a coloured badge with its next times, live predictions
-marked with a small arc where there are any. Away from a stop, a flick shows
-the stops near you, each with its next buses. If you're not, a flick doesn't
-check your location at all.
+Near Connect (Logan, Utah) or UTA (Ogden to Provo), flick your wrist for the
+next buses at your stop, live where there are live times. At Connect's
+transit centre it counts down to the next departure.
 
-At Connect's transit centre it counts down to the next departure, with a
-buzz at five minutes, and a flick shows which routes' buses are in. While buses run there, it checks every five minutes
-nearby so the countdown is on when you arrive, and stops after the last bus.
+Optional: turn on Transitous (transitous.org) to flick for buses anywhere
+else. Off by default; it sends your location, rounded to about 100 m. Data
+from transitous.org/sources and OpenStreetMap.
 
-Your location stays on your phone, and it never asks for a high-accuracy
-fix: the weather service gets it rounded to about 100 m, and live times are
-asked for by stop number (UTA's come from its own feed, whole, so nothing is
-asked). No accounts. Turn transit off and it never checks your location for
-transit. Only Transitous, if you turn it on, is sent your location for transit.
-
-When rain is due within the hour, the face says RAIN IN 15 MIN, large, in
-the free column beside the modules, from the same weather check.
-
-Elsewhere, a flick can ask Transitous (transitous.org), a free,
-volunteer-run service built on open transit data, for the stops and
-departures near you. It is off unless you turn it on, and the setting says
-what it costs: a location fix on every flick, sent rounded to about 100 m,
-and about 50 KB of data. Departures from transitous.org/sources, stops from
-OpenStreetMap.
-
-Settings on the phone for modules, theme, accent, wrist, clock and units.
-Round watches aren't supported.
+Otherwise your location stays on your phone. No accounts. Round watches
+aren't supported.
 
 ## Release notes (1.24.0)
 
