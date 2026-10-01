@@ -417,6 +417,7 @@ function keepNear(sys, lat, lon) {
 // when the headsign has one, else as many of its words as fit in eight, or
 // its first eight letters when the first word alone is longer.
 function dirWord(head) {
+  head = plain(head);   // HYRUM, not HYRUM,: the fonts have no comma
   var m = /\b(NORTH|SOUTH|EAST|WEST|IN|OUT)BOUND\b/.exec(head || '');
   if (m) return m[1].length <= 2 ? m[1] + 'BOUND' : m[1];
   var words = (head || '').trim().split(/\s+/), out = '';
@@ -903,12 +904,13 @@ function askAnywhere(query, cb) {
 }
 // Names from anywhere in the world, in the letters the face's own fonts
 // draw: capitals, digits and a little punctuation. Accents fold away,
-// a slash or a plus reads as and, and the rest is dropped.
+// apostrophes go, a slash or a plus reads as and, and the rest is dropped.
 function plain(text, keep) {
   var t = String(text || '').toUpperCase();
   try { t = t.normalize('NFD').replace(/[\u0300-\u036f]/g, ''); } catch (e) {}
   t = t.replace(/\u00df/g, 'SS').replace(/\u00c6/g, 'AE').replace(/\u00d8/g, 'O').replace(/\u0152/g, 'OE')
     .replace(/\u0141/g, 'L').replace(/\u0110/g, 'D').replace(/\u00de/g, 'TH').replace(/\u0131/g, 'I');
+  t = t.replace(/['\u2019]/g, '');   // MCDONALDS, not MCDONALD S
   if (keep) t = t.replace(/\s*[\/+]\s*/g, ' & ');
   return t.replace(keep ? /[^A-Z0-9&.: ]+/g : /[^A-Z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
