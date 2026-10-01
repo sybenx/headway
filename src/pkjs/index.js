@@ -1179,7 +1179,10 @@ setInterval(function () { look(false); }, 5 * 60 * 1000);
 // Only a phone last seen within YARD_NEAR of the yard looks every two minutes;
 // anywhere else the half-hourly look (or a flick there) has to bring it near.
 var YARD_HOUR = 60, YARD_EVERY = 2 * 60 * 1000, YARD_NEAR = 1000, lastBaseM = Infinity;
-var yard = { told: null, asked: 0, start: 0, seen: 0 };
+var yard = { told: null, asked: 0, start: 0, seen: 0, zero: null };
+// Once none are out, one more look YARD_RECHECK after the last trip ended,
+// for a bus that logged out wrongly and back in; then none.
+var YARD_RECHECK = 5 * 60;
 // [start, until] in epoch seconds around now, or null outside it.
 function yardWindow(index, now) {
   var ends = index.ends || [];
@@ -1240,8 +1243,10 @@ function yardTick() {
   getIndex(sys, function (index) {
     var w = index && index.ends && yardWindow(index, new Date());
     if (!w) return yardOff();
-    if (w.start !== yard.start) { yard.start = w.start; yard.seen = 0; }
+    if (w.start !== yard.start) { yard.start = w.start; yard.seen = 0; yard.zero = null; }
     if (Date.now() - yard.asked < YARD_EVERY) return;
+    var z = yard.zero, nowAsk = Date.now() / 1000;
+    if (z && (nowAsk < z.end + YARD_RECHECK || z.at >= z.end + YARD_RECHECK)) return;
     yard.asked = Date.now();
     navigator.geolocation.getCurrentPosition(function (pos) {
       var lat = pos.coords.latitude, lon = pos.coords.longitude;
@@ -1262,7 +1267,9 @@ function yardTick() {
           if (onRoad(b) && nowS - b[2] < BUS_FRESH && metres(b[0], b[1], sys.base.lat, sys.base.lon) > sys.base.r && b[2] > yard.seen) yard.seen = b[2];
         });
         // When the last trip ended only matters once none are out.
-        tellYard({ YD_OUT: out, YD_END: out ? 0 : Math.round(yard.seen || w.start), YD_UNTIL: Math.round(w.until) });
+        var end = Math.round(yard.seen || w.start);
+        yard.zero = out ? null : { end: end, at: nowS };
+        tellYard({ YD_OUT: out, YD_END: out ? 0 : end, YD_UNTIL: Math.round(w.until) });
       });
     }, function () { /* no fix: the watch keeps its last word until the window ends */ },
     { timeout: 10000, maximumAge: 4 * 60 * 1000 });

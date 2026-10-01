@@ -2470,11 +2470,15 @@ static void walk_look(void) {
 // Through the yard's hour, while the phone last saw the wearer near it, the
 // watch asks the phone to look every two minutes: the phone's own timer can
 // be held back in the background, a message from the watch wakes it.
+// Once none are out the minutes count on the watch alone; it asks once more
+// YARD_RECHECK after the last trip ended, for a bus that logged out wrongly
+// and back in, and that's all.
 #define YARD_EVERY 120
+#define YARD_RECHECK (5 * 60)
 static void yard_ask(void) {
   const time_t now = time(NULL);
   if (!s_yd.near || now < s_yd.from || now >= s_yd.wuntil || now - s_yd_asked < YARD_EVERY) return;
-  if (s_yd.out == 0 && s_yd.end && now - s_yd.end >= YARD_AFTER) return;   // done: the last is long in
+  if (s_yd.out == 0 && s_yd.end && (now < s_yd.end + YARD_RECHECK || s_yd_asked >= s_yd.end + YARD_RECHECK)) return;
   DictionaryIterator *out;
   if (app_message_outbox_begin(&out) != APP_MSG_OK) return;
   dict_write_uint8(out, MESSAGE_KEY_YARD, 1);

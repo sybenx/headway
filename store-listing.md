@@ -49,6 +49,12 @@ OpenStreetMap.
 Settings on the phone for modules, theme, accent, wrist, clock and units.
 Round watches aren't supported.
 
+## Release notes (1.23.1)
+
+At Connect's yard, once every bus is in, the watch looks once more five
+minutes after the last trip ended, in case one logged out by mistake, and
+then stops asking; the minutes count on by themselves.
+
 ## Release notes (1.23.0)
 
 A new setting, off unless you turn it on: flick anywhere, with Transitous.

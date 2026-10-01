@@ -130,7 +130,10 @@ the timetable's, from the latest arrival of the services running that day
 (9:03 PM on weekdays, 6:59 on Saturdays), and the minutes run from when the
 last bus was last seen on its trip, or from the timetable's end if it was
 never seen. Only a phone last seen within a kilometre of the yard looks,
-every two minutes through that hour; anywhere else nothing changes. A Pebble
+every two minutes while buses are out; once none are, it looks once more
+five minutes after the last trip ended, for a bus that logged out by mistake
+and back in, and then not again, while the minutes count to 25 on the watch.
+Anywhere else nothing changes. A Pebble
 Classic has no room for the count and answers as at any stop. A system names
 its yard with `--base lat,lon,metres`, and the stop index then carries each
 service's end.
