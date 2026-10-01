@@ -53,6 +53,7 @@ typedef struct {
   uint8_t transit;     // TRANSIT_*: what knowing the hub changes
   uint16_t radius;     // metres around the hub that count as near
   bool flick;          // a flick asks for the nearest stop
+  bool anywhere;       // and asks outside the systems the face knows (Transitous)
 } Settings;
 
 #define MOD_ICONS_OFF    0
@@ -64,7 +65,7 @@ typedef struct {
 #define BUZZ_ALWAYS 2   // wherever the countdown runs
 
 #define SETTINGS_KEY 1
-#define SETTINGS_VERSION 5
+#define SETTINGS_VERSION 6
 #define WEATHER_KEY  2
 #define TRANSIT_KEY  3
 #define THRESHOLD 5   // minutes; block goes solid at or under this
@@ -197,6 +198,7 @@ static void settings_defaults(void) {
   s_set.transit = TRANSIT_AUTO;
   s_set.radius = 100;   // every bay, and hardly a house
   s_set.flick = true;
+  s_set.anywhere = false;   // never on unless chosen
 }
 
 static void settings_clamp(void) {
@@ -230,8 +232,10 @@ static void settings_load(void) {
     bool adopted = false;
     if (n == (int)sizeof(s_set)) {
       persist_read_data(SETTINGS_KEY, &stored, sizeof(stored));
-      // Layout 4 is this one byte for byte; only the buzz's meaning moved.
-      if (stored.version == SETTINGS_VERSION || stored.version == 4) { s_set = stored; adopted = true; }
+      // Layouts 4 and 5 are this one byte for byte; only the buzz's meaning
+      // moved, and the byte that holds anywhere was padding, read as off.
+      if (stored.version >= 4 && stored.version <= SETTINGS_VERSION) { s_set = stored; adopted = true; }
+      if (stored.version < 6) s_set.anywhere = false;
     } else if (n >= (int)offsetof(Settings, transit) && n < (int)sizeof(s_set)) {
       // An older layout: the same fields up to where new ones were appended.
       // Carry it over rather than hand the wearer the defaults again.
@@ -1921,34 +1925,51 @@ static void layout_sideblock(const Frame *fr, int band_top, int band_bot, int le
   s_sb.show = true;
 }
 
-// ---- rain on its way: within the hour, the quiet face says so in the band
-// beside the modules, two short lines, RAIN IN over 15 MIN, to the nearest
-// five minutes up: the forecast comes by the quarter hour. A flick's answer
+// ---- rain on its way: within the hour, the quiet face gives it the whole
+// band on the wrist side of the modules: RAIN IN over a big 20 MIN, in the
+// largest figures that fit, to the nearest five minutes up since the forecast
+// comes by the quarter hour. Only when rain is coming; a flick's answer
 // takes the place first.
 #ifdef HAS_RAIN
-static struct { bool show; char mins[10]; int x, y1, y2; } s_rn;
+static struct { bool show; char num[4]; GFont f; int x, y_lab, y_num, x_min, y_min; } s_rn;
 static void layout_rain(int band_top, int band_bot, int left, int right) __attribute__((noinline));
 static void layout_rain(int band_top, int band_bot, int left, int right) {
   s_rn.show = false;
   const int32_t ahead = s_wx.valid && s_wx.rain_at ? s_wx.rain_at - (int32_t)time(NULL) : -1;
   if (ahead <= 0 || ahead > 60 * 60) return;
-  const int m = ((ahead + 59) / 60 + 4) / 5 * 5;
-  snprintf(s_rn.mins, sizeof(s_rn.mins), "%d MIN", m);
-  const int w = run_w("RAIN IN", s_f_cap, false, TRACK), w2 = run_w(s_rn.mins, s_f_cap, false, TRACK);
-  const int h = 2 * s_m_cap.cap + sc(SB_GAP);
-  if ((w > w2 ? w : w2) > right - left - sc(8) || h > band_bot - band_top) return;
-  const int top = band_top + (band_bot - band_top - h) / 2;
-  s_rn.x = left + sc(8);
-  s_rn.y1 = top - s_m_cap.bearing;
-  s_rn.y2 = top + s_m_cap.cap + sc(SB_GAP) - s_m_cap.bearing;
-  s_rn.show = true;
+  snprintf(s_rn.num, sizeof(s_rn.num), "%d", (int)(((ahead + 59) / 60 + 4) / 5 * 5));
+  const Metrics ml = barlow_metrics(measure("RAIN IN", s_f_label).h);
+  const int lab_w = run_w("RAIN IN", s_f_label, false, TRACK), min_w = run_w("MIN", s_f_label, false, TRACK);
+  const int room_w = right - left - sc(8), room_h = band_bot - band_top;
+  const GFont fonts[3] = { s_f_count, s_f_count_s, s_f_bigdate };
+  // Each size with MIN on the figures' baseline, then with MIN under them.
+  for (int k = 0; k < 6; k++) {
+    const GFont f = fonts[k / 2];
+    const bool under = k & 1;
+    const Metrics mn = barlow_metrics(measure(s_rn.num, f).h);
+    const int num_w = run_w(s_rn.num, f, true, 0), gap = sc(SB_GAP) * 2;
+    const int row_w = under ? (num_w > min_w ? num_w : min_w) : num_w + sc(LABEL_GAP) + min_w;
+    const int h = ml.cap + gap + mn.cap + (under ? gap + ml.cap : 0);
+    if ((row_w > lab_w ? row_w : lab_w) > room_w || h > room_h) continue;
+    const int top = band_top + (room_h - h) / 2;
+    s_rn.f = f;
+    s_rn.x = left + sc(8);
+    s_rn.y_lab = top - ml.bearing;
+    const int num_top = top + ml.cap + gap;
+    s_rn.y_num = num_top - mn.bearing;
+    s_rn.x_min = under ? s_rn.x : s_rn.x + num_w + sc(LABEL_GAP);
+    s_rn.y_min = (under ? num_top + mn.cap + gap : num_top + mn.cap - ml.cap) - ml.bearing;
+    s_rn.show = true;
+    return;
+  }
 }
 static void paint_rain(void) __attribute__((noinline));
 static void paint_rain(void) {
   graphics_context_set_text_color(s_ctx, s_dim);
-  draw_run("RAIN IN", s_f_cap, s_rn.x, s_rn.y1, false, TRACK);
+  draw_run("RAIN IN", s_f_label, s_rn.x, s_rn.y_lab, false, TRACK);
   graphics_context_set_text_color(s_ctx, s_ink);
-  draw_run(s_rn.mins, s_f_cap, s_rn.x, s_rn.y2, false, TRACK);
+  draw_run(s_rn.num, s_rn.f, s_rn.x, s_rn.y_num, true, 0);
+  draw_run("MIN", s_f_label, s_rn.x_min, s_rn.y_min, false, TRACK);
 }
 #endif
 
@@ -2329,7 +2350,14 @@ static void face_update(Layer *layer, GContext *ctx) {
     }
 #ifdef HAS_RAIN
     s_rn.show = false;
-    if (idle && !s_sb.show) layout_rain(s_tm.band_top, band_bot, fr.start - sc(8), s_md.n ? s_md.x0 - sc(8) : fr.end);
+    // The rain takes the whole column the modules and the date leave free,
+    // from under the time to the date's foot.
+    if (idle && !s_sb.show) {
+      int right = s_md.n ? s_md.x0 : fr.end;
+      if (s_id.dow_x < right) right = s_id.dow_x;
+      if (s_id.date_x < right) right = s_id.date_x;
+      layout_rain(s_tm.band_top, fr.bot - sc(DATE_PAD_BOT), fr.start - sc(8), right - sc(8));
+    }
 #endif
     // A flick with nothing to show, or one still waiting on the phone: the
     // seconds in the colon, on every face, so the gesture is seen to have
@@ -2541,6 +2569,7 @@ static void stopview_hold(uint32_t ms) {
 #define DRIVE_KMH 130
 static bool flick_asks(void) {
   if (s_set.transit == TRANSIT_OFF || !s_set.flick) return false;
+  if (s_set.anywhere) return true;
   if (s_set.transit != TRANSIT_AUTO && s_set.transit != TRANSIT_NEAR) return true;
   if (s_tr.area || !s_tr.at || !s_tr.km) return true;
   const int32_t gone = (int32_t)(time(NULL) - s_tr.at);
@@ -2763,6 +2792,9 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
   }
   if ((tp = dict_find(iter, MESSAGE_KEY_FLICK_ON))) {
     s_set.flick = tp->value->int32 != 0;
+  }
+  if ((tp = dict_find(iter, MESSAGE_KEY_ANYWHERE))) {
+    s_set.anywhere = tp->value->int32 != 0;
   }
   if ((tp = dict_find(iter, MESSAGE_KEY_TR_RADIUS))) {
     s_set.radius = (uint16_t)tp->value->int32;

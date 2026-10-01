@@ -600,7 +600,7 @@ function sendNearby(list) {
 }
 // The stops near a fix, nearest first, NEARBY_STOPS at most: twins across a
 // road are one, by the nearer's name; each with its two soonest routes.
-function nearbyStops(ranked, stops, deps, index, dayWord) {
+function nearbyStops(ranked, stops, deps, colour, dayWord) {
   var byId = {};
   stops.forEach(function (s) { byId[s.id] = s; });
   var out = [];
@@ -615,7 +615,7 @@ function nearbyStops(ranked, stops, deps, index, dayWord) {
     deps.forEach(function (d) {
       if (cells.length >= 2 || !o.ids[d.sid] || seen[d.route]) return;
       seen[d.route] = true;
-      cells.push([d.route, d.t, cells.length || !dayWord ? '' : dayWord, routeColour(index, d.route), d.live]);
+      cells.push([d.route, d.t, cells.length || !dayWord ? '' : dayWord, colour(d.route), d.live]);
     });
     o.cells = cells;
     return o;
@@ -813,6 +813,180 @@ function tripsSoon(stops, services, now, nowMin) {
   return want;
 }
 
+// A flick's answer from its departures, nearest stop first, whoever's
+// timetable they come from: deps by time, each {t, route, head, live, near,
+// sid}; best the nearest stop, ranked every stop by distance; out the yard's
+// count or null; letters false where headsigns carry no compass.
+function board(o) {
+  var deps = o.deps, dayWord = o.dayWord, title = o.title, best = o.best, reach = o.reach, out = o.out, colour = o.colour;
+  // A row a route and direction, in order of its next departure,
+  // with its next two times, or its next time and the day. Where a
+  // route runs both ways from here — twin stops across a road — the
+  // second column is the direction instead, since two identical
+  // badges would say nothing.
+  var groups = [], byKey = {}, perRoute = {};
+  deps.forEach(function (dep) {
+    var key = dep.route + '|' + dep.head, g = byKey[key];
+    if (!g) { g = byKey[key] = { route: dep.route, head: dep.head, times: [], live: dep.live, near: false }; groups.push(g); perRoute[dep.route] = (perRoute[dep.route] || 0) + 1; }
+    if (g.times.length < 2) g.times.push(dep.t);
+    g.near = g.near || dep.near;
+  });
+  // The nearest stop's routes, with its twin and its station, take the
+  // rows first; the stops the fix's accuracy adds only fill what's left,
+  // so a rough fix never pushes the stop the wearer is at off the board.
+  groups = groups.filter(function (g) { return g.near; }).concat(groups.filter(function (g) { return !g.near; }));
+  // Every row, near or far: the watch counts rows, not metres, and
+  // seats one row beside the modules and more on the board. The
+  // second column holds one qualifier: the day first, since a bus
+  // you can't catch today is the costliest thing to misread; then
+  // the direction at a merged pair; else the second time.
+  var rows = groups.slice(0, 3).map(function (g) {
+    var word = dayWord || (perRoute[g.route] > 1 ? dirWord(g.head) : '');
+    var when = word ? [g.times[0], word] : g.times;
+    return { route: g.route, head: g.head, when: when.join(' '), color: colour(g.route), live: g.live };
+  });
+  if (o.nearby) return sendNearby(nearbyStops(o.ranked, o.stops, deps, colour, dayWord));
+  // At a stop the answer takes the screen as it needs: a row a route
+  // with its next two times while they fit, every route's next time in
+  // two columns past that. Not the Classic, nor the yard.
+  if (out === null && !classic() && groups.length > 1) {   // one route: the block beside the modules
+    var take = groups.length <= TAKE_ROWS ? 'rows' : 'grid';
+    return sendTake(title, best.d <= Math.max(AT_STOP, reach) ? 0 : best.d, take, groups.slice(0, take === 'rows' ? TAKE_ROWS : TAKE_CELLS).map(function (g) {
+      var both = perRoute[g.route] > 1;
+      if (take === 'rows') {
+        var word = dayWord || (both ? dirWord(g.head) : '');
+        return [g.route, g.times[0], word || (g.times[1] === undefined ? '' : g.times[1]), colour(g.route), g.live];
+      }
+      // In two columns one time a route; a short route both ways from
+      // here carries the direction's first letter (12N, 12S), where a
+      // rail line's name would only garble (REDD), and so would a headsign
+      // from a feed the face doesn't know (U8S, for S+U ALEXANDERPLATZ).
+      return [both && o.letters !== false && g.route.length <= 2 ? g.route + dirWord(g.head).charAt(0) : g.route, g.times[0], '', colour(g.route), g.live];
+    }));
+  }
+  // Within the fix's own accuracy of the stop, the wearer may well be at it.
+  sendStopView(title, best.d <= Math.max(AT_STOP, reach) ? 0 : best.d, out === null ? rows : rows.slice(0, 1), out);
+}
+
+// ---- Transitous: a flick anywhere, for those who turn it on
+// Off by default, and staying so: the agency's own timetable answers
+// wherever the face knows one, and Transitous (MOTIS over every open feed,
+// transitous.org) only outside them. It is asked for the departures within
+// ANY_RADIUS of the fix rounded to three places (about 100 m), and a stop
+// the wearer is at, if the first answer is thin there, by that stop alone.
+var ANY_URL = 'https://api.transitous.org/api/v6/stoptimes', ANY_RADIUS = 500, ANY_N = 24, ANY_STOP_N = 12;
+var ANY_WAIT = 6000, VERSION = require('../../package.json').version;
+function anywhere() {
+  var v = settings().ANYWHERE;
+  return v === true || v === 1 || v === '1' || v === 'true';
+}
+function askAnywhere(query, cb) {
+  var done = false;
+  function finish(v) { if (!done) { done = true; cb(v); } }
+  var req = new XMLHttpRequest();
+  req.open('GET', ANY_URL + '?' + query, true);
+  // Transitous asks every client to say who it is; a phone that won't let a
+  // page set the header sends its own.
+  try { req.setRequestHeader('User-Agent', 'Headway/' + VERSION + ' (https://github.com/sybenx/headway)'); } catch (e) {}
+  req.onload = function () {
+    var d = null;
+    try { d = req.status === 200 ? JSON.parse(req.responseText) : null; } catch (e) {}
+    finish(d && d.stopTimes ? d.stopTimes : null);
+  };
+  req.onerror = function () { finish(null); };
+  req.timeout = ANY_WAIT;
+  req.ontimeout = function () { finish(null); };
+  setTimeout(function () { finish(null); }, ANY_WAIT + 250);
+  req.send();
+}
+// Names from anywhere in the world, in the letters the face's own fonts
+// draw: capitals, digits and a little punctuation. Accents fold away,
+// a slash or a plus reads as and, and the rest is dropped.
+function plain(text, keep) {
+  var t = String(text || '').toUpperCase();
+  try { t = t.normalize('NFD').replace(/[\u0300-\u036f]/g, ''); } catch (e) {}
+  t = t.replace(/\u00df/g, 'SS').replace(/\u00c6/g, 'AE').replace(/\u00d8/g, 'O').replace(/\u0152/g, 'OE')
+    .replace(/\u0141/g, 'L').replace(/\u0110/g, 'D').replace(/\u00de/g, 'TH').replace(/\u0131/g, 'I');
+  if (keep) t = t.replace(/\s*[\/+]\s*/g, ' & ');
+  return t.replace(keep ? /[^A-Z0-9&.: ]+/g : /[^A-Z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+// A route's badge: its short name, else the first word of its long one.
+function anyRoute(st) {
+  return plain(st.routeShortName || st.displayName || st.routeLongName).split(' ')[0].slice(0, 6) || '?';
+}
+function flickAnywhere(pos) {
+  var lat = pos.coords.latitude, lon = pos.coords.longitude;
+  var reach = Math.min(Math.max(pos.coords.accuracy || 0, 0), MAX_REACH);
+  var now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes();
+  var midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  console.log('headway: asking Transitous');
+  askAnywhere('center=' + lat.toFixed(3) + ',' + lon.toFixed(3) + '&radius=' + ANY_RADIUS + '&n=' + ANY_N, function (got) {
+    if (!got || !got.length) return sendStopView('', 0, []);
+    var byId = {}, ranked = [], colours = {}, seen = {}, all = [];
+    function take(list) {
+      list.forEach(function (st) {
+        var p = st.place || {};
+        if (!p.stopId || st.cancelled || st.tripCancelled || p.cancelled || p.pickupType === 'NOT_ALLOWED') return;
+        var key = st.tripId + '|' + p.stopId;
+        if (seen[key]) return;
+        seen[key] = true;
+        if (!byId[p.stopId]) {
+          byId[p.stopId] = { id: p.stopId, name: plain(p.name, true) };
+          ranked.push({ id: p.stopId, d: metres(lat, lon, p.lat, p.lon), lat: p.lat, lon: p.lon, station: plain(p.name, true) });
+        }
+        var route = anyRoute(st);
+        if (!colours[route]) colours[route] = parseInt(st.routeColor || '888888', 16) || 0x888888;
+        var at = new Date(p.departure || p.scheduledDeparture).getTime();
+        if (isNaN(at)) return;
+        all.push({ ms: at, route: route, head: plain(st.headsign, true), live: !!st.realTime, sid: p.stopId });
+      });
+    }
+    function answer() {
+      ranked.sort(function (a, b) { return a.d - b.d; });
+      var best = ranked[0];
+      var here = best.d <= Math.max(HERE_M, reach);
+      var near = {};
+      // The stop's twin across the road, and the stops Transitous names the
+      // same (a station's platforms), go with it.
+      ranked.forEach(function (st) {
+        if (metres(best.lat, best.lon, st.lat, st.lon) <= TWIN || st.station === best.station) near[st.id] = true;
+      });
+      var group = {};
+      ranked.forEach(function (st) {
+        if (here ? near[st.id] || st.d <= best.d + reach : st.d <= NEARBY_M) group[st.id] = true;
+      });
+      // Today's departures; when there are none, the first day ahead with
+      // any, with its word, as for the face's own systems.
+      var deps = [], dayWord = '';
+      all.sort(function (a, b) { return a.ms - b.ms; });
+      var first = all.filter(function (d) { return group[d.sid] && Math.floor((d.ms - midnight) / 60000) >= nowMin - 1; })[0];
+      var ahead = first ? Math.max(0, Math.floor((first.ms - midnight) / 86400000)) : 0;
+      all.forEach(function (d) {
+        var t = Math.floor((d.ms - midnight) / 60000) - ahead * 1440;
+        if (!group[d.sid] || t < (ahead ? 0 : nowMin - 1) || t >= 1440) return;
+        deps.push({ t: t, route: d.route, head: d.head, live: d.live, near: !!near[d.sid], sid: d.sid });
+      });
+      if (!deps.length) return sendStopView('', 0, []);
+      if (ahead) dayWord = ahead === 1 ? 'TOMORROW' : ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'][new Date(first.ms).getDay()];
+      deps.sort(function (a, b) { return a.t - b.t || (a.route < b.route ? -1 : a.route > b.route ? 1 : 0); });
+      var stops = Object.keys(byId).map(function (id) { return byId[id]; });
+      board({ deps: deps, dayWord: dayWord, title: byId[best.id].name, best: best, reach: reach, nearby: !here && !classic(), ranked: ranked,
+        stops: stops, out: null, letters: false, colour: function (r) { return colours[r] || 0x888888; } });
+    }
+    take(got);
+    var best = ranked.slice().sort(function (a, b) { return a.d - b.d; })[0];
+    var atIt = best && best.d <= Math.max(HERE_M, reach);
+    var there = all.filter(function (d) { return best && d.sid === best.id; }).length;
+    if (!atIt || there >= 3) return answer();
+    // At a stop the first answer spread thin: ask again by the stop alone,
+    // which sends no location at all.
+    askAnywhere('stopId=' + encodeURIComponent(best.id) + '&n=' + ANY_STOP_N, function (more) {
+      if (more) take(more);
+      answer();
+    });
+  });
+}
+
 function onFlick() {
   // The watch only asks when its own setting allows, so no gate here.
   lastAnswer = null;
@@ -823,14 +997,17 @@ function onFlick() {
     // The flick's fix answers the background question too.
     if (sawFix(lat, lon)) weatherAt(pos, true);
     var sys = systemAt(lat, lon);
-    if (!sys || !sys.data) return sendStopView('', 0, []);
+    // Outside every system the face knows, Transitous answers, if the
+    // wearer has turned it on; never by default.
+    var elsewhere = function () { return anywhere() ? flickAnywhere(pos) : sendStopView('', 0, []); };
+    if (!sys || !sys.data) return elsewhere();
     getIndex(sys, function (index, old) {
       if (!index) return sendStopView('', 0, []);
       Object.keys(index.routes || {}).forEach(function (r, i) { routeRank[r] = i; });
       var ranked = index.stops.map(function (st) {
         return { id: st[0], d: metres(lat, lon, st[1], st[2]), lat: st[1], lon: st[2], station: st[3] };
       }).sort(function (a, b) { return a.d - b.d; });
-      if (!ranked.length || ranked[0].d > FAR) return sendStopView('', 0, []);
+      if (!ranked.length || ranked[0].d > FAR) return elsewhere();
       var best = ranked[0];
       // A fix is only as good as the phone says: every stop within its
       // accuracy of the nearest could be the one the wearer is at, so all of
@@ -949,32 +1126,6 @@ function onFlick() {
           // onDay: the services of the day these departures are from.
           return sendWaves(title, hubChips(deps, dayWord, index, stops, inNow, sys.routes, onDay));
         }
-        // A row a route and direction, in order of its next departure,
-        // with its next two times, or its next time and the day. Where a
-        // route runs both ways from here — twin stops across a road — the
-        // second column is the direction instead, since two identical
-        // badges would say nothing.
-        var groups = [], byKey = {}, perRoute = {};
-        deps.forEach(function (dep) {
-          var key = dep.route + '|' + dep.head, g = byKey[key];
-          if (!g) { g = byKey[key] = { route: dep.route, head: dep.head, times: [], live: dep.live, near: false }; groups.push(g); perRoute[dep.route] = (perRoute[dep.route] || 0) + 1; }
-          if (g.times.length < 2) g.times.push(dep.t);
-          g.near = g.near || dep.near;
-        });
-        // The nearest stop's routes, with its twin and its station, take the
-        // rows first; the stops the fix's accuracy adds only fill what's left,
-        // so a rough fix never pushes the stop the wearer is at off the board.
-        groups = groups.filter(function (g) { return g.near; }).concat(groups.filter(function (g) { return !g.near; }));
-        // Every row, near or far: the watch counts rows, not metres, and
-        // seats one row beside the modules and more on the board. The
-        // second column holds one qualifier: the day first, since a bus
-        // you can't catch today is the costliest thing to misread; then
-        // the direction at a merged pair; else the second time.
-        var rows = groups.slice(0, 3).map(function (g) {
-          var word = dayWord || (perRoute[g.route] > 1 ? dirWord(g.head) : '');
-          var when = word ? [g.times[0], word] : g.times;
-          return { route: g.route, head: g.head, when: when.join(' '), color: routeColour(index, g.route), live: g.live };
-        });
         // At the yard the question is whether the buses are back: the count,
         // and the stop up the road in one row. Not on a Pebble Classic,
         // which has no room for it and answers as at any stop.
@@ -985,26 +1136,8 @@ function onFlick() {
           var pull = pullingIn(live, sys.base);
           return sendStopView(pull.n + ' PULLING IN', pull.d, [], out);
         }
-        if (nearby) return sendNearby(nearbyStops(ranked, stops, deps, index, dayWord));
-        // At a stop the answer takes the screen as it needs: a row a route
-        // with its next two times while they fit, every route's next time in
-        // two columns past that. Not the Classic, nor the yard.
-        if (out === null && !classic() && groups.length > 1) {   // one route: the block beside the modules
-          var take = groups.length <= TAKE_ROWS ? 'rows' : 'grid';
-          return sendTake(title, best.d <= Math.max(AT_STOP, reach) ? 0 : best.d, take, groups.slice(0, take === 'rows' ? TAKE_ROWS : TAKE_CELLS).map(function (g) {
-            var both = perRoute[g.route] > 1;
-            if (take === 'rows') {
-              var word = dayWord || (both ? dirWord(g.head) : '');
-              return [g.route, g.times[0], word || (g.times[1] === undefined ? '' : g.times[1]), routeColour(index, g.route), g.live];
-            }
-            // In two columns one time a route; a short route both ways from
-            // here carries the direction's first letter (12N, 12S), where a
-            // rail line's name would only garble (REDD).
-            return [both && g.route.length <= 2 ? g.route + dirWord(g.head).charAt(0) : g.route, g.times[0], '', routeColour(index, g.route), g.live];
-          }));
-        }
-        // Within the fix's own accuracy of the stop, the wearer may well be at it.
-        sendStopView(title, best.d <= Math.max(AT_STOP, reach) ? 0 : best.d, out === null ? rows : rows.slice(0, 1), out);
+        board({ deps: deps, dayWord: dayWord, title: title, best: best, reach: reach, nearby: nearby, ranked: ranked,
+          stops: stops, out: out, colour: function (r) { return routeColour(index, r); } });
       }
     });
   }, function (err) {
