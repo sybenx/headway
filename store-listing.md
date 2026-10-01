@@ -22,7 +22,8 @@ It knows two transit systems: Connect in Logan, Utah, and UTA from Ogden to
 Provo. The half-hourly check that fetches the weather also tells it whether
 you're near one. If you are, flick your wrist at a stop to see what leaves
 next: each route as a coloured badge with its next times, live predictions
-marked with a small arc where there are any. If you're not, a flick doesn't
+marked with a small arc where there are any. Away from a stop, a flick shows
+the stops near you, each with its next buses. If you're not, a flick doesn't
 check your location at all.
 
 At Connect's transit centre it counts down to the next departure, with a
@@ -37,6 +38,13 @@ transit.
 
 Settings on the phone for modules, theme, accent, wrist, clock and units.
 Round watches aren't supported.
+
+## Release notes (1.20.0)
+
+A flick answers more of what you're asking. At a stop it shows every route
+there, taking the screen as it needs, with the time as a line at the top. Away
+from a stop it shows the four nearest stops, how far each is, and the next
+two buses at each.
 
 ## Release notes (1.19.4)
 

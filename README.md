@@ -65,16 +65,22 @@ beside them, and their last minute counts in seconds too.
 **A flick of the wrist** anywhere inside the system asks the phone where it
 is and, for twelve seconds, lit, the face answers with the nearest stop. The
 face never asks for high accuracy; it takes the phone's everyday fix at its
-word, and reads every stop within that fix's accuracy of the nearest one. The answer is counted in rows, not metres. One row — one route, one
-direction — sits in the band beside the modules as three short lines: the
-stop, the badge and its next time, then how far, or the time after when you
-are standing there. The rest of the face stays. Two or three rows take the
-board: the time full size, the stop's name, a row a route with its badge in
-the agency's own colour and two columns, and a small date at the foot. The
-first column is the next time; the second holds one thing: the day when
+word, and reads every stop within that fix's accuracy of the nearest one.
+
+What it answers depends on where you are. **At a stop** (within 100 m, or
+the fix's accuracy) it's that stop's buses. One route sits in the band beside
+the modules as three short lines, the rest of the face kept. More take the
+screen: the time steps down to a line at the top, its seconds beside it, and
+below the stop's name comes a row a route, as many as there are (seven on a
+144-pixel face), each with its badge in the agency's own colour and two
+columns. The first is the next time; the second holds one thing: the day when
 today's buses are done (`5:12P TOMORROW`, `5:00A MON`), the direction where a
-route runs both ways from a pair of stops across a road (`NORTH`, `SOUTH`),
-otherwise the time after. A bus due this minute, or the minute just gone,
+route runs both ways from here (`NORTH`, `DAYBREAK`), otherwise the time
+after. A station with more than seven goes to two columns, every route's next
+time. **Away from a stop** it's the stops near you instead: the four nearest
+within 600 m, nearest first, each with how far and its two soonest routes.
+The hub and the yard keep their own answers, and a Pebble Classic keeps the
+board. A bus due this minute, or the minute just gone,
 reads `NOW`, and one due the next minute `1 MIN`. Times read in the watch's own clock style, and
 while the answer shows, the seconds sit small beneath the time at its outer
 edge, since a board read against a timetable wants to know where in the

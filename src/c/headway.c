@@ -108,6 +108,7 @@ typedef struct { char route[8], head[20], when[24]; uint32_t color; bool live; }
 static struct {
   bool valid, pending, lit;   // lit: a flick was heard; the seconds show until the answer's time is up
   bool wave;                  // the hub's answer: lines by departure time, not rows by route
+  uint8_t take;               // a full-screen answer: 2 rows at a stop, 3 two columns, 4 the stops near; 0 none
 #ifdef HAS_YARD
   int8_t out;                 // at the yard: how many buses are still out, -1 elsewhere
 #endif
@@ -1660,6 +1661,178 @@ static void paint_wave(int fr_start) {
     }
   }
 }
+
+// ---- the flick's full-screen answers. The time steps down to a line at
+// the top, its seconds beside it, and the face below is the answer's: at a
+// stop a row a route with its next two times (2), or with more routes than
+// rows every route's next time in two columns (3); away from a stop, the
+// stops near, nearest first, each with its two soonest routes (4). Lines
+// mirror as units, as the board's do.
+#define TK_CELLS 12
+#define TK_STOPS 4
+typedef struct { char route[6]; int16_t t1, t2; char word[10]; uint32_t col; bool live; int8_t stop; } TkCell;
+typedef struct { char name[24], dist[10]; int16_t y, name_x, dist_x, rule_y, rule_x0; } TkLine;
+typedef struct { char t1[8], t2[10]; bool word; int16_t bx, by, bw, gx, gy, tx, ty, lx, ly, x2, y2; } TkPlace;
+static struct {
+  uint8_t n, ns;
+  TkCell c[TK_CELLS];
+  char name[TK_STOPS][24];
+  int16_t dist[TK_STOPS];
+  // laid out
+  int head_y, time_x, secs_x, label_x, lines, nl, rule_w;
+  char time[8], secs[4], label[16];
+  TkLine line[TK_STOPS];
+  TkPlace at[TK_CELLS];
+} s_tk;
+
+// The phone's lines: S|metres|name for a stop, R|route|time|second time or
+// word|colour|live for a route, a newline between.
+static GColor secs_color(void);
+static void take_list(const char *p) __attribute__((noinline));
+static void take_list(const char *p) {
+  s_tk.n = s_tk.ns = 0;
+  int stop = -1;
+  while (*p) {
+    const char *e = strchr(p, '\n');
+    const int len = e ? e - p : (int)strlen(p);
+    char line[48], *f[6] = { 0 };
+    const int k = len < 47 ? len : 47;
+    memcpy(line, p, k); line[k] = 0;
+    int nf = 0;
+    for (char *q = line; nf < 6; ) { f[nf++] = q; char *bar = strchr(q, '|'); if (!bar) break; *bar = 0; q = bar + 1; }
+    if (line[0] == 'S' && nf >= 3 && s_tk.ns < TK_STOPS) {
+      s_tk.dist[s_tk.ns] = (int16_t)atoi(f[1]);
+      strncpy(s_tk.name[s_tk.ns], f[2], sizeof(s_tk.name[0]) - 1); s_tk.name[s_tk.ns][sizeof(s_tk.name[0]) - 1] = 0;
+      stop = s_tk.ns++;
+    } else if (line[0] == 'R' && nf >= 6 && s_tk.n < TK_CELLS) {
+      TkCell *c = &s_tk.c[s_tk.n++];
+      strncpy(c->route, f[1], sizeof(c->route) - 1); c->route[sizeof(c->route) - 1] = 0;
+      c->t1 = (int16_t)atoi(f[2]);
+      c->t2 = isdigit((int)f[3][0]) ? (int16_t)atoi(f[3]) : -1;
+      c->word[0] = 0;
+      if (c->t2 < 0) { strncpy(c->word, f[3], sizeof(c->word) - 1); c->word[sizeof(c->word) - 1] = 0; }
+      // The colour's hex by hand: the library's strtol faults on basalt.
+      uint32_t col = 0;
+      for (const char *h = f[4]; *h; h++) col = col * 16 + (uint32_t)(isdigit((int)*h) ? *h - '0' : (*h | 32) - 'a' + 10);
+      c->col = col & 0xFFFFFF;
+      c->live = f[5][0] == '1';
+      c->stop = (int8_t)stop;
+    }
+    p = e ? e + 1 : p + len;
+  }
+}
+
+static void layout_take(const struct tm *t, const Frame *fr) __attribute__((noinline));
+static void layout_take(const struct tm *t, const Frame *fr) {
+  // The time, small, on the top line at the wrist end, its seconds beside
+  // it; at the outer end the day, or NEARBY.
+  if (use_24h()) snprintf(s_tk.time, sizeof(s_tk.time), "%d:%02d", t->tm_hour, t->tm_min);
+  else snprintf(s_tk.time, sizeof(s_tk.time), "%d:%02d", display_hour(t->tm_hour), t->tm_min);
+  snprintf(s_tk.secs, sizeof(s_tk.secs), "%02d", t->tm_sec);
+  if (s_sv.take == 4) strncpy(s_tk.label, "NEARBY", sizeof(s_tk.label));
+  else { strftime(s_tk.label, sizeof(s_tk.label), "%a %d %b", t); for (char *c = s_tk.label; *c; c++) *c = toupper((int)*c); }
+  const Metrics m_t = barlow_metrics(measure("8", s_f_mod).h);
+  const Metrics m_val = barlow_metrics(measure("8", s_f_board).h), m_bad = barlow_metrics(measure("8", s_f_label).h);
+  s_tk.head_y = fr->top + sc(2) - m_t.bearing;
+  const int tw0 = run_w(s_tk.time, s_f_mod, false, 0);
+  s_tk.time_x = mapx(fr->start, tw0);
+  s_tk.secs_x = mapx(fr->start + tw0 + sc(3), run_w(s_tk.secs, s_f_cap, false, TRACK));
+  s_tk.label_x = mapx(fr->end - run_w(s_tk.label, s_f_cap, false, TRACK), run_w(s_tk.label, s_f_cap, false, TRACK));
+  const int badge_h = sc(CHIP), row_h = sc(SV_ROW_H), line_h = s_m_cap.cap + sc(SV_ROWS_GAP), pad = sc(2), w = fr->end - fr->start;
+  int y = fr->top + sc(2) + m_t.cap + sc(8);
+  const int colw = w / 2;
+  s_tk.lines = 0; s_tk.nl = 0;
+  int stop = -2, prev_y = -1, prev_col = 1;
+  for (int i = 0; i < s_tk.n; i++) {
+    const TkCell *c = &s_tk.c[i];
+    // A stop's line before its first route (the nearby list); at a stop the
+    // board's own name line, once, at the top.
+    if (c->stop != stop) {
+      stop = c->stop;
+      if (y + line_h + badge_h > fr->bot || s_tk.nl >= TK_STOPS) break;
+      const char *name = stop >= 0 ? s_tk.name[stop] : s_sv.stop;
+      TkLine *L = &s_tk.line[s_tk.nl++];
+      strncpy(L->name, name, sizeof(L->name) - 1); L->name[sizeof(L->name) - 1] = 0;
+      L->dist[0] = 0;
+      if (stop >= 0) format_dist(L->dist, sizeof(L->dist), s_tk.dist[stop]);
+      else if (s_sv.dist > 60) format_dist(L->dist, sizeof(L->dist), s_sv.dist);
+      const int dw = L->dist[0] ? run_w(L->dist, s_f_cap, false, TRACK) : 0;
+      fit_name(L->name, s_f_cap, w - (dw ? dw + sc(6) : 0));
+      L->y = y - s_m_cap.bearing;
+      L->name_x = mapx(fr->start, run_w(L->name, s_f_cap, false, TRACK));
+      L->dist_x = mapx(fr->end - dw, dw);
+      L->rule_y = y + s_m_cap.cap + sc(2);
+      L->rule_x0 = mapx(fr->start, w);
+      y += line_h; prev_col = 1;
+    }
+    // Two columns, a stop's pair or the grid's, a line between each pair.
+    const int col = s_sv.take != 2 && prev_col == 0 && prev_y >= 0 ? 1 : 0;
+    if (!col) { if (y + badge_h > fr->bot) break; prev_y = y; y += row_h; }
+    prev_col = col;
+    TkPlace *P = &s_tk.at[i];
+    char tok[8];
+    snprintf(tok, sizeof(tok), "%d", c->t1);
+    sv_clock(P->t1, sizeof(P->t1), tok);
+    P->t2[0] = 0; P->word = false;
+    if (s_sv.take == 2 && c->t2 >= 0) { snprintf(tok, sizeof(tok), "%d", c->t2); sv_clock(P->t2, sizeof(P->t2), tok); }
+    else if (c->word[0]) { strncpy(P->t2, c->word, sizeof(P->t2) - 1); P->t2[sizeof(P->t2) - 1] = 0; P->word = true; }
+    const int gw = run_w(c->route, s_f_label, false, 0);
+    const int bw = gw + 2 * pad < badge_h ? badge_h : gw + 2 * pad + 1;
+    const int tw = run_w(P->t1, sv_font(P->t1), false, 0);
+    const int cw = bw + sc(SV_BADGE_GAP) + tw + (c->live ? LIVE_W + 1 : 0);
+    const int lx = fr->start + col * colw, rx = mapx(lx, cw);
+    P->by = prev_y; P->bx = rx; P->bw = bw;
+    P->gx = rx + (bw - gw + 1) / 2; P->gy = prev_y + (badge_h - m_bad.cap) / 2 - m_bad.bearing;
+    P->tx = rx + bw + sc(SV_BADGE_GAP); P->ty = prev_y + (badge_h + m_bad.cap) / 2 - m_val.cap - m_val.bearing;
+    P->lx = P->tx + tw + 1; P->ly = P->ty + m_val.bearing - 1;
+    if (P->t2[0]) {
+      // The second column: the next time but one, or a word (a day, a way),
+      // in two columns a word only where no route sits beside it.
+      const bool beside = s_sv.take != 2 && i + 1 < s_tk.n && s_tk.c[i + 1].stop == c->stop && col == 0;
+      if (beside) P->t2[0] = 0;
+      else {
+        const int w2 = run_w(P->t2, P->word ? s_f_cap : sv_font(P->t2), false, P->word ? TRACK : 0);
+        P->x2 = mapx(s_sv.take == 2 ? fr->end - w2 : lx + cw + sc(4), w2);
+        P->y2 = P->word ? P->ty + m_val.bearing + m_val.cap - s_m_cap.cap - s_m_cap.bearing : P->ty;
+      }
+    }
+    s_tk.lines = i + 1;
+  }
+  s_tk.rule_w = w;
+}
+
+// Every place worked out beforehand: the painter reads them and draws.
+static void paint_take(void) __attribute__((noinline));
+static void paint_take(void) {
+  graphics_context_set_text_color(s_ctx, s_ink);
+  draw_run_s(s_tk.time, s_f_mod, s_tk.time_x, s_tk.head_y, false, 0);
+  graphics_context_set_text_color(s_ctx, secs_color());
+  draw_run_s(s_tk.secs, s_f_cap, s_tk.secs_x, s_tk.head_y, false, TRACK);
+  graphics_context_set_text_color(s_ctx, s_dim);
+  draw_run_s(s_tk.label, s_f_cap, s_tk.label_x, s_tk.head_y, false, TRACK);
+  for (int j = 0; j < s_tk.nl; j++) {
+    const TkLine *L = &s_tk.line[j];
+    graphics_context_set_text_color(s_ctx, light_theme() ? s_ink : s_dim);
+    draw_run_s(L->name, s_f_cap, L->name_x, L->y, false, TRACK);
+    if (L->dist[0]) { graphics_context_set_text_color(s_ctx, s_dim); draw_run_s(L->dist, s_f_cap, L->dist_x, L->y, false, TRACK); }
+    draw_stop_rule(L->rule_x0, L->rule_x0 + s_tk.rule_w, L->rule_y);
+  }
+  for (int i = 0; i < s_tk.lines; i++) {
+    const TkPlace *P = &s_tk.at[i];
+    const GColor fill = PBL_IF_COLOR_ELSE(GColorFromHEX(s_tk.c[i].col), s_ink);
+    graphics_context_set_fill_color(s_ctx, fill);
+    graphics_fill_rect(s_ctx, GRect(P->bx, P->by, P->bw, sc(CHIP)), sc(2), GCornersAll);
+    graphics_context_set_text_color(s_ctx, on_fill(fill));
+    draw_run_s(s_tk.c[i].route, s_f_label, P->gx, P->gy, false, 0);
+    graphics_context_set_text_color(s_ctx, s_ink);
+    draw_run_s(P->t1, sv_font(P->t1), P->tx, P->ty, false, 0);
+    if (s_tk.c[i].live) paint_live_mark(P->lx, P->ly);
+    if (P->t2[0]) {
+      graphics_context_set_text_color(s_ctx, P->word ? s_dim : s_ink);
+      draw_run_s(P->t2, P->word ? s_f_cap : sv_font(P->t2), P->x2, P->y2, false, P->word ? TRACK : 0);
+    }
+  }
+}
 #endif
 
 // ---- the side block: one row never takes the face. The answer sits in the
@@ -1680,7 +1853,7 @@ static struct {
 static void layout_sideblock(const Frame *fr, int band_top, int band_bot, int left, int right) __attribute__((noinline));
 static void layout_sideblock(const Frame *fr, int band_top, int band_bot, int left, int right) {
   s_sb.show = false;
-  if (s_sv.n != 1 || s_sv.wave) return;
+  if (s_sv.n != 1 || s_sv.wave || s_sv.take) return;
   const SvRow *row = &s_sv.row[0];
   s_sb.m_lab = s_m_cap;
   s_sb.m_val = barlow_metrics(measure("8", s_f_board).h);
@@ -2102,6 +2275,15 @@ static void face_update(Layer *layer, GContext *ctx) {
     if (s_sv.lit && !s_tm.secs) layout_secs(t);
   }
   // With no room for the stop beside the modules the yard keeps its count.
+#ifdef HAS_WAVE
+  if (s_sv.valid && s_sv.take && !yard) {
+    // The answer takes the screen: the content box even on both sides, with
+    // no rail to keep room for.
+    fr.end = s_w - fr.start;
+    layout_take(t, &fr);
+    paint_take();
+  } else
+#endif
   if (s_sv.valid && !s_sb.show && !yard) {
     layout_time(t, &fr, s_f_time, TIME_MARGIN_TOP);
     centre_time(&fr);
@@ -2397,6 +2579,12 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
 #ifdef HAS_WAVE
     Tuple *tm = dict_find(iter, MESSAGE_KEY_SV_MODE);
     s_sv.wave = tm && tm->value->int32 == 1 && s_sv.n > 0;
+    s_sv.take = 0;
+    Tuple *tl = dict_find(iter, MESSAGE_KEY_SV_LIST);
+    if (tm && tm->value->int32 >= 2 && tm->value->int32 <= 4 && tl) {
+      take_list(tl->value->cstring);
+      if (s_tk.n) s_sv.take = (uint8_t)tm->value->int32;
+    }
 #endif
     if (s_sv.wave) {
 #ifdef HAS_WAVE

@@ -1,7 +1,7 @@
 {
   "name": "headway",
   "author": "Aaron Herbst",
-  "version": "1.19.4",
+  "version": "1.20.0",
   "keywords": [
     "pebble-app",
     "watchface",
@@ -83,7 +83,8 @@
       "SV_OUT",
       "YD_OUT",
       "YD_END",
-      "YD_UNTIL"
+      "YD_UNTIL",
+      "SV_LIST"
     ],
     "resources": {
       "media": [
