@@ -140,11 +140,17 @@ function dayTable(sys, d) {
 }
 
 // The next departures of a route from a minute of the day, as minutes.
+// The next departures, and the one just gone if it was due in the last ten
+// minutes: a late bus may still be at its bay, and the watch shows its time
+// beside the next one's so the two can be told apart.
+var BOARD_WAIT = 10;
 function upcoming(list, nowMin) {
-  var out = [];
+  var out = [], prev = -1;
   for (var i = 0; i < list.length && out.length < TR_MAX; i++) {
     if (list[i] >= nowMin) out.push(list[i]);
+    else if (nowMin - list[i] <= BOARD_WAIT) prev = list[i];
   }
+  if (prev >= 0) { out.unshift(prev); if (out.length > TR_MAX) out.pop(); }
   return out;
 }
 

@@ -38,6 +38,13 @@ transit.
 Settings on the phone for modules, theme, accent, wrist, clock and units.
 Round watches aren't supported.
 
+## Release notes (1.19.4)
+
+At the transit centre, for ten minutes after a G or B departure, its minutes
+show before the next one's (:25 10:41), so a late bus still at its bay can
+be told from the one after it. Where it would cost a module its place, it
+stays out.
+
 ## Release notes (1.19.3)
 
 A one-row answer beside the modules reads as a list: its lines start

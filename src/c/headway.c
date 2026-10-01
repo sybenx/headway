@@ -273,6 +273,20 @@ static bool transit_fresh(time_t now) {
   return transit_mode() != TRANSIT_OFF && s_tr.at != 0 && now - s_tr.at < TR_STALE;
 }
 // Minutes until the first of a route's departures still ahead, or -1.
+// Minutes since the latest departure gone in the last BOARD_WAIT, or -1: a
+// loop bus that late may still be at its bay. Not on the Classic, short of
+// room for it.
+#ifndef PBL_PLATFORM_APLITE
+#define BOARD_WAIT 10
+static int transit_prev(const uint16_t *list, int now_min) {
+  int best = -1;
+  for (int i = 0; i < TR_MAX; i++) {
+    const int ago = now_min - (int)list[i];
+    if (list[i] != TR_NONE && ago > 0 && ago <= BOARD_WAIT && (best < 0 || ago < best)) best = ago;
+  }
+  return best;
+}
+#endif
 static int transit_next(const uint16_t *list, int now_min) {
   for (int i = 0; i < TR_MAX; i++) {
     if (list[i] != TR_NONE && (int)list[i] >= now_min) return (int)list[i] - now_min;
@@ -1107,8 +1121,14 @@ static struct {
   bool show; int w, gap;
   char min[6], at[8]; const char *unit; int later;   // later: 0 both, 1 G leaves later, 2 B leaves later
   int cx, cy, sq, gx, bx, ty, vx, vy, mx, my, ax, ay;
+#ifndef PBL_PLATFORM_APLITE
+  char was[8]; int wx;   // the departure just gone, its bus maybe still at its bay
+#endif
   bool now;
 } s_gb;
+#ifndef PBL_PLATFORM_APLITE
+static bool s_gb_nowas;   // leave the departure just gone out: it would cost a module
+#endif
 
 // The departure's clock time, without its A or P: the next half hour needs
 // no telling which.
@@ -1143,8 +1163,20 @@ static void layout_gb(int c_start, int avail_w, int band_top, int band_bot, int 
   // The clock time of that departure, beside the chips or in place of MIN.
   s_gb.at[0] = 0;
   if (!s_gb.now) gb_clock(s_gb.at, sizeof(s_gb.at), now_min + next);
+  // A departure due in the last few minutes goes before it: its bus may be
+  // the one still at the bay, late, and the two times tell which it is.
+#ifndef PBL_PLATFORM_APLITE
+  s_gb.was[0] = 0;
+  const int pg = transit_prev(s_tr.g, now_min), pb = transit_prev(s_tr.b, now_min);
+  const int prev = pg < 0 ? pb : pb < 0 ? pg : pg < pb ? pg : pb;
+  // Its minutes alone (:25): the next time beside it says the hour.
+  if (prev > 0 && !s_gb.now && !s_gb_nowas) snprintf(s_gb.was, sizeof(s_gb.was), ":%02d", (now_min - prev) % 60);
+  const int was_w = s_gb.was[0] ? run_w(s_gb.was, s_f_cap, false, TRACK) + sc(4) : 0;
+#else
+  const int was_w = 0;
+#endif
   const Metrics m_at = barlow_metrics(measure("8", s_f_cap).h);
-  const int at_w = s_gb.at[0] ? run_w(s_gb.at, s_f_cap, false, TRACK) : 0;
+  const int at_w = s_gb.at[0] ? was_w + run_w(s_gb.at, s_f_cap, false, TRACK) : 0;
   const int unit_w = s_gb.now ? 0 : run_w(s_gb.unit, s_f_cap, false, TRACK);
   const int v_w = s_gb.now ? min_w : min_w + sc(2) + unit_w;
   const int top_w = at_w ? at_w + sc(3) + chips : chips;
@@ -1155,7 +1187,10 @@ static void layout_gb(int c_start, int avail_w, int band_top, int band_bot, int 
   s_gb.sq = sq;
   // The caption line is one unit, the time then the chips, mirrored whole.
   const int rx = mapx(x + s_gb.w - top_w, top_w);
-  s_gb.ax = rx;
+#ifndef PBL_PLATFORM_APLITE
+  s_gb.wx = rx;
+#endif
+  s_gb.ax = rx + was_w;
   s_gb.cx = rx + (top_w - chips);
   s_gb.cy = y + label_h - sq + (sq > label_h ? (sq - label_h) / 2 : 0);
   s_gb.ay = s_gb.cy + (sq - m_chip.cap) / 2 + m_chip.cap - m_at.cap - m_at.bearing;
@@ -1167,6 +1202,33 @@ static void layout_gb(int c_start, int avail_w, int band_top, int band_bot, int 
   s_gb.mx = s_gb.vx + min_w + sc(2);
   s_gb.my = y + label_h + lgap + m_val.cap - m_cap.cap - m_cap.bearing;
   s_gb.show = true;
+}
+
+// The band's row: the second countdown at the hub, then the modules beside
+// it. The departure just gone gives way before a module does: shown only
+// where it costs the row nothing.
+static void layout_band(const Frame *fr, bool at_hub, int band_top, int band_bot, const struct tm *t) __attribute__((noinline));
+static void layout_band(const Frame *fr, bool at_hub, int band_top, int band_bot, const struct tm *t) {
+  const int now_min = t->tm_hour * 60 + t->tm_min;
+#ifndef PBL_PLATFORM_APLITE
+  s_gb_nowas = false;
+#endif
+  if (at_hub) layout_gb(fr->start, fr->end - fr->start, band_top, band_bot, now_min, t->tm_sec);
+  else s_gb.show = false;
+  layout_modules(s_f_mod, s_f_cap, fr->start, fr->end - fr->start - (s_gb.show ? s_gb.w + s_gb.gap : 0), band_top, band_bot);
+#ifndef PBL_PLATFORM_APLITE
+  if (s_gb.show && s_gb.was[0]) {
+    const int with = s_md.n;
+    s_gb_nowas = true;
+    layout_gb(fr->start, fr->end - fr->start, band_top, band_bot, now_min, t->tm_sec);
+    layout_modules(s_f_mod, s_f_cap, fr->start, fr->end - fr->start - (s_gb.show ? s_gb.w + s_gb.gap : 0), band_top, band_bot);
+    if (s_md.n <= with) {   // it cost nothing: back with it
+      s_gb_nowas = false;
+      layout_gb(fr->start, fr->end - fr->start, band_top, band_bot, now_min, t->tm_sec);
+      layout_modules(s_f_mod, s_f_cap, fr->start, fr->end - fr->start - (s_gb.show ? s_gb.w + s_gb.gap : 0), band_top, band_bot);
+    }
+  }
+#endif
 }
 
 static GColor chip_color(int route) {   // 0 G, 1 B
@@ -1197,6 +1259,9 @@ static void paint_gb(void) {
   if (s_gb.at[0]) {
     graphics_context_set_text_color(s_ctx, s_dim);
     draw_run_s(s_gb.at, s_f_cap, s_gb.ax, s_gb.ay, false, TRACK);
+#ifndef PBL_PLATFORM_APLITE
+    if (s_gb.was[0]) draw_run_s(s_gb.was, s_f_cap, s_gb.wx, s_gb.ay, false, TRACK);
+#endif
   }
 }
 
@@ -2020,10 +2085,7 @@ static void face_update(Layer *layer, GContext *ctx) {
     else if (peek) layout_block(t, &sch, &fr, s_f_count_s, BLOCK_ROW_GAP_P, false);
     else layout_block(t, &sch, &fr, s_f_count, BLOCK_ROW_GAP, true);
     const int band_bot = idle ? s_id.top : s_bk.top;
-    if (at_hub) layout_gb(fr.start, fr.end - fr.start, s_tm.band_top, band_bot, t->tm_hour * 60 + t->tm_min, t->tm_sec);
-    else s_gb.show = false;
-    layout_modules(s_f_mod, s_f_cap, fr.start, fr.end - fr.start - (s_gb.show ? s_gb.w + s_gb.gap : 0),
-                   s_tm.band_top, band_bot);
+    layout_band(&fr, at_hub, s_tm.band_top, band_bot, t);
     // The quiet face has nothing at the outer end: the modules go there too,
     // in their order, out from under the sleeve.
     if (idle && s_md.n) s_md.x0 = fr.end - s_md.total + modules_hang();
