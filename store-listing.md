@@ -29,6 +29,10 @@ from transitous.org/sources and OpenStreetMap.
 The weather service gets your location rounded to about 100 m; otherwise
 it stays on your phone. No accounts. Round watches aren't supported.
 
+## Release notes (1.25.1)
+
+The watchface list shows Headway's icon in colour on colour watches.
+
 ## Release notes (1.25.0)
 
 A flick at a stop now leaves a countdown behind: the next bus from that stop,
