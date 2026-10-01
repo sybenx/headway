@@ -74,6 +74,7 @@ typedef struct {
   uint8_t code;
   bool valid;
   time_t at;
+  int32_t rain_at;   // when rain is due to start, epoch seconds; 0 none due
 } Weather;
 
 // What the phone last said about the hub: whether the wearer is there in
@@ -104,6 +105,7 @@ typedef struct { char route[8], head[20], when[24]; uint32_t color; bool live; }
 #ifndef PBL_PLATFORM_APLITE
 #define HAS_WAVE 1
 #define HAS_YARD 1   // the yard's count in the countdown's place
+#define HAS_RAIN 1   // RAIN IN 15 MIN beside the modules
 #endif
 static struct {
   bool valid, pending, lit;   // lit: a flick was heard; the seconds show until the answer's time is up
@@ -1919,6 +1921,37 @@ static void layout_sideblock(const Frame *fr, int band_top, int band_bot, int le
   s_sb.show = true;
 }
 
+// ---- rain on its way: within the hour, the quiet face says so in the band
+// beside the modules, two short lines, RAIN IN over 15 MIN, to the nearest
+// five minutes up: the forecast comes by the quarter hour. A flick's answer
+// takes the place first.
+#ifdef HAS_RAIN
+static struct { bool show; char mins[10]; int x, y1, y2; } s_rn;
+static void layout_rain(int band_top, int band_bot, int left, int right) __attribute__((noinline));
+static void layout_rain(int band_top, int band_bot, int left, int right) {
+  s_rn.show = false;
+  const int32_t ahead = s_wx.valid && s_wx.rain_at ? s_wx.rain_at - (int32_t)time(NULL) : -1;
+  if (ahead <= 0 || ahead > 60 * 60) return;
+  const int m = ((ahead + 59) / 60 + 4) / 5 * 5;
+  snprintf(s_rn.mins, sizeof(s_rn.mins), "%d MIN", m);
+  const int w = run_w("RAIN IN", s_f_cap, false, TRACK), w2 = run_w(s_rn.mins, s_f_cap, false, TRACK);
+  const int h = 2 * s_m_cap.cap + sc(SB_GAP);
+  if ((w > w2 ? w : w2) > right - left - sc(8) || h > band_bot - band_top) return;
+  const int top = band_top + (band_bot - band_top - h) / 2;
+  s_rn.x = left + sc(8);
+  s_rn.y1 = top - s_m_cap.bearing;
+  s_rn.y2 = top + s_m_cap.cap + sc(SB_GAP) - s_m_cap.bearing;
+  s_rn.show = true;
+}
+static void paint_rain(void) __attribute__((noinline));
+static void paint_rain(void) {
+  graphics_context_set_text_color(s_ctx, s_dim);
+  draw_run("RAIN IN", s_f_cap, s_rn.x, s_rn.y1, false, TRACK);
+  graphics_context_set_text_color(s_ctx, s_ink);
+  draw_run(s_rn.mins, s_f_cap, s_rn.x, s_rn.y2, false, TRACK);
+}
+#endif
+
 static void paint_sideblock(void) __attribute__((noinline));
 static void paint_sideblock(void) {
   const SvRow *row = &s_sv.row[0];
@@ -2294,6 +2327,10 @@ static void face_update(Layer *layer, GContext *ctx) {
       else layout_sideblock(&fr, s_tm.band_top, band_bot, s_md.n ? s_md.x0 + s_md.total : fr.start - sc(8), fr.end);
       if (s_sb.show) layout_secs(t);
     }
+#ifdef HAS_RAIN
+    s_rn.show = false;
+    if (idle && !s_sb.show) layout_rain(s_tm.band_top, band_bot, fr.start - sc(8), s_md.n ? s_md.x0 - sc(8) : fr.end);
+#endif
     // A flick with nothing to show, or one still waiting on the phone: the
     // seconds in the colon, on every face, so the gesture is seen to have
     // landed; the countdown keeps its minutes.
@@ -2331,6 +2368,9 @@ static void face_update(Layer *layer, GContext *ctx) {
     paint_modules();
     if (s_gb.show) paint_gb();
     if (s_sb.show) paint_sideblock();
+#ifdef HAS_RAIN
+    if (s_rn.show) paint_rain();
+#endif
   }
 
   // ---- boarding buzz, once on the transition into the solid block: at the
@@ -2734,6 +2774,10 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
     if (tp->value->int32 && tt) {
       s_wx.temp = (int16_t)tt->value->int32;
       s_wx.code = tc ? (uint8_t)tc->value->int32 : 0;
+#ifdef HAS_RAIN
+      Tuple *tr = dict_find(iter, MESSAGE_KEY_RAIN_AT);
+      s_wx.rain_at = tr ? tr->value->int32 : 0;
+#endif
       s_wx.valid = true;
       s_wx.at = time(NULL);
       persist_write_data(WEATHER_KEY, &s_wx, sizeof(s_wx));

@@ -41,6 +41,12 @@ module with nothing to show — the weather before its first fetch — simply
 does not appear. Weather comes from [Open-Meteo](https://open-meteo.com),
 which needs no key.
 
+When rain is due within the hour, the quiet face says so beside the modules,
+`RAIN IN` over `15 MIN`, rounded up to five minutes since the forecast comes
+by the quarter hour. It rides on the same weather check, so it needs no flick
+and sends nothing more. A flick's answer takes the place first. Not on the
+Classic, whose memory is spoken for.
+
 ## Near a system it knows
 
 The face knows some transit systems and every stop in them. Most are just

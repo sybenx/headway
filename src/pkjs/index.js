@@ -21,8 +21,24 @@ function settings() {
   }
 }
 
-function send(temp, code) {
-  Pebble.sendAppMessage({ WOK: 1, TEMP: Math.round(temp), WCODE: code || 0 });
+function send(temp, code, rain) {
+  Pebble.sendAppMessage({ WOK: 1, TEMP: Math.round(temp), WCODE: code || 0, RAIN_AT: rain || 0 });
+}
+
+// When rain is due to start, in epoch seconds, from the forecast's quarter
+// hours: each one's precipitation falls in the fifteen minutes before its
+// time. 0 when none is due in the next two hours, or it's raining already
+// (the sky in the module says so).
+var RAIN_MM = 0.1;
+function rainAt(m) {
+  if (!m || !m.time || !m.precipitation) return 0;
+  var now = Date.now() / 1000;
+  for (var i = 0; i < m.time.length; i++) {
+    if (m.time[i] <= now || !(m.precipitation[i] >= RAIN_MM)) continue;
+    var start = m.time[i] - 900;
+    return start <= now ? 0 : start;
+  }
+  return 0;
 }
 
 // Only when a slot is actually showing weather.
@@ -42,15 +58,16 @@ function weatherAt(pos, force) {
     '?latitude=' + pos.coords.latitude.toFixed(3) +
     '&longitude=' + pos.coords.longitude.toFixed(3) +
     '&current=temperature_2m,weather_code' +
+    '&minutely_15=precipitation&forecast_minutely_15=8&timeformat=unixtime' +
     '&temperature_unit=' + unit;
   var req = new XMLHttpRequest();
   req.open('GET', url, true);
   req.onload = function () {
     if (req.status !== 200) return;
     try {
-      var cur = JSON.parse(req.responseText).current;
+      var d = JSON.parse(req.responseText), cur = d.current;
       lastFetch = Date.now();
-      send(cur.temperature_2m, cur.weather_code);
+      send(cur.temperature_2m, cur.weather_code, rainAt(d.minutely_15));
     } catch (e) {}
   };
   req.send();

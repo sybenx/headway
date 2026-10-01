@@ -36,8 +36,17 @@ asked for by stop number (UTA's come from its own feed, whole, so nothing is
 asked). No accounts. Turn transit off and it never checks your location for
 transit.
 
+When rain is due within the hour, the face says RAIN IN 15 MIN beside the
+modules, from the same weather check.
+
 Settings on the phone for modules, theme, accent, wrist, clock and units.
 Round watches aren't supported.
+
+## Release notes (1.22.0)
+
+When rain is due within the hour, the face says so beside the modules: RAIN
+IN 15 MIN, to the nearest five minutes. It comes with the weather, so no flick
+is needed. Not on the Classic.
 
 ## Release notes (1.21.0)
 
