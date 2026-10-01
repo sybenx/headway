@@ -137,9 +137,17 @@ static struct { int8_t out; int32_t end, until; int32_t from, wuntil; bool near;
 static time_t s_yd_asked;   // when the watch last asked the phone to look at the yard
 // The buses out, from a flick's answer while it's up, else from the phone's
 // word in its window; -1 when neither.
+// Once none are on trips the minutes count up to YARD_AFTER, time enough for
+// the last bus to finish a route and drive back, then the face is itself.
+#define YARD_AFTER (25 * 60)
+static bool yard_counting(void) {
+  const time_t now = time(NULL);
+  return s_yd.end && now < s_yd.until && now - s_yd.end < YARD_AFTER;
+}
 static int yard_out(void) {
   if (AT_YARD()) return s_sv.out;
-  if (s_yd.out >= 0 && time(NULL) < s_yd.until) return s_yd.out;
+  if (s_yd.out > 0 && time(NULL) < s_yd.until) return s_yd.out;
+  if (s_yd.out == 0 && yard_counting()) return 0;
   return -1;
 }
 #define YARD_ON() (yard_out() >= 0)
@@ -2100,7 +2108,7 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
     // after the last trip the phone knows when it ended, and the face says
     // how long ago, flick or not, so the wearer judges; otherwise a bare 0.
     s_bk.unit = "OUT";
-    if (out == 0 && s_yd.end && time(NULL) < s_yd.until) {
+    if (out == 0 && yard_counting()) {
       const int ago = (int)((time(NULL) - s_yd.end) / 60);
       snprintf(s_bk.num, sizeof(s_bk.num), "%d", ago < 0 ? 0 : ago);
       s_bk.unit = "MIN AGO";
@@ -2398,6 +2406,7 @@ static void walk_look(void) {
 static void yard_ask(void) {
   const time_t now = time(NULL);
   if (!s_yd.near || now < s_yd.from || now >= s_yd.wuntil || now - s_yd_asked < YARD_EVERY) return;
+  if (s_yd.out == 0 && s_yd.end && now - s_yd.end >= YARD_AFTER) return;   // done: the last is long in
   DictionaryIterator *out;
   if (app_message_outbox_begin(&out) != APP_MSG_OK) return;
   dict_write_uint8(out, MESSAGE_KEY_YARD, 1);
