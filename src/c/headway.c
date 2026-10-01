@@ -1844,8 +1844,16 @@ static void paint_take(void) {
 // over, `left` (where the modules end on that side, less the gap), so they
 // read as a list; `right` bounds it, and the block declines if it can't fit.
 #define SB_GAP 3
+#ifdef HAS_YARD
+#define SB_NOROW s_sb.norow
+#else
+#define SB_NOROW false
+#endif
 static struct {
   bool show, q_day;
+#ifdef HAS_YARD
+  bool norow;
+#endif
   int stop_x, stop_y, rule_y, row_x, row_w, badge_w, badge_h, glyph_dx, glyph_y, t_dx, t_y, q_x, q_y;
   char stop[24], t1[8], q[10];
   Metrics m_lab, m_val, m_bad;
@@ -1854,7 +1862,12 @@ static struct {
 static void layout_sideblock(const Frame *fr, int band_top, int band_bot, int left, int right) __attribute__((noinline));
 static void layout_sideblock(const Frame *fr, int band_top, int band_bot, int left, int right) {
   s_sb.show = false;
-  if (s_sv.n != 1 || s_sv.wave || s_sv.take) return;
+  // At the yard in its hour the block has no row: its line, what's pulling
+  // in, and under it how far the nearest is.
+#ifdef HAS_YARD
+  s_sb.norow = AT_YARD() && s_sv.n == 0;
+#endif
+  if ((s_sv.n != 1 && !SB_NOROW) || s_sv.wave || s_sv.take) return;
   const SvRow *row = &s_sv.row[0];
   s_sb.m_lab = s_m_cap;
   s_sb.m_val = barlow_metrics(measure("8", s_f_board).h);
@@ -1864,7 +1877,7 @@ static void layout_sideblock(const Frame *fr, int band_top, int band_bot, int le
   strncpy(s_sb.stop, s_sv.stop, sizeof(s_sb.stop) - 1); s_sb.stop[sizeof(s_sb.stop) - 1] = 0;
   fit_name(s_sb.stop, s_f_cap, room);
   // The row: badge and the next time, as on the board.
-  const char *sp = strchr(row->when, ' ');
+  const char *sp = SB_NOROW ? NULL : strchr(row->when, ' ');
   sv_clock(s_sb.t1, sizeof(s_sb.t1), row->when);
   const int pad = sc(2), badge_h = sc(CHIP);
   const int gw = run_w(row->route, s_f_label, false, 0);
@@ -1872,7 +1885,7 @@ static void layout_sideblock(const Frame *fr, int band_top, int band_bot, int le
   s_sb.badge_h = badge_h;
   s_sb.glyph_dx = (s_sb.badge_w - gw + 1) / 2;
   s_sb.t_dx = s_sb.badge_w + sc(SV_BADGE_GAP);
-  s_sb.row_w = s_sb.t_dx + run_w(s_sb.t1, sv_font(s_sb.t1), false, 0) + (row->live ? LIVE_W + 1 : 0);
+  s_sb.row_w = SB_NOROW ? 0 : s_sb.t_dx + run_w(s_sb.t1, sv_font(s_sb.t1), false, 0) + (row->live ? LIVE_W + 1 : 0);
   // The qualifier: how far, or, stood at the stop, the row's second column.
   s_sb.q[0] = 0; s_sb.q_day = false;
   if (s_sv.dist > 60) { format_dist(s_sb.q, sizeof(s_sb.q), s_sv.dist); s_sb.q_day = true; }
@@ -1881,7 +1894,8 @@ static void layout_sideblock(const Frame *fr, int band_top, int band_bot, int le
   const int q_w = s_sb.q[0] ? run_w(s_sb.q, s_sb.q_day ? s_f_cap : sv_font(s_sb.q), false, s_sb.q_day ? TRACK : 0) : 0;
   if (s_sb.row_w > room || q_w > room) return;   // no room beside the modules: the board it is
   // Three lines, centred in the band.
-  const int h = s_sb.m_lab.cap + sc(SB_GAP) + badge_h + (s_sb.q[0] ? sc(SB_GAP) + (s_sb.q_day ? s_sb.m_lab.cap : s_sb.m_val.cap) : 0);
+  const int row_h = SB_NOROW ? 0 : badge_h + sc(SB_GAP);
+  const int h = s_sb.m_lab.cap + sc(SB_GAP) + row_h + (s_sb.q[0] ? (s_sb.q_day ? s_sb.m_lab.cap : s_sb.m_val.cap) : 0);
   if (h > band_bot - band_top) return;
   const int top = band_top + (band_bot - band_top - h) / 2;
   const int x0 = left + sc(8);
@@ -1893,7 +1907,7 @@ static void layout_sideblock(const Frame *fr, int band_top, int band_bot, int le
   s_sb.glyph_y = by + (badge_h - s_sb.m_bad.cap) / 2 - s_sb.m_bad.bearing;
   s_sb.t_y = by + (badge_h + s_sb.m_bad.cap) / 2 - s_sb.m_val.cap - s_sb.m_val.bearing;
   s_sb.q_x = x0;
-  s_sb.q_y = by + badge_h + sc(SB_GAP) - (s_sb.q_day ? s_sb.m_lab.bearing : s_sb.m_val.bearing);
+  s_sb.q_y = by + row_h - (s_sb.q_day ? s_sb.m_lab.bearing : s_sb.m_val.bearing);
   s_sb.show = true;
 }
 
@@ -1906,6 +1920,7 @@ static void paint_sideblock(void) {
     const int w = run_w(s_sb.stop, s_f_cap, false, TRACK);
     draw_stop_rule(mapx(s_sb.stop_x, w), mapx(s_sb.stop_x, w) + w, s_sb.rule_y);
   }
+  if (!SB_NOROW) {
   const int rx = mapx(s_sb.row_x, s_sb.row_w);
   const GColor fill = PBL_IF_COLOR_ELSE(GColorFromHEX(row->color), s_ink);
   graphics_context_set_fill_color(s_ctx, fill);
@@ -1916,6 +1931,7 @@ static void paint_sideblock(void) {
   draw_run_s(s_sb.t1, sv_font(s_sb.t1), rx + s_sb.t_dx, s_sb.t_y, false, 0);
   if (row->live)
     paint_live_mark(rx + s_sb.t_dx + run_w(s_sb.t1, sv_font(s_sb.t1), false, 0) + 1, s_sb.t_y + s_sb.m_val.bearing - 1);
+  }
   if (s_sb.q[0]) {
     graphics_context_set_text_color(s_ctx, s_sb.q_day ? s_dim : s_ink);
     draw_run(s_sb.q, s_sb.q_day ? s_f_cap : sv_font(s_sb.q), s_sb.q_x, s_sb.q_y, false, s_sb.q_day ? TRACK : 0);

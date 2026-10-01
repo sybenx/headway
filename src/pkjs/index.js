@@ -749,9 +749,23 @@ function busesOut(live, base) {
   if (!live || !live.at) return null;
   var nowS = Date.now() / 1000, n = 0;
   live.at.forEach(function (b) {
-    if (nowS - b[2] < BUS_FRESH && metres(b[0], b[1], base.lat, base.lon) > base.r) n++;
+    if (onRoad(b) && nowS - b[2] < BUS_FRESH && metres(b[0], b[1], base.lat, base.lon) > base.r) n++;
   });
   return n;
+}
+// On a trip, or on a route by the tracker (a detour): still out. A bus off
+// both, logged in, is between trips, or at night on its way back.
+function onRoad(b) { return !!(b[3] || b[4]); }
+// The buses pulling in to the yard: logged in, fresh, off any trip or route,
+// and not in yet; how many, and how far the nearest is.
+function pullingIn(live, base) {
+  var nowS = Date.now() / 1000, n = 0, d = Infinity;
+  ((live && live.at) || []).forEach(function (b) {
+    if (onRoad(b) || !(nowS - b[2] < BUS_FRESH)) return;
+    var m = metres(b[0], b[1], base.lat, base.lon);
+    if (m > base.r) { n++; if (m < d) d = m; }
+  });
+  return { n: n, d: n ? d : 0 };
 }
 
 // A Pebble Classic (aplite) has no room for the hub's view; it keeps the board.
@@ -948,6 +962,12 @@ function onFlick() {
         // and the stop up the road in one row. Not on a Pebble Classic,
         // which has no room for it and answers as at any stop.
         var out = atBase && !classic() ? busesOut(live, sys.base) : null;
+        // In the yard's hour the stop up the road is no use at the yard: what
+        // is, is how many buses are pulling in, and how far the nearest is.
+        if (out !== null && index.ends && yardWindow(index, new Date())) {
+          var pull = pullingIn(live, sys.base);
+          return sendStopView(pull.n + ' PULLING IN', pull.d, [], out);
+        }
         if (nearby) return sendNearby(nearbyStops(ranked, stops, deps, index, dayWord));
         // At a stop the answer takes the screen as it needs: a row a route
         // with its next two times while they fit, every route's next time in
@@ -1089,7 +1109,7 @@ function yardTick() {
         if (out === null) return;   // no news: the watch keeps its last word
         var nowS = Date.now() / 1000;
         live.at.forEach(function (b) {
-          if (nowS - b[2] < BUS_FRESH && metres(b[0], b[1], sys.base.lat, sys.base.lon) > sys.base.r && b[2] > yard.seen) yard.seen = b[2];
+          if (onRoad(b) && nowS - b[2] < BUS_FRESH && metres(b[0], b[1], sys.base.lat, sys.base.lon) > sys.base.r && b[2] > yard.seen) yard.seen = b[2];
         });
         // When the last trip ended only matters once none are out.
         tellYard({ YD_OUT: out, YD_END: out ? 0 : Math.round(yard.seen || w.start), YD_UNTIL: Math.round(w.until) });
