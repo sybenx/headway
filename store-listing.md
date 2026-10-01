@@ -26,8 +26,8 @@ Optional: turn on Transitous (transitous.org) to flick for buses anywhere
 else. Off by default; it sends your location, rounded to about 100 m. Data
 from transitous.org/sources and OpenStreetMap.
 
-Otherwise your location stays on your phone. No accounts. Round watches
-aren't supported.
+The weather service gets your location rounded to about 100 m; otherwise
+it stays on your phone. No accounts. Round watches aren't supported.
 
 ## Release notes (1.24.0)
 
