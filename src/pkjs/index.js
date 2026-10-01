@@ -879,8 +879,9 @@ function board(o) {
 // the wearer is at, if the first answer is thin there, by that stop alone.
 var ANY_URL = 'https://api.transitous.org/api/v6/stoptimes', ANY_RADIUS = 500, ANY_N = 24, ANY_STOP_N = 12;
 var ANY_WAIT = 6000, VERSION = require('../../package.json').version;
-// Held back until Transitous has heard from us: off whatever was saved.
-var ANY_READY = false;
+// A switch to hold it back whatever was saved, as before Transitous had heard
+// from us (1.23.2); the watch keeps its own.
+var ANY_READY = true;
 function anywhere() {
   if (!ANY_READY) return false;
   var v = settings().ANYWHERE;

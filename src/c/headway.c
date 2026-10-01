@@ -64,7 +64,7 @@ typedef struct {
 #define BUZZ_HUB    1   // only at the hub, where a countdown is a bus to catch
 #define BUZZ_ALWAYS 2   // wherever the countdown runs
 
-#define ANY_READY 0   // Transitous held back: a saved on asks nowhere new
+#define ANY_READY 1   // Transitous on, for those who choose it
 #define SETTINGS_KEY 1
 #define SETTINGS_VERSION 6
 #define WEATHER_KEY  2
