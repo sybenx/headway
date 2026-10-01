@@ -629,7 +629,13 @@ function nearbyStops(ranked, stops, deps, colour, dayWord) {
 // live answer only where it says something new. lastAnswer is cleared by each
 // flick.
 var lastAnswer = null;
+// The stop countdown the answer brings, or none: a flick at a stop with a bus
+// due within CD_MIN minutes counts down to it on the face, as at the hub.
+// Every answer carries one, so a flick elsewhere ends the last.
+var CD_MIN = 20, answerCd = null;
 function sendAnswer(msg) {
+  msg.SV_CD_AT = answerCd ? answerCd.at : 0;
+  if (answerCd) { msg.SV_CD_R = answerCd.route; msg.SV_CD_C = answerCd.colour; }
   var key = JSON.stringify(Object.keys(msg).filter(function (k) { return k.indexOf('SV_') === 0; }).map(function (k) { return [k, msg[k]]; }));
   if (key === lastAnswer) return console.log('headway: live answer changes nothing');
   lastAnswer = key;
@@ -822,6 +828,14 @@ function tripsSoon(stops, services, now, nowMin) {
 // count or null; letters false where headsigns carry no compass.
 function board(o) {
   var deps = o.deps, dayWord = o.dayWord, title = o.title, best = o.best, reach = o.reach, out = o.out, colour = o.colour;
+  // At a stop, its soonest bus within CD_MIN, today, to count down to.
+  answerCd = null;
+  if (!o.nearby && out === null && !dayWord && !classic()) {
+    var now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes();
+    var soon = deps.filter(function (d) { return d.near && d.t >= nowMin && d.t - nowMin <= CD_MIN; })[0];
+    if (soon) answerCd = { at: Math.round(new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000) + soon.t * 60,
+      route: soon.route.slice(0, 7), colour: colour(soon.route) };
+  }
   // A row a route and direction, in order of its next departure,
   // with its next two times, or its next time and the day. Where a
   // route runs both ways from here — twin stops across a road — the
@@ -1001,7 +1015,7 @@ function flickAnywhere(pos) {
 
 function onFlick() {
   // The watch only asks when its own setting allows, so no gate here.
-  lastAnswer = null;
+  lastAnswer = null; answerCd = null;
   navigator.geolocation.getCurrentPosition(function (pos) {
     var lat = pos.coords.latitude, lon = pos.coords.longitude;
     console.log('headway: fix ' + lat.toFixed(4) + ',' + lon.toFixed(4) + ' +-' + Math.round(pos.coords.accuracy) + 'm');

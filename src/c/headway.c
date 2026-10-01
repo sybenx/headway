@@ -108,6 +108,7 @@ typedef struct { char route[8], head[20], when[24]; uint32_t color; bool live; }
 #define HAS_WAVE 1
 #define HAS_YARD 1   // the yard's count in the countdown's place
 #define HAS_RAIN 1   // RAIN IN 15 MIN beside the modules
+#define HAS_STOPCD 1 // the countdown at any stop, after a flick there
 #endif
 static struct {
   bool valid, pending, lit;   // lit: a flick was heard; the seconds show until the answer's time is up
@@ -158,6 +159,22 @@ static int yard_out(void) {
 #else
 #define AT_YARD() false
 #define YARD_ON() false
+#endif
+
+// ---- the countdown at any stop. A flick's answer at a stop with a bus due
+// within twenty minutes brings the hub's countdown for it, the route's badge
+// over the block, until the bus has left; nothing is checked meanwhile, so it
+// runs out on its own. Kept, so a trip to the watch's menus doesn't lose it.
+#ifdef HAS_STOPCD
+#define STOPCD_KEY 5
+static struct { int32_t at; char route[8]; uint32_t col; } s_cd;
+static bool s_cd_shown;   // the face is counting to it this frame
+static bool stopcd_on(time_t now) { return s_cd.at && now < s_cd.at + 60 && s_cd.at - now <= 21 * 60; }
+#define AT_STOPCD(now) stopcd_on(now)
+#define AT_STOP() s_cd_shown
+#else
+#define AT_STOPCD(now) false
+#define AT_STOP() false
 #endif
 
 // The hub's answer, a line a departure minute: the minute, and every route
@@ -735,6 +752,32 @@ static Schedule schedule_for(int hour, int minute, int second) {
   // The last minute, counted in seconds — the one place the face moves.
   s.is_final = s_set.final_seconds && s.remaining == 1;
   return s;
+}
+
+// The same, counted to one departure at epoch `at` rather than the headway.
+#ifdef HAS_STOPCD
+static Schedule schedule_until(const struct tm *t, time_t now, time_t at) {
+  Schedule s;
+  const time_t midnight = now - (t->tm_hour * 3600 + t->tm_min * 60 + t->tm_sec);
+  const int at_min = (int)((at - midnight) / 60), now_min = t->tm_hour * 60 + t->tm_min;
+  s.remaining = at_min > now_min ? at_min - now_min : 0;
+  s.secs = 60 - t->tm_sec;
+  s.next_h = (at_min / 60) % 24;
+  s.next_m = at_min % 60;
+  s.is_now = (s.remaining == 0);
+  s.is_boarding = (s.remaining > 0 && s.remaining <= THRESHOLD);
+  s.is_final = s_set.final_seconds && s.remaining == 1;
+  return s;
+}
+#endif
+
+// What the countdown counts to now: a stop's departure after a flick there,
+// away from the hub; else the headway.
+static inline __attribute__((always_inline)) Schedule schedule_now(const struct tm *t, time_t now) {
+#ifdef HAS_STOPCD
+  if (AT_STOPCD(now) && !(transit_fresh(now) && s_tr.state == 1)) return schedule_until(t, now, s_cd.at);
+#endif
+  return schedule_for(t->tm_hour, t->tm_min, t->tm_sec);
 }
 
 static bool use_24h(void) {
@@ -2120,6 +2163,10 @@ static struct {
   char dow[8], date[12], num[8];
   const char *unit;
   const char *label;          // over the block, at the yard; none elsewhere
+#ifdef HAS_STOPCD
+  bool badge;                 // the label is a route's badge, at a stop
+  int bx, by, bw, gx, gy;     // where the badge and its letters go
+#endif
   bool now, solid, bare;
   GSize z_num;
   Metrics m_min, m_num, m_dow, m_date;
@@ -2142,6 +2189,10 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
   // The block is the number and its unit; the departure's clock time is
   // the chips' to say, and the face at the hub is busy enough.
   s_bk.label = NULL;
+#ifdef HAS_STOPCD
+  s_bk.badge = false;
+  if (s_cd_shown) { s_bk.label = s_cd.route; s_bk.badge = true; }
+#endif
   if (sch->is_now) {
     strncpy(s_bk.num, "NOW", sizeof(s_bk.num));
   } else {
@@ -2234,6 +2285,20 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
   // A label stands over the block, and the band above ends there.
   s_bk.top = s_bk.block_y;
 #ifdef HAS_YARD
+#ifdef HAS_STOPCD
+  if (s_bk.badge) {
+    // Over the block's edge whether it is solid or not, so the badge stays
+    // put as the block fills at five minutes.
+    const Metrics mb = barlow_metrics(measure("8", s_f_label).h);
+    const int gw = run_w(s_bk.label, s_f_label, false, 0), bh = sc(CHIP);
+    s_bk.bw = gw + 2 * sc(2) < bh ? bh : gw + 2 * sc(2) + 1;
+    s_bk.by = s_bk.block_y - sc(3) - bh;
+    s_bk.bx = mapx(fr->end - s_bk.bw, s_bk.bw);
+    s_bk.gx = s_bk.bx + (s_bk.bw - gw + 1) / 2;
+    s_bk.gy = s_bk.by + (bh - mb.cap) / 2 - mb.bearing;
+    s_bk.top = s_bk.by - sc(4);
+  } else
+#endif
   if (s_bk.label) {
     s_bk.label_y = s_bk.num_y - sc(YARD_GAP) - s_m_cap.cap - s_m_cap.bearing;
     s_bk.label_x = fr->end - run_w(s_bk.label, s_f_cap, false, TRACK);
@@ -2264,6 +2329,15 @@ static void paint_block(int fr_start) {
       draw_run_s(s_bk.unit, s_f_label, x + s_bk.num_w + sc(LABEL_GAP),
                  s_bk.num_y + s_bk.m_num.cap - s_bk.m_min.cap - s_bk.m_min.bearing, false, TRACK);
   }
+#ifdef HAS_STOPCD
+  if (s_bk.badge) {
+    const GColor fill = PBL_IF_COLOR_ELSE(GColorFromHEX(s_cd.col), s_ink);
+    graphics_context_set_fill_color(s_ctx, fill);
+    graphics_fill_rect(s_ctx, GRect(s_bk.bx, s_bk.by, s_bk.bw, sc(CHIP)), sc(2), GCornersAll);
+    graphics_context_set_text_color(s_ctx, on_fill(fill));
+    draw_run_s(s_bk.label, s_f_label, s_bk.gx, s_bk.gy, false, 0);
+  } else
+#endif
 #ifdef HAS_YARD
   if (s_bk.label) {
     graphics_context_set_text_color(s_ctx, s_ink);
@@ -2295,7 +2369,7 @@ static void face_update(Layer *layer, GContext *ctx) {
 
   const time_t now = time(NULL);
   t = localtime(&now);
-  sch = schedule_for(t->tm_hour, t->tm_min, t->tm_sec);
+  sch = schedule_now(t, now);
 /*DEMO*/
   s_now_min = t->tm_hour * 60 + t->tm_min;
   // With the hub known, the countdown is for the hub: at it in its hours the
@@ -2307,7 +2381,11 @@ static void face_update(Layer *layer, GContext *ctx) {
   // buses still out in the block, the stop up the road beside the modules.
   // Either way the edge is the hairline, not the rail.
   yard = YARD_ON();
-  idle = !at_hub && s_set.transit != TRANSIT_CHIPS && !yard;
+  // A flick at a stop with a bus soon: the countdown for that bus.
+#ifdef HAS_STOPCD
+  s_cd_shown = !at_hub && !yard && AT_STOPCD(now);
+#endif
+  idle = !at_hub && !AT_STOP() && s_set.transit != TRANSIT_CHIPS && !yard;
   s_quiet_face = idle || yard;
 
   theme_apply(t->tm_hour);
@@ -2404,7 +2482,7 @@ static void face_update(Layer *layer, GContext *ctx) {
 
   // ---- boarding buzz, once on the transition into the solid block: at the
   // hub by default, or wherever the countdown runs.
-  const bool buzz = s_set.buzz == BUZZ_ALWAYS || (s_set.buzz == BUZZ_HUB && at_hub);
+  const bool buzz = s_set.buzz == BUZZ_ALWAYS || (s_set.buzz == BUZZ_HUB && (at_hub || AT_STOP()));
   if (!s_quiet_face && buzz && sch.remaining == THRESHOLD && s_last_remaining != THRESHOLD
       && !quiet_time_is_active()) {
     vibes_short_pulse();
@@ -2423,7 +2501,7 @@ static void tick_handler(struct tm *tick_time, TimeUnits units);
 static void retune_tick(void) {
   const time_t now = time(NULL);
   struct tm *t = localtime(&now);
-  const Schedule s = schedule_for(t->tm_hour, t->tm_min, t->tm_sec);
+  const Schedule s = schedule_now(t, now);
   const int now_min = t->tm_hour * 60 + t->tm_min;
   const bool gb_final = s_set.final_seconds && transit_fresh(now) && s_tr.state == 1
       && (transit_next(s_tr.g, now_min) == 1 || transit_next(s_tr.b, now_min) == 1);
@@ -2723,6 +2801,17 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
       take_row(iter, 1, MESSAGE_KEY_SV_R2, MESSAGE_KEY_SV_H2, MESSAGE_KEY_SV_W2, MESSAGE_KEY_SV_C2, MESSAGE_KEY_SV_T2);
       take_row(iter, 2, MESSAGE_KEY_SV_R3, MESSAGE_KEY_SV_H3, MESSAGE_KEY_SV_W3, MESSAGE_KEY_SV_C3, MESSAGE_KEY_SV_T3);
     }
+#ifdef HAS_STOPCD
+    // Every answer says whether a stop's countdown runs: a time, or none.
+    Tuple *tca = dict_find(iter, MESSAGE_KEY_SV_CD_AT);
+    if (tca) {
+      Tuple *tcr = dict_find(iter, MESSAGE_KEY_SV_CD_R), *tcc = dict_find(iter, MESSAGE_KEY_SV_CD_C);
+      s_cd.at = tca->value->int32;
+      strncpy(s_cd.route, tcr ? tcr->value->cstring : "", sizeof(s_cd.route) - 1); s_cd.route[sizeof(s_cd.route) - 1] = 0;
+      s_cd.col = tcc ? (uint32_t)tcc->value->int32 : 0x888888;
+      if (s_cd.at) persist_write_data(STOPCD_KEY, &s_cd, sizeof(s_cd)); else persist_delete(STOPCD_KEY);
+    }
+#endif
     s_sv.pending = false;
     if (s_sv.n == 0 && !s_sv.stop[0]) {
       // No stop near enough to speak of: the face stays as it was, and the
@@ -2862,6 +2951,9 @@ static void window_unload(Window *window) {
 static void init(void) {
   settings_load();
   weather_load();
+#ifdef HAS_STOPCD
+  if (persist_get_size(STOPCD_KEY) == (int)sizeof(s_cd)) persist_read_data(STOPCD_KEY, &s_cd, sizeof(s_cd));
+#endif
   transit_load();
 #ifdef HAS_YARD
   s_yd.out = -1;

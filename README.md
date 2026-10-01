@@ -157,6 +157,13 @@ hollow, and solid once it's there. Only the next departure of each route is
 drawn so; with no live answer every badge is solid, as before.
 
 ![live times on the board](screenshots/stop-live.png)
+At a stop, when a bus is due within twenty minutes, the answer leaves the
+transit centre's countdown behind it: the soonest bus from the stop you're
+at, its route's badge over the block, `12 MIN` going solid at five with a
+buzz, `NOW` in its minute, and then the plain face again. Nothing is checked
+while it runs; it simply runs out, and a flick elsewhere ends it. Not on the
+Classic.
+
 Every flick, anywhere, shows the seconds the moment the watch feels it:
 under the time on the plain face, or, where the countdown is running, in
 the block itself, where `19 MIN` becomes `18:42`, what is truly left. With

@@ -19,8 +19,8 @@ from the outer edge, the part a cuff uncovers first. Rain due within the
 hour shows on the face.
 
 Near Connect (Logan, Utah) or UTA (Ogden to Provo), flick your wrist for the
-next buses at your stop, live where there are live times. At Connect's
-transit centre it counts down to the next departure.
+next buses at your stop, live where there are live times, and the face
+counts down to the next one.
 
 Optional: turn on Transitous (transitous.org) to flick for buses anywhere
 else. Off by default; it sends your location, rounded to about 100 m. Data
@@ -28,6 +28,13 @@ from transitous.org/sources and OpenStreetMap.
 
 The weather service gets your location rounded to about 100 m; otherwise
 it stays on your phone. No accounts. Round watches aren't supported.
+
+## Release notes (1.25.0)
+
+A flick at a stop now leaves a countdown behind: the next bus from that stop,
+its route's badge over the block, solid at five minutes with a buzz, until
+it has gone. Anywhere Headway answers, Transitous included. Not on the
+Classic.
 
 ## Release notes (1.24.0)
 
