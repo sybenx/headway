@@ -39,6 +39,13 @@ transit.
 Settings on the phone for modules, theme, accent, wrist, clock and units.
 Round watches aren't supported.
 
+## Release notes (1.21.0)
+
+At Connect's yard the watch itself asks for the count through the hour after
+the last trip, so it keeps coming when the phone would sleep. A flick there
+says how many buses are pulling in and how far the nearest is, and after the
+last trip the minutes count to 25, then the face is itself again.
+
 ## Release notes (1.20.0)
 
 A flick answers more of what you're asking. At a stop it shows every route
