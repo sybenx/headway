@@ -727,7 +727,9 @@ function waves(deps, dayWord, index) {
       routes: w.list.map(function (x) { return x.route; }),
       colors: w.list.map(function (x) { return routeColour(index, x.route); }),
       live: bits,
-      away: 0,
+      // With no word from the feed on which buses are in, none is claimed:
+      // colour on the board means a bus at its bay, so every badge is grey.
+      away: (1 << w.list.length) - 1,
     };
   });
 }
@@ -764,7 +766,12 @@ function hubChips(deps, dayWord, index, stops, inNow, loops, onDay) {
     if ((loops || []).indexOf(d.route) < 0 || next[d.route]) return false;
     return (next[d.route] = true);
   });
-  return [line].concat(waves(firsts, '', index).slice(0, 2));
+  // The loops' lines are in colour, like the chips, only where the bus is in.
+  return [line].concat(waves(firsts, '', index).slice(0, 2).map(function (w) {
+    w.away = 0;
+    w.routes.forEach(function (r, j) { if (!inNow[routeStem(r)]) w.away |= 1 << j; });
+    return w;
+  }));
 }
 
 // Buses still out, for a flick at the yard they sleep in: every bus with a

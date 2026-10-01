@@ -29,6 +29,11 @@ from transitous.org/sources and OpenStreetMap.
 The weather service gets your location rounded to about 100 m; otherwise
 it stays on your phone. No accounts. Round watches aren't supported.
 
+## Release notes (1.25.2)
+
+At the transit centre a flick colours only the buses at their bays; the rest
+are grey outlines, and with no live word on who is in, all are grey.
+
 ## Release notes (1.25.1)
 
 The watchface list shows Headway's icon in colour on colour watches.

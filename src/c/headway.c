@@ -1699,12 +1699,12 @@ static void paint_wave(int fr_start) {
       const int x = rx + (s_wl.bx[k][c] - s_wl.l[k].x);
       const GColor fill = PBL_IF_COLOR_ELSE(GColorFromHEX(w->col[b]), s_ink);
       if ((w->away >> b) & 1) {
-        // Its bus isn't in at its bay yet: the badge hollow, outlined in its
-        // colour, the route in ink, since a dark route colour alone would
-        // vanish on the dark ground.
-        graphics_context_set_stroke_color(s_ctx, fill);
+        // Its bus isn't in at its bay yet: the badge hollow and grey, the
+        // route grey too. Colour is kept for the buses that are here, so a
+        // board in colour reads as buses at their bays and nothing else.
+        graphics_context_set_stroke_color(s_ctx, s_dim);
         graphics_draw_round_rect(s_ctx, GRect(x, s_wl.l[k].y, s_wl.bw[k][c], badge_h), sc(2));
-        graphics_context_set_text_color(s_ctx, s_ink);
+        graphics_context_set_text_color(s_ctx, s_dim);
       } else {
         graphics_context_set_fill_color(s_ctx, fill);
         graphics_fill_rect(s_ctx, GRect(x, s_wl.l[k].y, s_wl.bw[k][c], badge_h), sc(2), GCornersAll);

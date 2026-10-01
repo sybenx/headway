@@ -108,9 +108,11 @@ line. Four lines fit where the date was: the loops, the half-hour wave, and
 what follows. With the live feed, a flick there asks a different question,
 the one asked standing in the bays: which buses are in? Every route that
 leaves the transit centre that day is a badge on one line, in route order,
-solid where its bus is at a bay now and hollow where it isn't, and under it
-the loops' next departures, `G` and `B`, a line each. With no live answer it
-is the departures by time, since nothing can be said about who is in. A
+solid in its colour where its bus is at a bay now and a grey outline where
+it isn't, and under it the loops' next departures, `G` and `B`, a line each,
+coloured the same way. Colour on that board means a bus is here and nothing
+else. With no live answer it is the departures by time, all grey, since
+nothing can be said about who is in. A
 Pebble Classic has no room for it and keeps the board.
 
 **At the yard,** Connect's headquarters in North Logan where the buses sleep,
@@ -153,8 +155,7 @@ time held to the timetable costs you the bus the times one doesn't, where
 an early one costs only a wait. A time without the
 arc is the timetable's. At the hub the live feed also says which buses are
 in: a route whose bus hasn't reached the transit centre yet has its badge
-hollow, and solid once it's there. Only the next departure of each route is
-drawn so; with no live answer every badge is solid, as before.
+a grey outline, and solid in its colour once it's there.
 
 ![live times on the board](screenshots/stop-live.png)
 At a stop, when a bus is due within twenty minutes, the answer leaves the
