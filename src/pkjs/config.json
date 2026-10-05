@@ -282,6 +282,16 @@
         "description": "Metres from the centre that count as being at it."
       },
       {
+        "type": "slider",
+        "messageKey": "CD_RANGE",
+        "label": "Count down to a stop within",
+        "defaultValue": 400,
+        "min": 100,
+        "max": 2000,
+        "step": 50,
+        "description": "Metres. A flick further than this from every stop shows only its seconds, and ends a countdown left from a stop you've walked away from."
+      },
+      {
         "type": "toggle",
         "messageKey": "FLICK_ON",
         "label": "Flick for the nearest stop",

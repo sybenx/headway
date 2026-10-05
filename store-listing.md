@@ -30,6 +30,12 @@ from transitous.org/sources and OpenStreetMap.
 The weather service gets your location rounded to about 100 m; otherwise
 it stays on your phone. No accounts. Round watches aren't supported.
 
+## Release notes (1.26.1)
+
+A flick counts down only to a stop within range, 400 m unless you set it
+otherwise: further off it shows its seconds and lets a countdown you've
+walked away from go. The new slider is under Transit.
+
 ## Release notes (1.26.0)
 
 A flick now answers with one thing: a countdown to the next bus from the

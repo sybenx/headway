@@ -1,7 +1,7 @@
 {
   "name": "headway",
   "author": "Aaron Herbst",
-  "version": "1.26.0",
+  "version": "1.26.1",
   "keywords": [
     "pebble-app",
     "watchface",
@@ -88,7 +88,8 @@
       "SV_KEEP",
       "SV_QUIET",
       "CD_END",
-      "CD_CHECK"
+      "CD_CHECK",
+      "CD_RANGE"
     ],
     "resources": {
       "media": [

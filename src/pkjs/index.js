@@ -610,6 +610,10 @@ var CD_MAX = 8;
 // Where the countdown's stop is, for the half-hourly look to end it once the
 // wearer has gone; null with none running.
 var cdStop = null, CD_GONE = 400;
+// How near a stop must be to count down to it: a flick further from every
+// stop than this shows only its seconds. The wearer's to set.
+var CD_RANGE_DEFAULT = 400;
+function cdRange() { return Number(settings().CD_RANGE) || CD_RANGE_DEFAULT; }
 function departures(deps, dayMs, colour) {
   var out = [], seen = {};
   deps.filter(function (d) { return d.near; }).concat(deps.filter(function (d) { return !d.near; })).forEach(function (d) {
@@ -820,6 +824,12 @@ function answerStop(o) {
   // Within the fix's own accuracy of the stop, the wearer may well be at it.
   var dist = o.best.d <= Math.max(HERE_M, o.reach) ? 0 : o.best.d;
   if (o.out !== null) return sendYard(o.title, dist, o.out);
+  // At the yard the stop files are read for the count's sake; the stop up
+  // the road still has to be within range to be counted down to.
+  if (o.best.d > cdRange()) {
+    console.log('headway: nearest stop ' + Math.round(o.best.d) + ' m off, past the range of ' + cdRange());
+    return sendNothing(false);
+  }
   var list = departures(o.deps, o.dayMs, o.colour);
   if (!list.length) return sendNothing(false);
   sendList(o.title, dist, list, o.liveSys, { lat: o.best.lat, lon: o.best.lon }, o.quiet);
@@ -910,6 +920,10 @@ function flickAnywhere(pos) {
     function answer() {
       ranked.sort(function (a, b) { return a.d - b.d; });
       var best = ranked[0];
+      if (best.d > cdRange()) {
+        console.log('headway: nearest stop ' + Math.round(best.d) + ' m off, past the range of ' + cdRange());
+        return sendNothing(false);
+      }
       var here = best.d <= Math.max(HERE_M, reach);
       var near = {};
       // The stop's twin across the road, and the stops Transitous names the
@@ -1001,6 +1015,12 @@ function answerAt(pos, quiet) {
       var reach = Math.min(Math.max(pos.coords.accuracy || 0, 0), MAX_REACH);
       var atHub = sys.hub && metres(best.lat, best.lon, sys.hub.lat, sys.hub.lon) <= HUB;
       var atBase = sys.base && metres(lat, lon, sys.base.lat, sys.base.lon) <= sys.base.r;
+      // A stop further off than the range isn't the wearer's: nothing to
+      // count to, and a countdown left from one that was ends.
+      if (!atHub && !atBase && best.d > cdRange()) {
+        console.log('headway: nearest stop ' + Math.round(best.d) + ' m off, past the range of ' + cdRange());
+        return sendNothing(false);
+      }
       // The answer is the nearest stop's buses, at it or on the way to it.
       var group = atHub
         ? ranked.filter(function (st) { return metres(sys.hub.lat, sys.hub.lon, st.lat, st.lon) <= HUB; }).slice(0, 16)

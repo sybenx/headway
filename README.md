@@ -71,8 +71,10 @@ beside them, and their last minute counts in seconds too.
 
 **A flick of the wrist** anywhere inside the system asks the phone where it
 is, and the face answers with a countdown to the next bus from the nearest
-stop: the route's badge over the big minutes, the stop's name beside the
-modules, and how far it is when the fix puts you off it. The face never
+stop, within a range you set, 400 m by default: the route's badge over the
+big minutes, the stop's name beside the modules, and how far it is when the
+fix puts you off it. Further than that from every stop a flick shows only
+its seconds, and ends a countdown left from a stop you've walked away from. The face never
 asks for high accuracy; it takes the phone's everyday fix at its word, and
 the nearest stop within that accuracy is yours, with its twin across the road
 and, at a station, every bay. The countdown is the hub's countdown, at any
@@ -148,8 +150,8 @@ a grey outline, and solid in its colour once it's there.
 Every flick, anywhere, shows the seconds the moment the watch feels it:
 under the time on the plain face, or, where the countdown is running, in
 the block itself, where `19 MIN` becomes `18:42`, what is truly left. With
-no stop within two kilometres that is all a flick shows: the gesture was
-heard, and nothing is taken away to say there is nothing.
+no stop within range that is all a flick shows: the gesture was heard, and
+nothing is taken away to say there is nothing.
 
 The face knows two systems so far. Connect, the Cache Valley Transit District
 in Logan, Utah, is the hub kind: its routes leave the transit centre on the
@@ -188,7 +190,8 @@ and a departure offset you set, with the hub's extras when you are at one.
 From the Pebble app.
 
 - **Transit** — automatic (default), countdown everywhere, or off. With it:
-  how near the hub counts as at it, and a switch for the flick. **Flick
+  how near the hub counts as at it, how near a stop must be for a flick to
+  count down to it, and a switch for the flick. **Flick
   anywhere, with Transitous** is off unless you turn it on; see above.
 - **Headway** and **departure offset** — for the countdown: 30, 20 or 15
   minutes, and minutes past the hour.
