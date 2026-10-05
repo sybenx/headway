@@ -18,16 +18,29 @@ A sleeve-aware transit watch: the time, heart rate, weather and date hang
 from the outer edge, the part a cuff uncovers first. Rain due within the
 hour shows on the face.
 
-Near Connect (Logan, Utah) or UTA (Ogden to Provo), flick your wrist for the
-next buses at your stop, live where there are live times, and the face
-counts down to the next one.
+Near Connect (Logan, Utah) or UTA (Ogden to Provo), flick your wrist and
+the face counts down to the next bus from your stop, live where there are
+live times, until it has gone and on to the next. Flick again for the
+stop's next route.
 
-Optional: turn on Transitous (transitous.org) to flick for buses anywhere
-else. Off by default; it sends your location, rounded to about 100 m. Data
+Optional: turn on Transitous (transitous.org) for the same countdown
+anywhere else. Off by default; it sends your location, rounded to about 100 m. Data
 from transitous.org/sources and OpenStreetMap.
 
 The weather service gets your location rounded to about 100 m; otherwise
 it stays on your phone. No accounts. Round watches aren't supported.
+
+## Release notes (1.26.0)
+
+A flick now answers with one thing: a countdown to the next bus from the
+nearest stop, its route over the big minutes and the stop beside the
+modules, with how far it is when you're off it. It runs on through the
+stop's next buses until you leave or the day's buses are done; past an hour
+it reads the clock time, and a bus another day's shows its day. A second
+flick steps to the stop's next route. Where live times exist the watch asks
+again at five minutes and at one. The board, the one-row answer, the nearby
+stops and the transit centre's timetable view are gone; the centre's
+which-buses-are-in and the yard stay. On the Classic too.
 
 ## Release notes (1.25.2)
 

@@ -269,7 +269,7 @@
             "value": "0"
           }
         ],
-        "description": "Automatic: a plain watch; a flick of the wrist inside a transit system the face knows shows the nearest stop, and near its transit centre the countdown comes on. The phone checks roughly where you are every half hour, every five minutes only near a transit centre while its buses run; a flick takes one fix, never a high-accuracy one, and only where you could be in a system. Countdown everywhere: the countdown wherever you are, set below. Off: a plain watch, and the phone never checks your location for transit."
+        "description": "Automatic: a plain watch; a flick of the wrist inside a transit system the face knows starts a countdown to the next bus from the nearest stop, and at its transit centre the countdown comes on by itself. The phone checks roughly where you are every half hour, every five minutes only near a transit centre while its buses run; a flick takes one fix, never a high-accuracy one, and only where you could be in a system. Countdown everywhere: the countdown wherever you are, set below. Off: a plain watch, and the phone never checks your location for transit."
       },
       {
         "type": "slider",
@@ -286,14 +286,14 @@
         "messageKey": "FLICK_ON",
         "label": "Flick for the nearest stop",
         "defaultValue": true,
-        "description": "A flick of the wrist shows the nearest stop and what leaves it next, for twelve seconds. Off, a flick still shows the seconds."
+        "description": "A flick of the wrist starts a countdown to the next bus from the nearest stop: its route over the big minutes, the stop beside the modules. It moves on to the next bus as each goes, and ends when you leave the stop or the day's buses are done. A second flick within a few seconds steps to the stop's next route. Off, a flick still shows the seconds."
       },
       {
         "type": "toggle",
         "messageKey": "ANYWHERE",
         "label": "Flick anywhere, with Transitous",
         "defaultValue": false,
-        "description": "Off unless you turn it on. Outside the systems above, a flick asks Transitous, a free, volunteer-run service built on open transit data (transitous.org), for the stops and departures near you. With this on: a flick takes a location fix wherever you are, not only in a system the face knows; your location goes to Transitous, rounded to about 100 m, and its servers keep request logs for two days; each flick downloads about 50 KB over the phone’s data, up to 250 KB in the largest cities. Times are live where the agency publishes them, the timetable elsewhere, and only as good as the feeds behind them. The systems above always answer from their own timetable."
+        "description": "Off unless you turn it on. Outside the systems above, a flick asks Transitous, a free, volunteer-run service built on open transit data (transitous.org), for what leaves the nearest stop, and counts down to it as anywhere. With this on: a flick takes a location fix wherever you are, not only in a system the face knows; your location goes to Transitous, rounded to about 100 m, and its servers keep request logs for two days; each flick downloads about 50 KB over the phone’s data, up to 250 KB in the largest cities. Times are live where the agency publishes them, the timetable elsewhere, and only as good as the feeds behind them. The systems above always answer from their own timetable."
       }
     ]
   },

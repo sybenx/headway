@@ -95,25 +95,23 @@ typedef struct {
   time_t at;
 } Transit;
 
-// The stop view: what the phone answered the last flick with. Shown for a
-// few seconds, then the face is itself again.
+// A flick's answer: the hub's lines, or the stop's list the countdown below
+// takes. Lit for a few seconds, then the face is itself again.
 #define SV_ROWS 3
 #define SV_SHOW_MS 12000
 #define SV_WAIT_MS 15000
 #define SV_MIN_MS 8000    // an answer that lands late still gets this long
-typedef struct { char route[8], head[20], when[24]; uint32_t color; bool live; } SvRow;
 // Not on the Classic: its 24 KB holds neither the hub's view nor the yard's
-// count and the heap too, so the phone sends it the board it always had.
+// count and the heap too.
 #ifndef PBL_PLATFORM_APLITE
 #define HAS_WAVE 1
 #define HAS_YARD 1   // the yard's count in the countdown's place
 #define HAS_RAIN 1   // RAIN IN 15 MIN beside the modules
-#define HAS_STOPCD 1 // the countdown at any stop, after a flick there
 #endif
+#define HAS_STOPCD 1 // the countdown at any stop, after a flick there
 static struct {
   bool valid, pending, lit;   // lit: a flick was heard; the seconds show until the answer's time is up
-  bool wave;                  // the hub's answer: lines by departure time, not rows by route
-  uint8_t take;               // a full-screen answer: 2 rows at a stop, 3 two columns, 4 the stops near; 0 none
+  bool wave;                  // the hub's answer: lines by departure time
 #ifdef HAS_YARD
   int8_t out;                 // at the yard: how many buses are still out, -1 elsewhere
 #endif
@@ -126,9 +124,8 @@ static struct {
   uint16_t t0_ms;
   int32_t seg_at, end_at;
   int16_t seg_f;
-  char stop[24];
-  int dist, n;
-  SvRow row[SV_ROWS];
+  char stop[24];              // the hub's name over its lines
+  int n;                      // how many lines
   AppTimer *timer;
   AppTimer *drain;            // repaints the hairline as it shortens
 } s_sv;
@@ -161,21 +158,56 @@ static int yard_out(void) {
 #define YARD_ON() false
 #endif
 
-// ---- the countdown at any stop. A flick's answer at a stop with a bus due
-// within twenty minutes brings the hub's countdown for it, the route's badge
-// over the block, until the bus has left; nothing is checked meanwhile, so it
-// runs out on its own. Kept, so a trip to the watch's menus doesn't lose it.
-#ifdef HAS_STOPCD
+// ---- the countdown at any stop. A flick's answer is the stop and its next
+// departures, soonest first, the nearest stop's before any the fix's
+// accuracy adds. The face counts down to the first not yet gone, the route's
+// badge over the block and the stop's name beside the modules, and moves on
+// to the next as each goes: until the list runs out, a flick elsewhere
+// answers, or the phone's half-hourly look finds the wearer gone from the
+// stop. A second flick, while the answer is lit, steps to the next route.
+// Kept, so a trip to the watch's menus doesn't lose it.
+#define CD_MAX 8
+#define CD_CLOCK_MIN 60   // past this many minutes the block reads the clock time
 #define STOPCD_KEY 5
-static struct { int32_t at; char route[8]; uint32_t col; } s_cd;
-static bool s_cd_shown;   // the face is counting to it this frame
-static bool stopcd_on(time_t now) { return s_cd.at && now < s_cd.at + 60 && s_cd.at - now <= 21 * 60; }
-#define AT_STOPCD(now) stopcd_on(now)
+typedef struct { int32_t at; uint32_t col; char route[8]; bool live; } CdDep;
+static struct {
+  uint8_t n;
+  bool live_sys;       // the system has live times: the phone is asked again near the end
+  int16_t dist;        // metres to the stop, 0 at it
+  char stop[24];
+  char pick[8];        // a route stepped to by a second flick, or none
+  CdDep d[CD_MAX];
+} s_cd;
+static bool s_cd_shown;   // the face is counting to one this frame
+static int8_t s_cd_cur;   // which
+// The departure the face counts to: the first not yet gone, a minute's grace
+// after its time; or, stepped to a route, that route's first. -1 for none.
+static int cd_current(time_t now) {
+  int first = -1;
+  for (int i = 0; i < s_cd.n; i++) if (now < s_cd.d[i].at + 60) { first = i; break; }
+  if (first < 0 || !s_cd.pick[0]) return first;
+  for (int i = first; i < s_cd.n; i++)
+    if (now < s_cd.d[i].at + 60 && !strcmp(s_cd.d[i].route, s_cd.pick)) return i;
+  return first;
+}
+// Step to the next route on the list after the one counting, round to the
+// first: each route once, by its first departure still to come. False with
+// nowhere to step.
+static bool cd_step(time_t now) {
+  const int cur = cd_current(now);
+  if (cur < 0) return false;
+  for (int k = 1; k <= s_cd.n; k++) {
+    const int i = (cur + k) % s_cd.n;
+    if (now >= s_cd.d[i].at + 60 || !strcmp(s_cd.d[i].route, s_cd.d[cur].route)) continue;
+    bool first = true;
+    for (int j = 0; j < i; j++) if (now < s_cd.d[j].at + 60 && !strcmp(s_cd.d[j].route, s_cd.d[i].route)) first = false;
+    if (!first) continue;
+    strcpy(s_cd.pick, s_cd.d[i].route);
+    return true;
+  }
+  return false;
+}
 #define AT_STOP() s_cd_shown
-#else
-#define AT_STOPCD(now) false
-#define AT_STOP() false
-#endif
 
 // The hub's answer, a line a departure minute: the minute, and every route
 // leaving then as a badge, in route order. live has a bit a badge for a
@@ -400,6 +432,7 @@ static Window *s_window;
 static Layer *s_face;
 static int s_last_remaining = -1;
 static int16_t s_w = REF_W;   // display width, for scaling
+static time_t s_now;          // the frame's clock, read by its layouts
 
 static int sc(int v) { return (v * s_w + REF_W / 2) / REF_W; }
 
@@ -774,9 +807,10 @@ static Schedule schedule_until(const struct tm *t, time_t now, time_t at) {
 // What the countdown counts to now: a stop's departure after a flick there,
 // away from the hub; else the headway.
 static inline __attribute__((always_inline)) Schedule schedule_now(const struct tm *t, time_t now) {
-#ifdef HAS_STOPCD
-  if (AT_STOPCD(now) && !(transit_fresh(now) && s_tr.state == 1)) return schedule_until(t, now, s_cd.at);
-#endif
+  if (!(transit_fresh(now) && s_tr.state == 1)) {
+    const int i = cd_current(now);
+    if (i >= 0) return schedule_until(t, now, s_cd.d[i].at);
+  }
   return schedule_for(t->tm_hour, t->tm_min, t->tm_sec);
 }
 
@@ -1264,6 +1298,11 @@ static void layout_gb(int c_start, int avail_w, int band_top, int band_bot, int 
   s_gb.show = true;
 }
 
+// The countdown's stop, beside the modules: laid out with the band, defined
+// with the countdown below.
+static struct { bool want, show; int w, gap, x, y_name, y_dist; char name[24], dist[10]; } s_se;
+static void layout_stop_el(int c_start, int avail_w, int band_top, int band_bot) __attribute__((noinline));
+
 // The band's row: the second countdown at the hub, then the modules beside
 // it. The departure just gone gives way before a module does: shown only
 // where it costs the row nothing.
@@ -1275,7 +1314,10 @@ static void layout_band(const Frame *fr, bool at_hub, int band_top, int band_bot
 #endif
   if (at_hub) layout_gb(fr->start, fr->end - fr->start, band_top, band_bot, now_min, t->tm_sec);
   else s_gb.show = false;
-  layout_modules(s_f_mod, s_f_cap, fr->start, fr->end - fr->start - (s_gb.show ? s_gb.w + s_gb.gap : 0), band_top, band_bot);
+  // The countdown's stop takes the chips' place, where there are none.
+  if (!s_gb.show) layout_stop_el(fr->start, fr->end - fr->start, band_top, band_bot);
+  else s_se.show = false;
+  layout_modules(s_f_mod, s_f_cap, fr->start, fr->end - fr->start - (s_gb.show ? s_gb.w + s_gb.gap : s_se.show ? s_se.w + s_se.gap : 0), band_top, band_bot);
 #ifndef PBL_PLATFORM_APLITE
   if (s_gb.show && s_gb.was[0]) {
     const int with = s_md.n;
@@ -1355,16 +1397,14 @@ static void paint_idle(void) {
   draw_run(s_id.date, s_f_bigdate, s_id.date_x, s_id.date_y - s_id.m.bearing, false, TRACK);
 }
 
-// ---- the stop view: on a flick, the nearest stop and what leaves it next.
-// It takes the whole of the face below the time for a few seconds: a line
-// for the stop, then a row a departure — the route in its own colour, where
-// it is going, and when. The rail stays; it is the one thing the design
-// never covers.
+// ---- what the hub's answer is written with: the way a departure is
+// written, and the line for the stop, hung from the outer edge.
 #define SV_ROW_H 15
 #define SV_LINE_GAP 3      // the stop line's air below the time
 #define SV_ROWS_GAP 5      // between the stop line and the first row
 // A departure comes as minutes past midnight and is written the way the
 // watch tells time: 5:13P, or 17:13 on a 24-hour watch.
+#ifdef HAS_WAVE
 static int s_now_min;   // set each frame, so a board can tell a due bus
 static void sv_clock(char *out, size_t n, const char *tok) {
   const int m = atoi(tok), h = (m / 60) % 24, mm = m % 60;
@@ -1381,10 +1421,12 @@ static void sv_clock(char *out, size_t n, const char *tok) {
 static bool sv_is_now(const char *t) { return t[0] == 'N' || t[1] == ' '; }
 // NOW is set in the label font, which has the letters; a time in the board's.
 static GFont sv_font(const char *t) { return sv_is_now(t) ? s_f_label : s_f_board; }
+#endif
 
 // On the light theme grey text at this size loses its strokes, so the stop
 // line is ink with a hairline of light grey beneath it; on one-bit watches
 // the hairline is dotted. On the dark theme light grey reads as it is.
+#ifdef HAS_WAVE
 static void draw_stop_rule(int x0, int x1, int y) {
   if (x1 <= x0) return;
 #ifdef PBL_COLOR
@@ -1395,14 +1437,12 @@ static void draw_stop_rule(int x0, int x1, int y) {
   for (int x = x0; x < x1; x += 2) graphics_fill_rect(s_ctx, GRect(x, y, 1, 1), 0, GCornerNone);
 #endif
 }
+#endif
 static bool light_theme(void) { return gcolor_equal(s_ground, GColorWhite); }
 
 static struct {
-  int head_y, dist_w, stop_x, note_x, note_y, n, rule_y, date_x, date_y;
-  char date[16];
-  Metrics m_date;
-  char dist[10], note[20], stop[24];
-  struct { int y, badge_w, badge_h, glyph_dx, glyph_y, text_y, t1_dx, t2_dx, t2_y, row_x, row_w; bool t2_day; char t1[8], t2[10]; } r[SV_ROWS];
+  int head_y, dist_w, stop_x, rule_y;
+  char dist[10], stop[24];
   Metrics m_lab, m_val, m_bad;
 } s_svl;
 
@@ -1432,135 +1472,7 @@ static inline __attribute__((always_inline)) void fit_name(char *s, GFont f, int
   }
 }
 
-// The board, as the design draws it: hung from the outer edge, a line for
-// the stop, then a row a route — its badge and the next clock times, two
-// where they fit, or the next time and its day when today's are done. It
-// takes the whole of the room below the time and sits centred in it.
 #define SV_BADGE_GAP 5     // badge to the first time
-#define SV_TIME_GAP  7     // between the times
-// The badges are the chips' size, with the chips' glyph: one badge on the face.
-// The head and foot every answer shares: a small date at the foot, then the
-// stop line, its name hung from the outer edge and at the wrist end the
-// distance — or, at the hub after the day's last bus, the day. Inlined into
-// each layout, so no painter gets deeper for sharing it.
-static inline __attribute__((always_inline)) void layout_board_head(const struct tm *t, const Frame *fr) {
-  // The flick may have been for the date: a small one keeps the foot.
-  strftime(s_svl.date, sizeof(s_svl.date), "%a %d %b", t);
-  for (char *c = s_svl.date; *c; c++) *c = toupper((int)*c);
-  s_svl.m_date = barlow_metrics(measure(s_svl.date, s_f_date).h);
-  s_svl.date_y = fr->bot - sc(DATE_PAD_BOT) - s_svl.m_date.cap;
-  s_svl.date_x = fr->start;
-  // The stop line and the badges in the caption font, the times in the
-  // board font: the board is a small thing under a full-size time.
-  s_svl.m_lab = s_m_cap;
-  s_svl.m_val = barlow_metrics(measure("8", s_f_board).h);
-  s_svl.m_bad = barlow_metrics(measure("8", s_f_label).h);
-  s_svl.dist_w = 0;
-#ifdef HAS_WAVE
-  const char *word = s_sv.wave ? strchr(s_wave[0].when, ' ') : NULL;
-#else
-  const char *word = NULL;
-#endif
-  if (word && word[1]) {
-    strncpy(s_svl.dist, word + 1, sizeof(s_svl.dist) - 1); s_svl.dist[sizeof(s_svl.dist) - 1] = 0;
-    s_svl.dist_w = run_w(s_svl.dist, s_f_cap, false, TRACK);
-  } else if (!s_sv.wave && s_sv.dist > 60) {
-    format_dist(s_svl.dist, sizeof(s_svl.dist), s_sv.dist);
-    s_svl.dist_w = run_w(s_svl.dist, s_f_cap, false, TRACK);
-  }
-  // The stop's name gives way to the distance, a word at a time.
-  strncpy(s_svl.stop, s_sv.stop, sizeof(s_svl.stop) - 1); s_svl.stop[sizeof(s_svl.stop) - 1] = 0;
-  fit_name(s_svl.stop, s_f_cap, fr->end - fr->start - (s_svl.dist_w ? s_svl.dist_w + sc(6) : 0));
-  s_svl.stop_x = fr->end - run_w(s_svl.stop, s_f_cap, false, TRACK);
-  s_svl.note[0] = 0;
-}
-
-static void layout_stopview(const struct tm *t, const Frame *fr, int band_top) __attribute__((noinline));
-static void layout_stopview(const struct tm *t, const Frame *fr, int band_top) {
-  layout_board_head(t, fr);
-  const int band_bot = s_svl.date_y - sc(4);
-  const GFont f_line = s_f_cap, f_badge = s_f_label;
-  if (s_sv.n == 0) strncpy(s_svl.note, "NO SERVICE", sizeof(s_svl.note));   // a stop the data has nothing for
-  s_svl.note_x = fr->end - run_w(s_svl.note, f_line, false, TRACK);
-
-  const int badge_h = sc(CHIP);
-  const int line_h = s_svl.m_lab.cap + sc(SV_ROWS_GAP);
-  int rows = s_sv.n < SV_ROWS ? s_sv.n : SV_ROWS;
-  if (s_sv.n == 0) rows = 1;   // the note takes a row's place
-  while (rows > 0 && sc(SV_LINE_GAP) + line_h + (rows - 1) * sc(SV_ROW_H) + badge_h > band_bot - band_top - sc(2)) rows--;
-  const int used = sc(SV_LINE_GAP) + line_h + (rows ? (rows - 1) * sc(SV_ROW_H) + badge_h : 0);
-  const int top = band_top + (band_bot - band_top - used) / 2;
-  s_svl.head_y = top + sc(SV_LINE_GAP) - s_svl.m_lab.bearing;
-  s_svl.rule_y = top + sc(SV_LINE_GAP) + s_svl.m_lab.cap + sc(2);
-  int y = top + sc(SV_LINE_GAP) + line_h;
-  s_svl.note_y = y + sc(2) - s_svl.m_lab.bearing;
-  s_svl.n = 0;
-  if (s_sv.n == 0) return;
-  // The board reads in columns, as the design sets it: each time column
-  // starts at one x down the rows, and the badges end at one x before them.
-  int W1 = 0, W2 = 0;
-  for (int i = 0; i < rows; i++) {
-    const SvRow *row = &s_sv.row[i];
-    const int pad = sc(2);
-    s_svl.r[i].y = y;
-    // A one-glyph route gets a square badge; longer ones grow with the glyphs.
-    // The run's width carries a trailing bearing the ink does not, so the
-    // ink centres on width minus one; a wide badge is sized even for it.
-    const int gw = run_w(row->route, f_badge, false, 0);
-    s_svl.r[i].badge_w = gw + 2 * pad < badge_h ? badge_h : gw + 2 * pad + 1;
-    s_svl.r[i].badge_h = badge_h;
-    s_svl.r[i].glyph_dx = (s_svl.r[i].badge_w - gw + 1) / 2;
-    s_svl.r[i].glyph_y = y + (badge_h - s_svl.m_bad.cap) / 2 - s_svl.m_bad.bearing;
-    // The times sit on the badge's baseline: cap bottoms level.
-    s_svl.r[i].text_y = y + (badge_h + s_svl.m_bad.cap) / 2 - s_svl.m_val.cap - s_svl.m_val.bearing;
-    // The row comes as two tokens, a space between: minutes past midnight,
-    // then either a second time or a word — a day, TOMORROW or MON, or the
-    // direction where the route runs both ways from here.
-    const char *sp = strchr(row->when, ' ');
-    sv_clock(s_svl.r[i].t1, sizeof(s_svl.r[i].t1), row->when);
-    s_svl.r[i].t2[0] = 0;
-    s_svl.r[i].t2_day = false;
-    if (sp && isdigit((int)sp[1])) sv_clock(s_svl.r[i].t2, sizeof(s_svl.r[i].t2), sp + 1);
-    else if (sp && sp[1]) {
-      strncpy(s_svl.r[i].t2, sp + 1, sizeof(s_svl.r[i].t2) - 1); s_svl.r[i].t2[sizeof(s_svl.r[i].t2) - 1] = 0;
-      s_svl.r[i].t2_day = true;
-    }
-    // Proportional, as the design sets them: the colon takes its own width.
-    // A word in the second column takes the caption font on the baseline.
-    s_svl.r[i].t2_y = s_svl.r[i].t2_day ? s_svl.r[i].text_y + s_svl.m_val.bearing + s_svl.m_val.cap - s_svl.m_lab.cap - s_svl.m_lab.bearing : s_svl.r[i].text_y;
-    const int w1 = run_w(s_svl.r[i].t1, sv_font(s_svl.r[i].t1), false, 0);
-    const int w2 = s_svl.r[i].t2[0] ? run_w(s_svl.r[i].t2, s_svl.r[i].t2_day ? f_line : sv_font(s_svl.r[i].t2), false, s_svl.r[i].t2_day ? TRACK : 0) : 0;
-    if (w1 > W1) W1 = w1;
-    if (w2 > W2) W2 = w2;
-    s_svl.n = i + 1;
-    y += sc(SV_ROW_H);
-  }
-  const int x2 = fr->end - W2;                              // the second column
-  const int x1 = W2 ? x2 - sc(SV_TIME_GAP) - W1 : fr->end - W1;   // the first
-  const int bx = x1 - sc(SV_BADGE_GAP);                     // where the badges end
-  for (int i = 0; i < s_svl.n; i++) {
-    s_svl.r[i].row_x = bx - s_svl.r[i].badge_w;
-    s_svl.r[i].row_w = fr->end - s_svl.r[i].row_x;
-    s_svl.r[i].t1_dx = x1 - s_svl.r[i].row_x;
-    s_svl.r[i].t2_dx = x2 - s_svl.r[i].row_x;
-  }
-}
-
-static inline __attribute__((always_inline)) void paint_board_head(int fr_start, bool date) {
-  graphics_context_set_text_color(s_ctx, light_theme() ? s_ink : s_dim);
-  draw_run(s_svl.stop, s_f_cap, s_svl.stop_x, s_svl.head_y, false, TRACK);
-  if (light_theme()) {
-    const int w = run_w(s_svl.stop, s_f_cap, false, TRACK);
-    draw_stop_rule(mapx(s_svl.stop_x, w), mapx(s_svl.stop_x, w) + w, s_svl.rule_y);
-  }
-  graphics_context_set_text_color(s_ctx, s_ink);
-  if (date) draw_run(s_svl.date, s_f_date, s_svl.date_x, s_svl.date_y - s_svl.m_date.bearing, false, TRACK);
-  if (s_svl.dist_w) {
-    graphics_context_set_text_color(s_ctx, s_ink);
-    draw_run(s_svl.dist, s_f_cap, fr_start, s_svl.head_y, false, TRACK);
-  }
-}
-
 // A live time's mark: a small broadcast arc in the accent, the sign transit
 // apps give a predicted time, beside the time or above a hub badge. A time
 // without it is the timetable's. Fills only, so no deeper than its caller.
@@ -1574,37 +1486,38 @@ static void paint_live_mark(int x, int y) {
       if (LIVE_ARC[j][i] == 'X') graphics_fill_rect(s_ctx, GRect(x + i, y + j, 1, 1), 0, GCornerNone);
 }
 
-static void paint_stopview(int fr_start) __attribute__((noinline));
-static void paint_stopview(int fr_start) {
-  paint_board_head(fr_start, true);
-  if (s_svl.note[0]) {
-    graphics_context_set_text_color(s_ctx, s_ink);
-    draw_run(s_svl.note, s_f_cap, s_svl.note_x, s_svl.note_y, false, TRACK);
+#ifdef HAS_WAVE
+// The hub's stop line: its name hung from the outer edge and, after the
+// day's last bus, the day at the wrist end. Inlined into the layout.
+static inline __attribute__((always_inline)) void layout_board_head(const Frame *fr) {
+  s_svl.m_lab = s_m_cap;
+  s_svl.m_val = barlow_metrics(measure("8", s_f_board).h);
+  s_svl.m_bad = barlow_metrics(measure("8", s_f_label).h);
+  s_svl.dist_w = 0;
+  const char *word = strchr(s_wave[0].when, ' ');
+  if (word && word[1]) {
+    strncpy(s_svl.dist, word + 1, sizeof(s_svl.dist) - 1); s_svl.dist[sizeof(s_svl.dist) - 1] = 0;
+    s_svl.dist_w = run_w(s_svl.dist, s_f_cap, false, TRACK);
   }
-  for (int i = 0; i < s_svl.n; i++) {
-    const SvRow *row = &s_sv.row[i];
-    // The row is one unit, placed once by its logical x, then read rightwards.
-    const int rx = mapx(s_svl.r[i].row_x, s_svl.r[i].row_w);
-    const GColor fill = PBL_IF_COLOR_ELSE(GColorFromHEX(row->color), s_ink);
-    graphics_context_set_fill_color(s_ctx, fill);
-    graphics_fill_rect(s_ctx, GRect(rx, s_svl.r[i].y, s_svl.r[i].badge_w, s_svl.r[i].badge_h), sc(2), GCornersAll);
-    graphics_context_set_text_color(s_ctx, on_fill(fill));
-    draw_run_s(row->route, s_f_label, rx + s_svl.r[i].glyph_dx, s_svl.r[i].glyph_y, false, 0);
+  // The stop's name gives way to the day, a word at a time.
+  strncpy(s_svl.stop, s_sv.stop, sizeof(s_svl.stop) - 1); s_svl.stop[sizeof(s_svl.stop) - 1] = 0;
+  fit_name(s_svl.stop, s_f_cap, fr->end - fr->start - (s_svl.dist_w ? s_svl.dist_w + sc(6) : 0));
+  s_svl.stop_x = fr->end - run_w(s_svl.stop, s_f_cap, false, TRACK);
+}
+
+static inline __attribute__((always_inline)) void paint_board_head(int fr_start) {
+  graphics_context_set_text_color(s_ctx, light_theme() ? s_ink : s_dim);
+  draw_run(s_svl.stop, s_f_cap, s_svl.stop_x, s_svl.head_y, false, TRACK);
+  if (light_theme()) {
+    const int w = run_w(s_svl.stop, s_f_cap, false, TRACK);
+    draw_stop_rule(mapx(s_svl.stop_x, w), mapx(s_svl.stop_x, w) + w, s_svl.rule_y);
+  }
+  if (s_svl.dist_w) {
     graphics_context_set_text_color(s_ctx, s_ink);
-    draw_run_s(s_svl.r[i].t1, sv_font(s_svl.r[i].t1), rx + s_svl.r[i].t1_dx, s_svl.r[i].text_y, false, 0);
-    if (row->live)
-      paint_live_mark(rx + s_svl.r[i].t1_dx + run_w(s_svl.r[i].t1, sv_font(s_svl.r[i].t1), false, 0) + 1,
-                      s_svl.r[i].text_y + s_svl.m_val.bearing - 1);
-    if (s_svl.r[i].t2_day) {
-      graphics_context_set_text_color(s_ctx, s_dim);
-      draw_run_s(s_svl.r[i].t2, s_f_cap, rx + s_svl.r[i].t2_dx, s_svl.r[i].t2_y, false, TRACK);
-    } else if (s_svl.r[i].t2[0]) {
-      // A second time can be NOW too, a bus hard on the heels of one just
-      // gone: it takes the letters' font as the first column's does.
-      draw_run_s(s_svl.r[i].t2, sv_font(s_svl.r[i].t2), rx + s_svl.r[i].t2_dx, s_svl.r[i].text_y, false, 0);
-    }
+    draw_run(s_svl.dist, s_f_cap, fr_start, s_svl.head_y, false, TRACK);
   }
 }
+#endif
 
 #ifdef HAS_WAVE
 // ---- the hub's answer: departures by time. At the transit centre a dozen
@@ -1624,9 +1537,9 @@ static struct {
   uint8_t bw[WV_LINES][WV_MAX], gdx[WV_LINES][WV_MAX];
 } s_wl;
 
-static void layout_wave(const struct tm *t, const Frame *fr, int band_top) __attribute__((noinline));
-static void layout_wave(const struct tm *t, const Frame *fr, int band_top) {
-  layout_board_head(t, fr);
+static void layout_wave(const Frame *fr, int band_top) __attribute__((noinline));
+static void layout_wave(const Frame *fr, int band_top) {
+  layout_board_head(fr);
   const int band_bot = fr->bot - sc(DATE_PAD_BOT);
   const int badge_h = sc(CHIP), pad = sc(2), gap = sc(WV_GAP);
   const int line_h = s_svl.m_lab.cap + sc(SV_ROWS_GAP);
@@ -1688,7 +1601,7 @@ static void layout_wave(const struct tm *t, const Frame *fr, int band_top) {
 
 static void paint_wave(int fr_start) __attribute__((noinline));
 static void paint_wave(int fr_start) {
-  paint_board_head(fr_start, false);
+  paint_board_head(fr_start);
   const int badge_h = sc(CHIP);
   for (int k = 0; k < s_wl.n; k++) {
     const WaveLine *w = &s_wave[s_wl.l[k].wave];
@@ -1720,260 +1633,14 @@ static void paint_wave(int fr_start) {
     }
   }
 }
-
-// ---- the flick's full-screen answers. The time steps down to a line at
-// the top, its seconds beside it, and the face below is the answer's: at a
-// stop a row a route with its next two times (2), or with more routes than
-// rows every route's next time in two columns (3); away from a stop, the
-// stops near, nearest first, each with its two soonest routes (4). Lines
-// mirror as units, as the board's do.
-#define TK_CELLS 12
-#define TK_STOPS 4
-typedef struct { char route[6]; int16_t t1, t2; char word[10]; uint32_t col; bool live; int8_t stop; } TkCell;
-typedef struct { char name[24], dist[10]; int16_t y, name_x, dist_x, rule_y, rule_x0; } TkLine;
-typedef struct { char t1[8], t2[10]; bool word; int16_t bx, by, bw, gx, gy, tx, ty, lx, ly, x2, y2; } TkPlace;
-static struct {
-  uint8_t n, ns;
-  TkCell c[TK_CELLS];
-  char name[TK_STOPS][24];
-  int16_t dist[TK_STOPS];
-  // laid out
-  int head_y, time_x, secs_x, label_x, lines, nl, rule_w;
-  char time[8], secs[4], label[16];
-  TkLine line[TK_STOPS];
-  TkPlace at[TK_CELLS];
-} s_tk;
-
-// The phone's lines: S|metres|name for a stop, R|route|time|second time or
-// word|colour|live for a route, a newline between.
-static GColor secs_color(void);
-static void take_list(const char *p) __attribute__((noinline));
-static void take_list(const char *p) {
-  s_tk.n = s_tk.ns = 0;
-  int stop = -1;
-  while (*p) {
-    const char *e = strchr(p, '\n');
-    const int len = e ? e - p : (int)strlen(p);
-    char line[48], *f[6] = { 0 };
-    const int k = len < 47 ? len : 47;
-    memcpy(line, p, k); line[k] = 0;
-    int nf = 0;
-    for (char *q = line; nf < 6; ) { f[nf++] = q; char *bar = strchr(q, '|'); if (!bar) break; *bar = 0; q = bar + 1; }
-    if (line[0] == 'S' && nf >= 3 && s_tk.ns < TK_STOPS) {
-      s_tk.dist[s_tk.ns] = (int16_t)atoi(f[1]);
-      strncpy(s_tk.name[s_tk.ns], f[2], sizeof(s_tk.name[0]) - 1); s_tk.name[s_tk.ns][sizeof(s_tk.name[0]) - 1] = 0;
-      stop = s_tk.ns++;
-    } else if (line[0] == 'R' && nf >= 6 && s_tk.n < TK_CELLS) {
-      TkCell *c = &s_tk.c[s_tk.n++];
-      strncpy(c->route, f[1], sizeof(c->route) - 1); c->route[sizeof(c->route) - 1] = 0;
-      c->t1 = (int16_t)atoi(f[2]);
-      c->t2 = isdigit((int)f[3][0]) ? (int16_t)atoi(f[3]) : -1;
-      c->word[0] = 0;
-      if (c->t2 < 0) { strncpy(c->word, f[3], sizeof(c->word) - 1); c->word[sizeof(c->word) - 1] = 0; }
-      // The colour's hex by hand: the library's strtol faults on basalt.
-      uint32_t col = 0;
-      for (const char *h = f[4]; *h; h++) col = col * 16 + (uint32_t)(isdigit((int)*h) ? *h - '0' : (*h | 32) - 'a' + 10);
-      c->col = col & 0xFFFFFF;
-      c->live = f[5][0] == '1';
-      c->stop = (int8_t)stop;
-    }
-    p = e ? e + 1 : p + len;
-  }
-}
-
-static void layout_take(const struct tm *t, const Frame *fr) __attribute__((noinline));
-static void layout_take(const struct tm *t, const Frame *fr) {
-  // The time, small, on the top line at the wrist end, its seconds beside
-  // it; at the outer end the day, or NEARBY.
-  if (use_24h()) snprintf(s_tk.time, sizeof(s_tk.time), "%d:%02d", t->tm_hour, t->tm_min);
-  else snprintf(s_tk.time, sizeof(s_tk.time), "%d:%02d", display_hour(t->tm_hour), t->tm_min);
-  snprintf(s_tk.secs, sizeof(s_tk.secs), "%02d", t->tm_sec);
-  if (s_sv.take == 4) strncpy(s_tk.label, "NEARBY", sizeof(s_tk.label));
-  else { strftime(s_tk.label, sizeof(s_tk.label), "%a %d %b", t); for (char *c = s_tk.label; *c; c++) *c = toupper((int)*c); }
-  const Metrics m_t = barlow_metrics(measure("8", s_f_mod).h);
-  const Metrics m_val = barlow_metrics(measure("8", s_f_board).h), m_bad = barlow_metrics(measure("8", s_f_label).h);
-  s_tk.head_y = fr->top + sc(2) - m_t.bearing;
-  const int tw0 = run_w(s_tk.time, s_f_mod, false, 0);
-  s_tk.time_x = mapx(fr->start, tw0);
-  s_tk.secs_x = mapx(fr->start + tw0 + sc(3), run_w(s_tk.secs, s_f_cap, false, TRACK));
-  s_tk.label_x = mapx(fr->end - run_w(s_tk.label, s_f_cap, false, TRACK), run_w(s_tk.label, s_f_cap, false, TRACK));
-  const int badge_h = sc(CHIP), row_h = sc(SV_ROW_H), line_h = s_m_cap.cap + sc(SV_ROWS_GAP), pad = sc(2), w = fr->end - fr->start;
-  int y = fr->top + sc(2) + m_t.cap + sc(8);
-  const int colw = w / 2;
-  s_tk.lines = 0; s_tk.nl = 0;
-  int stop = -2, prev_y = -1, prev_col = 1;
-  for (int i = 0; i < s_tk.n; i++) {
-    const TkCell *c = &s_tk.c[i];
-    // A stop's line before its first route (the nearby list); at a stop the
-    // board's own name line, once, at the top.
-    if (c->stop != stop) {
-      stop = c->stop;
-      if (y + line_h + badge_h > fr->bot || s_tk.nl >= TK_STOPS) break;
-      const char *name = stop >= 0 ? s_tk.name[stop] : s_sv.stop;
-      TkLine *L = &s_tk.line[s_tk.nl++];
-      strncpy(L->name, name, sizeof(L->name) - 1); L->name[sizeof(L->name) - 1] = 0;
-      L->dist[0] = 0;
-      if (stop >= 0) format_dist(L->dist, sizeof(L->dist), s_tk.dist[stop]);
-      else if (s_sv.dist > 60) format_dist(L->dist, sizeof(L->dist), s_sv.dist);
-      const int dw = L->dist[0] ? run_w(L->dist, s_f_cap, false, TRACK) : 0;
-      fit_name(L->name, s_f_cap, w - (dw ? dw + sc(6) : 0));
-      L->y = y - s_m_cap.bearing;
-      L->name_x = mapx(fr->start, run_w(L->name, s_f_cap, false, TRACK));
-      L->dist_x = mapx(fr->end - dw, dw);
-      L->rule_y = y + s_m_cap.cap + sc(2);
-      L->rule_x0 = mapx(fr->start, w);
-      y += line_h; prev_col = 1;
-    }
-    // Two columns, a stop's pair or the grid's, a line between each pair.
-    const int col = s_sv.take != 2 && prev_col == 0 && prev_y >= 0 ? 1 : 0;
-    if (!col) { if (y + badge_h > fr->bot) break; prev_y = y; y += row_h; }
-    prev_col = col;
-    TkPlace *P = &s_tk.at[i];
-    char tok[8];
-    snprintf(tok, sizeof(tok), "%d", c->t1);
-    sv_clock(P->t1, sizeof(P->t1), tok);
-    P->t2[0] = 0; P->word = false;
-    if (s_sv.take == 2 && c->t2 >= 0) { snprintf(tok, sizeof(tok), "%d", c->t2); sv_clock(P->t2, sizeof(P->t2), tok); }
-    else if (c->word[0]) { strncpy(P->t2, c->word, sizeof(P->t2) - 1); P->t2[sizeof(P->t2) - 1] = 0; P->word = true; }
-    const int gw = run_w(c->route, s_f_label, false, 0);
-    const int bw = gw + 2 * pad < badge_h ? badge_h : gw + 2 * pad + 1;
-    const int tw = run_w(P->t1, sv_font(P->t1), false, 0);
-    const int cw = bw + sc(SV_BADGE_GAP) + tw + (c->live ? LIVE_W + 1 : 0);
-    const int lx = fr->start + col * colw, rx = mapx(lx, cw);
-    P->by = prev_y; P->bx = rx; P->bw = bw;
-    P->gx = rx + (bw - gw + 1) / 2; P->gy = prev_y + (badge_h - m_bad.cap) / 2 - m_bad.bearing;
-    P->tx = rx + bw + sc(SV_BADGE_GAP); P->ty = prev_y + (badge_h + m_bad.cap) / 2 - m_val.cap - m_val.bearing;
-    P->lx = P->tx + tw + 1; P->ly = P->ty + m_val.bearing - 1;
-    if (P->t2[0]) {
-      // The second column: the next time but one, or a word (a day, a way),
-      // in two columns a word only where no route sits beside it.
-      const bool beside = s_sv.take != 2 && i + 1 < s_tk.n && s_tk.c[i + 1].stop == c->stop && col == 0;
-      if (beside) P->t2[0] = 0;
-      else {
-        const int w2 = run_w(P->t2, P->word ? s_f_cap : sv_font(P->t2), false, P->word ? TRACK : 0);
-        P->x2 = mapx(s_sv.take == 2 ? fr->end - w2 : lx + cw + sc(4), w2);
-        P->y2 = P->word ? P->ty + m_val.bearing + m_val.cap - s_m_cap.cap - s_m_cap.bearing : P->ty;
-      }
-    }
-    s_tk.lines = i + 1;
-  }
-  s_tk.rule_w = w;
-}
-
-// Every place worked out beforehand: the painter reads them and draws.
-static void paint_take(void) __attribute__((noinline));
-static void paint_take(void) {
-  graphics_context_set_text_color(s_ctx, s_ink);
-  draw_run_s(s_tk.time, s_f_mod, s_tk.time_x, s_tk.head_y, false, 0);
-  graphics_context_set_text_color(s_ctx, secs_color());
-  draw_run_s(s_tk.secs, s_f_cap, s_tk.secs_x, s_tk.head_y, false, TRACK);
-  graphics_context_set_text_color(s_ctx, s_dim);
-  draw_run_s(s_tk.label, s_f_cap, s_tk.label_x, s_tk.head_y, false, TRACK);
-  for (int j = 0; j < s_tk.nl; j++) {
-    const TkLine *L = &s_tk.line[j];
-    graphics_context_set_text_color(s_ctx, light_theme() ? s_ink : s_dim);
-    draw_run_s(L->name, s_f_cap, L->name_x, L->y, false, TRACK);
-    if (L->dist[0]) { graphics_context_set_text_color(s_ctx, s_dim); draw_run_s(L->dist, s_f_cap, L->dist_x, L->y, false, TRACK); }
-    draw_stop_rule(L->rule_x0, L->rule_x0 + s_tk.rule_w, L->rule_y);
-  }
-  for (int i = 0; i < s_tk.lines; i++) {
-    const TkPlace *P = &s_tk.at[i];
-    const GColor fill = PBL_IF_COLOR_ELSE(GColorFromHEX(s_tk.c[i].col), s_ink);
-    graphics_context_set_fill_color(s_ctx, fill);
-    graphics_fill_rect(s_ctx, GRect(P->bx, P->by, P->bw, sc(CHIP)), sc(2), GCornersAll);
-    graphics_context_set_text_color(s_ctx, on_fill(fill));
-    draw_run_s(s_tk.c[i].route, s_f_label, P->gx, P->gy, false, 0);
-    graphics_context_set_text_color(s_ctx, s_ink);
-    draw_run_s(P->t1, sv_font(P->t1), P->tx, P->ty, false, 0);
-    if (s_tk.c[i].live) paint_live_mark(P->lx, P->ly);
-    if (P->t2[0]) {
-      graphics_context_set_text_color(s_ctx, P->word ? s_dim : s_ink);
-      draw_run_s(P->t2, P->word ? s_f_cap : sv_font(P->t2), P->x2, P->y2, false, P->word ? TRACK : 0);
-    }
-  }
-}
 #endif
-
-// ---- the side block: one row never takes the face. The answer sits in the
-// band beside the modules, three short lines hung from one edge: the stop,
-// the badge and its time, then the distance, or the row's second column
-// when stood at the stop. Date and modules stay; twelve seconds later the
-// block is gone. Its lines start together at the start of the space left
-// over, `left` (where the modules end on that side, less the gap), so they
-// read as a list; `right` bounds it, and the block declines if it can't fit.
-#define SB_GAP 3
-#ifdef HAS_YARD
-#define SB_NOROW s_sb.norow
-#else
-#define SB_NOROW false
-#endif
-static struct {
-  bool show, q_day;
-#ifdef HAS_YARD
-  bool norow;
-#endif
-  int stop_x, stop_y, rule_y, row_x, row_w, badge_w, badge_h, glyph_dx, glyph_y, t_dx, t_y, q_x, q_y;
-  char stop[24], t1[8], q[10];
-  Metrics m_lab, m_val, m_bad;
-} s_sb;
-
-static void layout_sideblock(const Frame *fr, int band_top, int band_bot, int left, int right) __attribute__((noinline));
-static void layout_sideblock(const Frame *fr, int band_top, int band_bot, int left, int right) {
-  s_sb.show = false;
-  // At the yard in its hour the block has no row: its line, what's pulling
-  // in, and under it how far the nearest is.
-#ifdef HAS_YARD
-  s_sb.norow = AT_YARD() && s_sv.n == 0;
-#endif
-  if ((s_sv.n != 1 && !SB_NOROW) || s_sv.wave || s_sv.take) return;
-  const SvRow *row = &s_sv.row[0];
-  s_sb.m_lab = s_m_cap;
-  s_sb.m_val = barlow_metrics(measure("8", s_f_board).h);
-  s_sb.m_bad = barlow_metrics(measure("8", s_f_label).h);
-  const int room = right - left - sc(8);
-  // The stop's name, a word at a time down to the room there is.
-  strncpy(s_sb.stop, s_sv.stop, sizeof(s_sb.stop) - 1); s_sb.stop[sizeof(s_sb.stop) - 1] = 0;
-  fit_name(s_sb.stop, s_f_cap, room);
-  // The row: badge and the next time, as on the board.
-  const char *sp = SB_NOROW ? NULL : strchr(row->when, ' ');
-  sv_clock(s_sb.t1, sizeof(s_sb.t1), row->when);
-  const int pad = sc(2), badge_h = sc(CHIP);
-  const int gw = run_w(row->route, s_f_label, false, 0);
-  s_sb.badge_w = gw + 2 * pad < badge_h ? badge_h : gw + 2 * pad + 1;
-  s_sb.badge_h = badge_h;
-  s_sb.glyph_dx = (s_sb.badge_w - gw + 1) / 2;
-  s_sb.t_dx = s_sb.badge_w + sc(SV_BADGE_GAP);
-  s_sb.row_w = SB_NOROW ? 0 : s_sb.t_dx + run_w(s_sb.t1, sv_font(s_sb.t1), false, 0) + (row->live ? LIVE_W + 1 : 0);
-  // The qualifier: how far, or, stood at the stop, the row's second column.
-  s_sb.q[0] = 0; s_sb.q_day = false;
-  if (s_sv.dist > 60) { format_dist(s_sb.q, sizeof(s_sb.q), s_sv.dist); s_sb.q_day = true; }
-  else if (sp && isdigit((int)sp[1])) sv_clock(s_sb.q, sizeof(s_sb.q), sp + 1);
-  else if (sp && sp[1]) { strncpy(s_sb.q, sp + 1, sizeof(s_sb.q) - 1); s_sb.q[sizeof(s_sb.q) - 1] = 0; s_sb.q_day = true; }
-  const int q_w = s_sb.q[0] ? run_w(s_sb.q, s_sb.q_day ? s_f_cap : sv_font(s_sb.q), false, s_sb.q_day ? TRACK : 0) : 0;
-  if (s_sb.row_w > room || q_w > room) return;   // no room beside the modules: the board it is
-  // Three lines, centred in the band.
-  const int row_h = SB_NOROW ? 0 : badge_h + sc(SB_GAP);
-  const int h = s_sb.m_lab.cap + sc(SB_GAP) + row_h + (s_sb.q[0] ? (s_sb.q_day ? s_sb.m_lab.cap : s_sb.m_val.cap) : 0);
-  if (h > band_bot - band_top) return;
-  const int top = band_top + (band_bot - band_top - h) / 2;
-  const int x0 = left + sc(8);
-  s_sb.stop_x = x0;
-  s_sb.stop_y = top - s_sb.m_lab.bearing;
-  s_sb.rule_y = top + s_sb.m_lab.cap + sc(2);
-  const int by = top + s_sb.m_lab.cap + sc(SB_GAP);
-  s_sb.row_x = x0;
-  s_sb.glyph_y = by + (badge_h - s_sb.m_bad.cap) / 2 - s_sb.m_bad.bearing;
-  s_sb.t_y = by + (badge_h + s_sb.m_bad.cap) / 2 - s_sb.m_val.cap - s_sb.m_val.bearing;
-  s_sb.q_x = x0;
-  s_sb.q_y = by + row_h - (s_sb.q_day ? s_sb.m_lab.bearing : s_sb.m_val.bearing);
-  s_sb.show = true;
-}
 
 // ---- rain on its way: within the hour, the quiet face gives it the whole
 // band on the wrist side of the modules: RAIN IN over a big 20 MIN, in the
 // largest figures that fit, to the nearest five minutes up since the forecast
 // comes by the quarter hour. Only when rain is coming; a flick's answer
 // takes the place first.
+#define SB_GAP 3
 #ifdef HAS_RAIN
 static struct { bool show; char num[4]; GFont f; int x, y_lab, y_num, x_min, y_min; } s_rn;
 static void layout_rain(int band_top, int band_bot, int left, int right) __attribute__((noinline));
@@ -2017,31 +1684,40 @@ static void paint_rain(void) {
 }
 #endif
 
-static void paint_sideblock(void) __attribute__((noinline));
-static void paint_sideblock(void) {
-  const SvRow *row = &s_sv.row[0];
-  graphics_context_set_text_color(s_ctx, light_theme() ? s_ink : s_dim);
-  draw_run(s_sb.stop, s_f_cap, s_sb.stop_x, s_sb.stop_y, false, TRACK);
-  if (light_theme()) {
-    const int w = run_w(s_sb.stop, s_f_cap, false, TRACK);
-    draw_stop_rule(mapx(s_sb.stop_x, w), mapx(s_sb.stop_x, w) + w, s_sb.rule_y);
-  }
-  if (!SB_NOROW) {
-  const int rx = mapx(s_sb.row_x, s_sb.row_w);
-  const GColor fill = PBL_IF_COLOR_ELSE(GColorFromHEX(row->color), s_ink);
-  graphics_context_set_fill_color(s_ctx, fill);
-  graphics_fill_rect(s_ctx, GRect(rx, s_sb.glyph_y + s_sb.m_bad.bearing - (s_sb.badge_h - s_sb.m_bad.cap) / 2, s_sb.badge_w, s_sb.badge_h), sc(2), GCornersAll);
-  graphics_context_set_text_color(s_ctx, on_fill(fill));
-  draw_run_s(row->route, s_f_label, rx + s_sb.glyph_dx, s_sb.glyph_y, false, 0);
+// ---- the stop the countdown is for: its name and, when the fix put the
+// wearer off it, how far, at the outer end of the band the modules share,
+// where the hub's chips go. The name gives way a word at a time, so the
+// modules keep their room; the yard's answer takes the place too.
+static void layout_stop_el(int c_start, int avail_w, int band_top, int band_bot) {
+  s_se.show = false;
+  if (!s_se.want) return;
+  s_se.dist[0] = 0;
+  if (s_cd.dist > 0) format_dist(s_se.dist, sizeof(s_se.dist), s_cd.dist);
+  const int lines = s_se.dist[0] ? 2 : 1;
+  const int h = lines * s_m_cap.cap + (lines - 1) * sc(MOD_LABEL_GAP);
+  if (band_bot - band_top < h) return;
+  bool mods = false;
+  for (int i = 0; i < MODULE_COUNT; i++) if (s_set.mod[i] != MODULE_NONE) mods = true;
+  strncpy(s_se.name, s_cd.stop, sizeof(s_se.name) - 1); s_se.name[sizeof(s_se.name) - 1] = 0;
+  fit_name(s_se.name, s_f_cap, mods ? avail_w / 2 : avail_w);
+  const int nw = run_w(s_se.name, s_f_cap, false, TRACK);
+  const int dw = s_se.dist[0] ? run_w(s_se.dist, s_f_cap, false, TRACK) : 0;
+  s_se.w = nw > dw ? nw : dw;
+  if (!s_se.w || s_se.w > avail_w) return;
+  s_se.gap = sc(MOD_GAP);
+  s_se.x = c_start + avail_w - s_se.w;
+  const int top = (band_top + band_bot) / 2 - h / 2;
+  s_se.y_name = top - s_m_cap.bearing;
+  s_se.y_dist = top + s_m_cap.cap + sc(MOD_LABEL_GAP) - s_m_cap.bearing;
+  s_se.show = true;
+}
+static void paint_stop_el(void) __attribute__((noinline));
+static void paint_stop_el(void) {
   graphics_context_set_text_color(s_ctx, s_ink);
-  draw_run_s(s_sb.t1, sv_font(s_sb.t1), rx + s_sb.t_dx, s_sb.t_y, false, 0);
-  if (row->live)
-    paint_live_mark(rx + s_sb.t_dx + run_w(s_sb.t1, sv_font(s_sb.t1), false, 0) + 1, s_sb.t_y + s_sb.m_val.bearing - 1);
-  }
-  if (s_sb.q[0]) {
-    graphics_context_set_text_color(s_ctx, s_sb.q_day ? s_dim : s_ink);
-    draw_run(s_sb.q, s_sb.q_day ? s_f_cap : sv_font(s_sb.q), s_sb.q_x, s_sb.q_y, false, s_sb.q_day ? TRACK : 0);
-  }
+  draw_run(s_se.name, s_f_cap, s_se.x + s_se.w - run_w(s_se.name, s_f_cap, false, TRACK), s_se.y_name, false, TRACK);
+  if (!s_se.dist[0]) return;
+  graphics_context_set_text_color(s_ctx, s_dim);
+  draw_run(s_se.dist, s_f_cap, s_se.x + s_se.w - run_w(s_se.dist, s_f_cap, false, TRACK), s_se.y_dist, false, TRACK);
 }
 
 // ---- zone 03/04: the time, flush to the outer edge so the minute survives
@@ -2164,8 +1840,10 @@ static struct {
   const char *unit;
   const char *label;          // over the block, at the yard; none elsewhere
 #ifdef HAS_STOPCD
-  bool badge;                 // the label is a route's badge, at a stop
-  int bx, by, bw, gx, gy;     // where the badge and its letters go
+  bool badge, live;           // the label is a route's badge, at a stop; live, its time is predicted
+  char day[10];               // beside the badge: TOMORROW, or the weekday, when the bus is another day's
+  int bx, by, bw, gx, gy, bl; // where the badge and its letters go; bl its logical x
+  int live_x, live_y, day_x, day_y;
 #endif
   bool now, solid, bare;
   GSize z_num;
@@ -2189,10 +1867,6 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
   // The block is the number and its unit; the departure's clock time is
   // the chips' to say, and the face at the hub is busy enough.
   s_bk.label = NULL;
-#ifdef HAS_STOPCD
-  s_bk.badge = false;
-  if (s_cd_shown) { s_bk.label = s_cd.route; s_bk.badge = true; }
-#endif
   if (sch->is_now) {
     strncpy(s_bk.num, "NOW", sizeof(s_bk.num));
   } else {
@@ -2203,6 +1877,26 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
       snprintf(s_bk.num, sizeof(s_bk.num), "%d", sch->remaining);
     }
   }
+#ifdef HAS_STOPCD
+  s_bk.badge = false; s_bk.live = false; s_bk.day[0] = 0;
+  if (s_cd_shown) {
+    const CdDep *d = &s_cd.d[s_cd_cur];
+    s_bk.label = d->route; s_bk.badge = true; s_bk.live = d->live;
+    // Past the hour the block reads the departure's clock time, a size
+    // down, with its AM or PM where the watch says so; a bus another day's
+    // has its day beside the badge: TOMORROW, or the weekday.
+    if (!sch->is_now && sch->remaining > CD_CLOCK_MIN) {
+      snprintf(s_bk.num, sizeof(s_bk.num), "%d:%02d", display_hour(sch->next_h), sch->next_m);
+      s_bk.unit = use_24h() ? "" : sch->next_h < 12 ? "AM" : "PM";
+      f_num = s_f_count_s;
+    }
+    const time_t midnight = s_now - (t->tm_hour * 3600 + t->tm_min * 60 + t->tm_sec);
+    const int ahead = (int)((d->at - midnight) / 86400);
+    static const char *const DOW3[7] = { "SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT" };
+    if (ahead == 1) strcpy(s_bk.day, "TOMORROW");
+    else if (ahead > 1) strcpy(s_bk.day, DOW3[(t->tm_wday + ahead) % 7]);
+  }
+#endif
 
   // At the yard the block is the count of buses still out, a label over it.
 #ifdef HAS_YARD
@@ -2231,7 +1925,7 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
   const GFont f_label = s_f_label, f_date = s_f_date;
   s_bk.f_num = f_num; s_bk.show_date = date;
   s_bk.z_num = measure(s_bk.num, f_num);
-  const bool bare = s_bk.now;   // NOW carries no unit
+  const bool bare = s_bk.now || !s_bk.unit[0];   // NOW carries no unit, nor a 24-hour clock time
   const int min_w = bare ? 0 : run_w(s_bk.unit, f_label, false, TRACK);
   s_bk.m_min = barlow_metrics(bare ? 0 : measure(s_bk.unit, f_label).h);
   s_bk.m_num = barlow_metrics(s_bk.z_num.h);
@@ -2250,19 +1944,26 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
   // The bottom row is a space-between pair and the block must not grow into
   // the weekday/date column. Should a label outgrow the row, the block's own
   // padding gives way first and the normal state keeps the design's spacing.
-  const int date_w = date ? (dow_w > date_w2 ? dow_w : date_w2) : 0;
-  const int avail = fr->end - fr->start - date_w - sc(ROW_GAP);
-  int pad_in = sc(BLOCK_PAD_IN), pad_out = sc(BLOCK_PAD_OUT);
-  int over = inner_w + pad_in + pad_out - avail;
-  if (over > 0) {
-    int give = pad_in - sc(BLOCK_PAD_MIN);
-    if (give > over) give = over;
-    if (give > 0) { pad_in -= give; over -= give; }
-  }
-  if (over > 0) {
-    int give = pad_out - sc(BLOCK_PAD_MIN);
-    if (give > over) give = over;
-    if (give > 0) { pad_out -= give; over -= give; }
+  int date_w = date ? (dow_w > date_w2 ? dow_w : date_w2) : 0;
+  int pad_in, pad_out, over;
+  for (int pass = 0;; pass++) {
+    const int avail = fr->end - fr->start - date_w - sc(ROW_GAP);
+    pad_in = sc(BLOCK_PAD_IN); pad_out = sc(BLOCK_PAD_OUT);
+    over = inner_w + pad_in + pad_out - avail;
+    if (over > 0) {
+      int give = pad_in - sc(BLOCK_PAD_MIN);
+      if (give > over) give = over;
+      if (give > 0) { pad_in -= give; over -= give; }
+    }
+    if (over > 0) {
+      int give = pad_out - sc(BLOCK_PAD_MIN);
+      if (give > over) give = over;
+      if (give > 0) { pad_out -= give; over -= give; }
+    }
+    // A clock time wider than the row takes the date's column: the date is
+    // the one thing the block may cover, and only then.
+    if (over > 0 && s_bk.show_date && !pass) { s_bk.show_date = false; date_w = 0; continue; }
+    break;
   }
   if (over > 0) inner_w -= over;   // last resort: the label overruns
 
@@ -2284,22 +1985,30 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
   s_bk.dow_y = s_bk.date_y - sc(DOW_GAP) - s_bk.m_dow.cap;
   // A label stands over the block, and the band above ends there.
   s_bk.top = s_bk.block_y;
-#ifdef HAS_YARD
 #ifdef HAS_STOPCD
   if (s_bk.badge) {
     // Over the block's edge whether it is solid or not, so the badge stays
-    // put as the block fills at five minutes.
+    // put as the block fills at five minutes. The live mark and the day
+    // word sit on its wrist side.
     const Metrics mb = barlow_metrics(measure("8", s_f_label).h);
     const int gw = run_w(s_bk.label, s_f_label, false, 0), bh = sc(CHIP);
     s_bk.bw = gw + 2 * sc(2) < bh ? bh : gw + 2 * sc(2) + 1;
     s_bk.by = s_bk.block_y - sc(3) - bh;
-    s_bk.bx = mapx(fr->end - s_bk.bw, s_bk.bw);
+    s_bk.bl = fr->end - s_bk.bw;
+    s_bk.bx = mapx(s_bk.bl, s_bk.bw);
     s_bk.gx = s_bk.bx + (s_bk.bw - gw + 1) / 2;
     s_bk.gy = s_bk.by + (bh - mb.cap) / 2 - mb.bearing;
     s_bk.top = s_bk.by - sc(4);
-  } else
+    int wrist = s_bk.bl - sc(4);
+    if (s_bk.live) { s_bk.live_x = wrist - LIVE_W; s_bk.live_y = s_bk.by + (bh - 5) / 2; wrist = s_bk.live_x - sc(4); }
+    if (s_bk.day[0]) {
+      s_bk.day_x = wrist - run_w(s_bk.day, s_f_cap, false, TRACK);
+      s_bk.day_y = s_bk.by + (bh - s_m_cap.cap) / 2 - s_m_cap.bearing;
+    }
+  }
 #endif
-  if (s_bk.label) {
+#ifdef HAS_YARD
+  if (s_bk.label && !s_bk.badge) {
     s_bk.label_y = s_bk.num_y - sc(YARD_GAP) - s_m_cap.cap - s_m_cap.bearing;
     s_bk.label_x = fr->end - run_w(s_bk.label, s_f_cap, false, TRACK);
     s_bk.top = s_bk.label_y + s_m_cap.bearing - sc(4);
@@ -2331,15 +2040,20 @@ static void paint_block(int fr_start) {
   }
 #ifdef HAS_STOPCD
   if (s_bk.badge) {
-    const GColor fill = PBL_IF_COLOR_ELSE(GColorFromHEX(s_cd.col), s_ink);
+    const GColor fill = PBL_IF_COLOR_ELSE(GColorFromHEX(s_cd.d[s_cd_cur].col), s_ink);
     graphics_context_set_fill_color(s_ctx, fill);
     graphics_fill_rect(s_ctx, GRect(s_bk.bx, s_bk.by, s_bk.bw, sc(CHIP)), sc(2), GCornersAll);
     graphics_context_set_text_color(s_ctx, on_fill(fill));
     draw_run_s(s_bk.label, s_f_label, s_bk.gx, s_bk.gy, false, 0);
-  } else
+    if (s_bk.live) paint_live_mark(mapx(s_bk.live_x, LIVE_W), s_bk.live_y);
+    if (s_bk.day[0]) {
+      graphics_context_set_text_color(s_ctx, s_dim);
+      draw_run(s_bk.day, s_f_cap, s_bk.day_x, s_bk.day_y, false, TRACK);
+    }
+  }
 #endif
 #ifdef HAS_YARD
-  if (s_bk.label) {
+  if (s_bk.label && !s_bk.badge) {
     graphics_context_set_text_color(s_ctx, s_ink);
     draw_run(s_bk.label, s_f_cap, s_bk.label_x, s_bk.label_y, false, TRACK);
   }
@@ -2351,6 +2065,9 @@ static void paint_block(int fr_start) {
   draw_run(s_bk.date, s_f_date, fr_start, s_bk.date_y - s_bk.m_date.bearing, false, TRACK);
 }
 
+// The frame's clock: the README's screenshots pin it at build time.
+static time_t face_now(void) { return time(NULL); }
+
 static void face_update(Layer *layer, GContext *ctx) {
   // A timeline peek slides up over the bottom of the watchface — precisely
   // where the countdown and the date sit. Laying out against the
@@ -2360,18 +2077,21 @@ static void face_update(Layer *layer, GContext *ctx) {
   static Schedule sch;
   static struct tm *t;
   static Frame fr;
-  static bool at_hub, peek, yard, idle;
+  static bool at_hub, peek, yard, idle, wave;
   s_ctx = ctx;
   full = layer_get_bounds(layer);
   b = layer_get_unobstructed_bounds(layer);
   s_w = b.size.w;
   peek = b.size.h < full.size.h - sc(8);
 
-  const time_t now = time(NULL);
+  s_now = face_now();
+  const time_t now = s_now;
   t = localtime(&now);
   sch = schedule_now(t, now);
 /*DEMO*/
+#ifdef HAS_WAVE
   s_now_min = t->tm_hour * 60 + t->tm_min;
+#endif
   // With the hub known, the countdown is for the hub: at it in its hours the
   // face runs as ever, with the second countdown; anywhere else it is quiet.
   at_hub = transit_fresh(now) && s_tr.state == 1;
@@ -2383,7 +2103,8 @@ static void face_update(Layer *layer, GContext *ctx) {
   yard = YARD_ON();
   // A flick at a stop with a bus soon: the countdown for that bus.
 #ifdef HAS_STOPCD
-  s_cd_shown = !at_hub && !yard && AT_STOPCD(now);
+  s_cd_cur = (int8_t)cd_current(now);
+  s_cd_shown = !at_hub && !yard && s_cd_cur >= 0;
 #endif
   idle = !at_hub && !AT_STOP() && s_set.transit != TRANSIT_CHIPS && !yard;
   s_quiet_face = idle || yard;
@@ -2400,13 +2121,15 @@ static void face_update(Layer *layer, GContext *ctx) {
   fr.top = sc(PAD_TOP);
   fr.bot = b.size.h - sc(PAD_BOTTOM);
 
-  // The answer to a flick is counted in rows, not metres. One row sits in
-  // the band beside the modules and the face keeps everything else. Two or
-  // three take the board: the time full size, the countdown stepped aside,
-  // a small date at the foot. Laid out first, so a one-row answer with no
-  // room beside the modules can still take the board.
-  s_sb.show = false;
-  if (!s_sv.valid || s_sv.n == 1 || yard) {
+  // The countdown's stop sits in the band where the hub's chips would, while
+  // it runs, and the yard's answer takes the place too.
+  s_se.want = s_cd.stop[0] && (AT_STOP() || (yard && s_sv.valid));
+#ifdef HAS_WAVE
+  wave = s_sv.valid && s_sv.wave && !yard;
+#else
+  wave = false;
+#endif
+  if (!wave) {
     // A timeline peek covers the bottom third. The date goes first, the time
     // and the countdown step down, and the modules and the second countdown
     // keep their band, as the design reflows it.
@@ -2420,65 +2143,40 @@ static void face_update(Layer *layer, GContext *ctx) {
     // The quiet face has nothing at the outer end: the modules go there too,
     // in their order, out from under the sleeve.
     if (idle && s_md.n) s_md.x0 = fr.end - s_md.total + modules_hang();
-    if (s_sv.valid && !s_gb.show) {
-      // Beside the modules: on the quiet face to their wrist side, on the
-      // countdown face at the outer end past them.
-      if (idle) layout_sideblock(&fr, s_tm.band_top, band_bot, fr.start - sc(8), s_md.n ? s_md.x0 - sc(8) : fr.end);
-      else layout_sideblock(&fr, s_tm.band_top, band_bot, s_md.n ? s_md.x0 + s_md.total : fr.start - sc(8), fr.end);
-      if (s_sb.show) layout_secs(t);
-    }
 #ifdef HAS_RAIN
     s_rn.show = false;
     // The rain takes the whole column the modules and the date leave free,
     // from under the time to the date's foot.
-    if (idle && !s_sb.show) {
+    if (idle) {
       int right = s_md.n ? s_md.x0 : fr.end;
       if (s_id.dow_x < right) right = s_id.dow_x;
       if (s_id.date_x < right) right = s_id.date_x;
       layout_rain(s_tm.band_top, fr.bot - sc(DATE_PAD_BOT), fr.start - sc(8), right - sc(8));
     }
 #endif
-    // A flick with nothing to show, or one still waiting on the phone: the
-    // seconds in the colon, on every face, so the gesture is seen to have
-    // landed; the countdown keeps its minutes.
+    // A flick: the seconds in the colon, on every face, so the gesture is
+    // seen to have landed; the countdown keeps its minutes.
     if (s_sv.lit && !s_tm.secs) layout_secs(t);
-  }
-  // With no room for the stop beside the modules the yard keeps its count.
-#ifdef HAS_WAVE
-  if (s_sv.valid && s_sv.take && !yard) {
-    // The answer takes the screen: the content box even on both sides, with
-    // no rail to keep room for.
-    fr.end = s_w - fr.start;
-    layout_take(t, &fr);
-    paint_take();
-  } else
-#endif
-  if (s_sv.valid && !s_sb.show && !yard) {
-    layout_time(t, &fr, s_f_time, TIME_MARGIN_TOP);
-    centre_time(&fr);
-    layout_secs(t);
-    paint_time();
-#ifdef HAS_WAVE
-    if (s_sv.wave) {
-      layout_wave(t, &fr, s_tm.band_top);
-      paint_wave(fr.start);
-    } else
-#endif
-    {
-      layout_stopview(t, &fr, s_tm.band_top);
-      paint_stopview(fr.start);
-    }
-  } else {
     paint_time();
     if (idle) paint_idle();
     else paint_block(fr.start);
     paint_modules();
     if (s_gb.show) paint_gb();
-    if (s_sb.show) paint_sideblock();
+    if (s_se.show) paint_stop_el();
 #ifdef HAS_RAIN
     if (s_rn.show) paint_rain();
 #endif
   }
+#ifdef HAS_WAVE
+  else {
+    layout_time(t, &fr, s_f_time, TIME_MARGIN_TOP);
+    centre_time(&fr);
+    layout_secs(t);
+    paint_time();
+    layout_wave(&fr, s_tm.band_top);
+    paint_wave(fr.start);
+  }
+#endif
 
   // ---- boarding buzz, once on the transition into the solid block: at the
   // hub by default, or wherever the countdown runs.
@@ -2565,9 +2263,31 @@ static void yard_ask(void) {
 }
 #endif
 
+#ifdef HAS_STOPCD
+// Where the stop's system has live times, the phone is asked to look again
+// at five minutes and at one, so a late bus moves the countdown before it
+// reads NOW on an empty road. Twice a bus, and never within two minutes.
+static time_t s_cd_checked;
+static void cd_check(void) {
+  if (!s_cd_shown || !s_cd.live_sys) return;
+  const time_t now = face_now();
+  if (now - s_cd_checked < 120) return;
+  struct tm *t = localtime(&now);
+  const Schedule s = schedule_now(t, now);
+  if (s.remaining != THRESHOLD && s.remaining != 1) return;
+  DictionaryIterator *out;
+  if (app_message_outbox_begin(&out) != APP_MSG_OK) return;
+  dict_write_uint8(out, MESSAGE_KEY_CD_CHECK, 1);
+  if (app_message_outbox_send() == APP_MSG_OK) s_cd_checked = now;
+}
+#endif
+
 static void tick_handler(struct tm *tick_time, TimeUnits units) {
   retune_tick();
   if (units & MINUTE_UNIT) walk_look();
+#ifdef HAS_STOPCD
+  cd_check();
+#endif
 #ifdef HAS_YARD
   yard_ask();
 #endif
@@ -2671,6 +2391,15 @@ static void tap_handler(AccelAxisType axis, int32_t direction) {
   // (flick_asks).
   light_enable_interaction();
   if (s_sv.pending) return;
+#ifdef HAS_STOPCD
+  // A second flick while the answer is lit steps the countdown to the stop's
+  // next route; with one route only, it is a flick like any other.
+  if (s_sv.lit && s_cd_shown && cd_step(face_now())) {
+    stopview_hold(SV_SHOW_MS);
+    layer_mark_dirty(s_face);
+    return;
+  }
+#endif
   s_sv.lit = true;
   drain_start();
   stopview_hold(SV_SHOW_MS);
@@ -2712,16 +2441,30 @@ static void take_wave(DictionaryIterator *iter, int i, uint32_t kr, uint32_t kw,
 }
 #endif
 
-static void take_row(DictionaryIterator *iter, int i, uint32_t kr, uint32_t kh, uint32_t kw, uint32_t kc, uint32_t kt) {
-  Tuple *tr = dict_find(iter, kr), *th = dict_find(iter, kh), *tw = dict_find(iter, kw);
-  Tuple *tc = dict_find(iter, kc), *tt = dict_find(iter, kt);
-  SvRow *row = &s_sv.row[i];
-  strncpy(row->route, tr ? tr->value->cstring : "", sizeof(row->route) - 1); row->route[sizeof(row->route) - 1] = 0;
-  strncpy(row->head, th ? th->value->cstring : "", sizeof(row->head) - 1); row->head[sizeof(row->head) - 1] = 0;
-  strncpy(row->when, tw ? tw->value->cstring : "", sizeof(row->when) - 1); row->when[sizeof(row->when) - 1] = 0;
-  row->color = tc ? (uint32_t)tc->value->int32 & 0xFFFFFF : 0x888888;
-  row->live = tt ? tt->value->int32 != 0 : false;
+// The phone's list, a line a departure: route|epoch seconds|colour|live.
+#ifdef HAS_STOPCD
+static void take_list(const char *p) __attribute__((noinline));
+static void take_list(const char *p) {
+  s_cd.n = 0;
+  while (*p && s_cd.n < CD_MAX) {
+    const char *e = strchr(p, '\n');
+    const int len = e ? e - p : (int)strlen(p);
+    char line[40], *f[4] = { 0 };
+    const int k = len < 39 ? len : 39;
+    memcpy(line, p, k); line[k] = 0;
+    int nf = 0;
+    for (char *q = line; nf < 4; ) { f[nf++] = q; char *bar = strchr(q, '|'); if (!bar) break; *bar = 0; q = bar + 1; }
+    if (nf == 4) {
+      CdDep *d = &s_cd.d[s_cd.n++];
+      strncpy(d->route, f[0], sizeof(d->route) - 1); d->route[sizeof(d->route) - 1] = 0;
+      d->at = atoi(f[1]);
+      d->col = (uint32_t)atoi(f[2]) & 0xFFFFFF;   // decimal: the library's strtol faults on basalt
+      d->live = f[3][0] == '1';
+    }
+    p = e ? e + 1 : p + len;
+  }
 }
+#endif
 
 // The hub's word, pushed by the phone: from its background check, or with a
 // flick's answer, worked out from the flick's own fix.
@@ -2768,14 +2511,24 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
     layer_mark_dirty(s_face);
   }
 #endif
+#ifdef HAS_STOPCD
+  // The phone's half-hourly look found the wearer gone from the stop.
+  if ((tp = dict_find(iter, MESSAGE_KEY_CD_END))) {
+    s_cd.n = 0; s_cd.stop[0] = 0; s_cd.pick[0] = 0;
+    persist_delete(STOPCD_KEY);
+    retune_tick();
+    layer_mark_dirty(s_face);
+  }
+#endif
   if ((tp = dict_find(iter, MESSAGE_KEY_SV_N))) {
     Tuple *ts = dict_find(iter, MESSAGE_KEY_SV_STOP);
     Tuple *td = dict_find(iter, MESSAGE_KEY_SV_DIST);
+    const bool keep = dict_find(iter, MESSAGE_KEY_SV_KEEP) != NULL;    // no fix: the last countdown stands
+    const bool quiet = dict_find(iter, MESSAGE_KEY_SV_QUIET) != NULL;  // the watch asked, not a flick: nothing lights
     s_sv.n = (int)tp->value->int32;
     if (s_sv.n > SV_ROWS) s_sv.n = SV_ROWS;
     if (s_sv.n < 0) s_sv.n = 0;
     strncpy(s_sv.stop, ts ? ts->value->cstring : "", sizeof(s_sv.stop) - 1); s_sv.stop[sizeof(s_sv.stop) - 1] = 0;
-    s_sv.dist = td ? (int)td->value->int32 : 0;
 #ifdef HAS_YARD
     Tuple *tout = dict_find(iter, MESSAGE_KEY_SV_OUT);
     s_sv.out = tout ? (int8_t)(tout->value->int32 > 99 ? 99 : tout->value->int32) : -1;
@@ -2783,47 +2536,35 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
 #ifdef HAS_WAVE
     Tuple *tm = dict_find(iter, MESSAGE_KEY_SV_MODE);
     s_sv.wave = tm && tm->value->int32 == 1 && s_sv.n > 0;
-    s_sv.take = 0;
-    Tuple *tl = dict_find(iter, MESSAGE_KEY_SV_LIST);
-    if (tm && tm->value->int32 >= 2 && tm->value->int32 <= 4 && tl) {
-      take_list(tl->value->cstring);
-      if (s_tk.n) s_sv.take = (uint8_t)tm->value->int32;
-    }
-#endif
     if (s_sv.wave) {
-#ifdef HAS_WAVE
       take_wave(iter, 0, MESSAGE_KEY_SV_R1, MESSAGE_KEY_SV_W1, MESSAGE_KEY_SV_K1, MESSAGE_KEY_SV_T1, MESSAGE_KEY_SV_O1);
       take_wave(iter, 1, MESSAGE_KEY_SV_R2, MESSAGE_KEY_SV_W2, MESSAGE_KEY_SV_K2, MESSAGE_KEY_SV_T2, MESSAGE_KEY_SV_O2);
       take_wave(iter, 2, MESSAGE_KEY_SV_R3, MESSAGE_KEY_SV_W3, MESSAGE_KEY_SV_K3, MESSAGE_KEY_SV_T3, MESSAGE_KEY_SV_O3);
-#endif
-    } else {
-      take_row(iter, 0, MESSAGE_KEY_SV_R1, MESSAGE_KEY_SV_H1, MESSAGE_KEY_SV_W1, MESSAGE_KEY_SV_C1, MESSAGE_KEY_SV_T1);
-      take_row(iter, 1, MESSAGE_KEY_SV_R2, MESSAGE_KEY_SV_H2, MESSAGE_KEY_SV_W2, MESSAGE_KEY_SV_C2, MESSAGE_KEY_SV_T2);
-      take_row(iter, 2, MESSAGE_KEY_SV_R3, MESSAGE_KEY_SV_H3, MESSAGE_KEY_SV_W3, MESSAGE_KEY_SV_C3, MESSAGE_KEY_SV_T3);
     }
+#endif
 #ifdef HAS_STOPCD
-    // Every answer says whether a stop's countdown runs: a time, or none.
-    Tuple *tca = dict_find(iter, MESSAGE_KEY_SV_CD_AT);
-    if (tca) {
-      Tuple *tcr = dict_find(iter, MESSAGE_KEY_SV_CD_R), *tcc = dict_find(iter, MESSAGE_KEY_SV_CD_C);
-      s_cd.at = tca->value->int32;
-      strncpy(s_cd.route, tcr ? tcr->value->cstring : "", sizeof(s_cd.route) - 1); s_cd.route[sizeof(s_cd.route) - 1] = 0;
-      s_cd.col = tcc ? (uint32_t)tcc->value->int32 : 0x888888;
-      if (s_cd.at) persist_write_data(STOPCD_KEY, &s_cd, sizeof(s_cd)); else persist_delete(STOPCD_KEY);
+    // Every other answer is the stop's list, and the countdown is its: an
+    // empty one ends the last, unless the phone says to keep it.
+    if (!s_sv.wave && !keep) {
+      Tuple *tl = dict_find(iter, MESSAGE_KEY_SV_LIST), *tv = dict_find(iter, MESSAGE_KEY_SV_LIVE);
+      strncpy(s_cd.stop, s_sv.stop, sizeof(s_cd.stop) - 1); s_cd.stop[sizeof(s_cd.stop) - 1] = 0;
+      s_cd.dist = td ? (int16_t)td->value->int32 : 0;
+      s_cd.live_sys = tv && tv->value->int32 != 0;
+      take_list(tl ? tl->value->cstring : "");
+      if (!quiet) s_cd.pick[0] = 0;
+      if (s_cd.n) persist_write_data(STOPCD_KEY, &s_cd, sizeof(s_cd)); else persist_delete(STOPCD_KEY);
     }
 #endif
+    if (quiet) { retune_tick(); layer_mark_dirty(s_face); return; }
     s_sv.pending = false;
-    if (s_sv.n == 0 && !s_sv.stop[0]) {
-      // No stop near enough to speak of: the face stays as it was, and the
-      // seconds under the time say the flick was heard. Nothing is taken
-      // away to say nothing.
-      s_sv.valid = false;
-      stopview_hold(drain_answer());
-      layer_mark_dirty(s_face);
-      return;
-    }
-    s_sv.valid = true;
-    light_enable_interaction();
+#ifdef HAS_YARD
+    s_sv.valid = s_sv.wave || s_sv.out >= 0;
+#else
+    s_sv.valid = s_sv.wave;
+#endif
+    // Nothing to show: the face stays as it was, and the seconds in the
+    // colon say the flick was heard. Nothing is taken away to say nothing.
+    if (s_sv.valid || s_cd.n) light_enable_interaction();
     stopview_hold(drain_answer());
     retune_tick();
     layer_mark_dirty(s_face);
@@ -2971,13 +2712,13 @@ static void init(void) {
   s_sv.out = -1;   // no yard until the phone says so
 #endif
   s_f_bigdate = fonts_load_custom_font(resource_get_handle(RES_BIGDATE));
+  // The countdown a size down: under a timeline peek, and for a clock time.
+  s_f_count_s = fonts_load_custom_font(resource_get_handle(RES_COUNT_S));
 #ifdef PBL_PLATFORM_APLITE
-  // The Classic has no timeline peek, so the peek's smaller time and
-  // countdown are never drawn; each custom font costs 60 B of its heap.
-  s_f_count_s = s_f_count;
+  // The Classic has no timeline peek, so the peek's smaller time is never
+  // drawn; each custom font costs 60 B of its heap.
   s_f_time_p = s_f_time;
 #else
-  s_f_count_s = fonts_load_custom_font(resource_get_handle(RES_COUNT_S));
   s_f_time_p = fonts_load_custom_font(resource_get_handle(RES_TIME_P));
 #endif
 
@@ -3005,8 +2746,8 @@ static void deinit(void) {
   fonts_unload_custom_font(s_f_board);
   fonts_unload_custom_font(s_f_cap);
   fonts_unload_custom_font(s_f_bigdate);
-#ifndef PBL_PLATFORM_APLITE
   fonts_unload_custom_font(s_f_count_s);
+#ifndef PBL_PLATFORM_APLITE
   fonts_unload_custom_font(s_f_time_p);
 #endif
   tick_timer_service_unsubscribe();
