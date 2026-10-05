@@ -425,7 +425,9 @@ static int transit_next(const uint16_t *list, int now_min) {
 #endif
 
 static GFont s_f_time, s_f_count, s_f_mod, s_f_label, s_f_date, s_f_cap, s_f_bigdate;
-static GFont s_f_board;   // the board's clock times, in the wider cut
+#ifdef HAS_WAVE
+static GFont s_f_board;   // the hub's clock times, in the wider cut
+#endif
 static GFont s_f_count_s;   // the countdown a size down, under a timeline peek
 static GFont s_f_time_p;                // the time under a timeline peek
 static Window *s_window;
@@ -1437,14 +1439,15 @@ static void draw_stop_rule(int x0, int x1, int y) {
   for (int x = x0; x < x1; x += 2) graphics_fill_rect(s_ctx, GRect(x, y, 1, 1), 0, GCornerNone);
 #endif
 }
-#endif
-static bool light_theme(void) { return gcolor_equal(s_ground, GColorWhite); }
-
 static struct {
   int head_y, dist_w, stop_x, rule_y;
   char dist[10], stop[24];
   Metrics m_lab, m_val, m_bad;
 } s_svl;
+#endif
+#if defined(HAS_WAVE) || defined(PBL_COLOR)
+static bool light_theme(void) { return gcolor_equal(s_ground, GColorWhite); }
+#endif
 
 static void format_dist(char *out, size_t n, int metres) {
   if (s_set.imperial) {
@@ -2705,7 +2708,9 @@ static void init(void) {
   s_f_mod = fonts_load_custom_font(resource_get_handle(RES_MOD));
   s_f_label = fonts_load_custom_font(resource_get_handle(RES_LABEL));
   s_f_date = fonts_load_custom_font(resource_get_handle(RES_DATE));
-  s_f_board = fonts_load_custom_font(resource_get_handle(RES_BOARD));
+#ifdef HAS_WAVE
+  s_f_board = fonts_load_custom_font(resource_get_handle(RES_BOARD));   // the hub's clock times
+#endif
   s_f_cap = fonts_load_custom_font(resource_get_handle(RES_CAP));
   s_m_cap = barlow_metrics(measure("B", s_f_cap).h);
 #ifdef HAS_YARD
@@ -2743,7 +2748,9 @@ static void deinit(void) {
   fonts_unload_custom_font(s_f_mod);
   fonts_unload_custom_font(s_f_label);
   fonts_unload_custom_font(s_f_date);
+#ifdef HAS_WAVE
   fonts_unload_custom_font(s_f_board);
+#endif
   fonts_unload_custom_font(s_f_cap);
   fonts_unload_custom_font(s_f_bigdate);
   fonts_unload_custom_font(s_f_count_s);
