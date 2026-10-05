@@ -638,13 +638,6 @@ function sendNothing(keep) {
   if (!keep) cdStop = null;
   sendAnswer(keep ? { SV_N: 0, SV_KEEP: 1 } : { SV_N: 0 });
 }
-// The yard's answer: the count in the countdown's place, and a line beside
-// the modules; no countdown.
-function sendYard(name, dist, out) {
-  console.log('headway: yard ' + name + ', ' + out + ' out');
-  cdStop = null;
-  sendAnswer({ SV_STOP: fitName(name), SV_DIST: Math.round(dist), SV_N: 0, SV_MODE: 0, SV_OUT: out });
-}
 
 // At the hub the answer is by time, not by route: a line a departure minute,
 // every route leaving then as a badge in route order. SV_R holds the labels
@@ -765,33 +758,6 @@ function hubChips(deps, dayWord, index, stops, inNow, loops, onDay) {
   }));
 }
 
-// Buses still out, for a flick at the yard they sleep in: every bus with a
-// fresh position anywhere but there. A bus that has switched off in the yard
-// stops reporting, one parked with its tracker on sits inside; either way it
-// is in. Null with no live answer, so nothing is claimed on no news.
-function busesOut(live, base) {
-  if (!live || !live.at) return null;
-  var nowS = Date.now() / 1000, n = 0;
-  live.at.forEach(function (b) {
-    if (onRoad(b) && nowS - b[2] < BUS_FRESH && metres(b[0], b[1], base.lat, base.lon) > base.r) n++;
-  });
-  return n;
-}
-// On a trip, or on a route by the tracker (a detour): still out. A bus off
-// both, logged in, is between trips, or at night on its way back.
-function onRoad(b) { return !!(b[3] || b[4]); }
-// The buses pulling in to the yard: logged in, fresh, off any trip or route,
-// and not in yet; how many, and how far the nearest is.
-function pullingIn(live, base) {
-  var nowS = Date.now() / 1000, n = 0, d = Infinity;
-  ((live && live.at) || []).forEach(function (b) {
-    if (onRoad(b) || !(nowS - b[2] < BUS_FRESH)) return;
-    var m = metres(b[0], b[1], base.lat, base.lon);
-    if (m > base.r) { n++; if (m < d) d = m; }
-  });
-  return { n: n, d: n ? d : 0 };
-}
-
 // A departure's minute on the day whose services are onDay, the evening
 // before's being onEve (GTFS writes 12:53 AM as 24:53 on the evening's
 // service), or -1 when it doesn't run then.
@@ -817,15 +783,11 @@ function tripsSoon(stops, services, now, nowMin) {
 
 // A flick's answer from its departures, whoever's timetable they come
 // from: deps by time, each {t, route, head, live, near, sid}; dayMs the
-// midnight of the day they're on; best the nearest stop; out the yard's
-// count or null; liveSys whether the system has live times; quiet for a
-// re-check the watch asked for.
+// midnight of the day they're on; best the nearest stop; liveSys whether
+// the system has live times; quiet for a re-check the watch asked for.
 function answerStop(o) {
   // Within the fix's own accuracy of the stop, the wearer may well be at it.
   var dist = o.best.d <= Math.max(HERE_M, o.reach) ? 0 : o.best.d;
-  if (o.out !== null) return sendYard(o.title, dist, o.out);
-  // At the yard the stop files are read for the count's sake; the stop up
-  // the road still has to be within range to be counted down to.
   if (o.best.d > cdRange()) {
     console.log('headway: nearest stop ' + Math.round(o.best.d) + ' m off, past the range of ' + cdRange());
     return sendNothing(false);
@@ -949,7 +911,7 @@ function flickAnywhere(pos) {
       if (!deps.length) return sendNothing(false);
       if (ahead) dayWord = ahead === 1 ? 'TOMORROW' : ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'][new Date(first.ms).getDay()];
       deps.sort(function (a, b) { return a.t - b.t || (a.route < b.route ? -1 : a.route > b.route ? 1 : 0); });
-      answerStop({ deps: deps, dayMs: midnight + ahead * 86400000, title: byId[best.id].name, best: best, reach: reach, out: null,
+      answerStop({ deps: deps, dayMs: midnight + ahead * 86400000, title: byId[best.id].name, best: best, reach: reach,
         liveSys: false, colour: function (r) { return colours[r] || 0x888888; } });
     }
     take(got);
@@ -1014,10 +976,16 @@ function answerAt(pos, quiet) {
       // own name rather than whichever bay happened to be nearest.
       var reach = Math.min(Math.max(pos.coords.accuracy || 0, 0), MAX_REACH);
       var atHub = sys.hub && metres(best.lat, best.lon, sys.hub.lat, sys.hub.lon) <= HUB;
-      var atBase = sys.base && metres(lat, lon, sys.base.lat, sys.base.lon) <= sys.base.r;
+      // At the yard the question is whether the buses are back, and the
+      // phone's looks answer it on the watch; a flick there asks for a look
+      // now, and answers nothing itself.
+      if (sys.base && metres(lat, lon, sys.base.lat, sys.base.lon) <= sys.base.r) {
+        if (!quiet) yardTick(true);
+        return sendNothing(false);
+      }
       // A stop further off than the range isn't the wearer's: nothing to
       // count to, and a countdown left from one that was ends.
-      if (!atHub && !atBase && best.d > cdRange()) {
+      if (!atHub && best.d > cdRange()) {
         console.log('headway: nearest stop ' + Math.round(best.d) + ' m off, past the range of ' + cdRange());
         return sendNothing(false);
       }
@@ -1126,15 +1094,7 @@ function answerAt(pos, quiet) {
           // onDay: the services of the day these departures are from.
           return sendWaves(title, hubChips(deps, dayWord, index, stops, inNow, sys.routes, onDay));
         }
-        // At the yard the question is whether the buses are back: the count.
-        var out = atBase ? busesOut(live, sys.base) : null;
-        // In the yard's hour the stop up the road is no use at the yard: what
-        // is, is how many buses are pulling in, and how far the nearest is.
-        if (out !== null && index.ends && yardWindow(index, new Date())) {
-          var pull = pullingIn(live, sys.base);
-          return sendYard(pull.n + ' PULLING IN', pull.d, out);
-        }
-        answerStop({ deps: deps, dayMs: date.getTime(), title: title, best: best, reach: reach, out: out,
+        answerStop({ deps: deps, dayMs: date.getTime(), title: title, best: best, reach: reach,
           liveSys: !!sys.live, quiet: quiet, colour: function (r) { return routeColour(index, r); } });
       }
     });
@@ -1154,7 +1114,7 @@ Pebble.addEventListener('appmessage', function (e) {
   if (e.payload && e.payload.FLICK) { console.log('headway: flick'); onFlick(); }
   else if (e.payload && e.payload.CD_CHECK) { console.log('headway: the watch asks again'); onCdCheck(); }
   else if (e.payload && e.payload.LOOK) onLook();
-  else if (e.payload && e.payload.YARD) { console.log('headway: yard asked by the watch'); yardTick(); }
+  else if (e.payload && e.payload.YARD) { console.log('headway: yard asked by the watch'); yardTick(false); }
 });
 
 Pebble.addEventListener('ready', function () { look(true); });
@@ -1164,20 +1124,44 @@ Pebble.addEventListener('webviewclosed', function () {
 });
 setInterval(function () { look(false); }, 5 * 60 * 1000);
 
-// ---- the yard, coming home. For an hour after the day's last trip, at the
-// yard its buses sleep in, the watch shows how many are still on trips and,
-// once none are, how long ago the last trip ended, with no flick. The feed
-// lists a bus only while it's on a trip, so "none out" isn't "all in": the
-// last one may still be driving back, and the wearer judges from the minutes.
-// The window is the timetable's: the latest end of the services running
-// that day (or, past midnight, the day before), and an hour after it.
-// Only a phone last seen within YARD_NEAR of the yard looks every two minutes;
+// ---- the yard, coming home: when to close the gates. From the day's last
+// trip, at the yard its buses sleep in, the watch shows how many buses are
+// still moving and, once none are, how long since the last one stopped, with
+// no flick. The feed is no help on who is logged off: it keeps re-stamping a
+// bus's last fix with the current time, so on a Sunday night every bus reads
+// fresh, parked at the bays where it logged off the day before. What a
+// logged-off bus cannot do is move. So each look is compared with the one
+// before: a bus whose position has changed by YARD_MOVED since is still
+// coming, one that hasn't is in, or as good as. Fifteen minutes after the
+// last one stops the block goes solid: close the gates.
+// The window is the timetable's: the latest end of the services running that
+// day (or, past midnight, the day before), and YARD_HOUR after it. Only a
+// phone last seen within YARD_NEAR of the yard looks, every two minutes;
 // anywhere else the half-hourly look (or a flick there) has to bring it near.
-var YARD_HOUR = 60, YARD_EVERY = 2 * 60 * 1000, YARD_NEAR = 1000, lastBaseM = Infinity;
-var yard = { told: null, asked: 0, start: 0, seen: 0, zero: null };
-// Once none are out, one more look YARD_RECHECK after the last trip ended,
-// for a bus that logged out wrongly and back in; then none.
-var YARD_RECHECK = 5 * 60;
+var YARD_HOUR = 90, YARD_EVERY = 2 * 60 * 1000, YARD_NEAR = 1000, YARD_MOVED = 40, lastBaseM = Infinity;
+var yard = { told: null, asked: 0, start: 0, last: null, lastAt: 0, lastMoved: 0 };
+// A bus's name across looks: its trip, else its route from the tracker site.
+function busKey(b) { return b[3] || (b[4] ? 'r' + b[4] : ''); }
+// This look against the one before: how many buses have moved, and when any
+// last did. Null on the first look of a window, with nothing to compare.
+function yardLook(live, w) {
+  var now = Date.now() / 1000, cur = {};
+  (live.at || []).forEach(function (b) { var k = busKey(b); if (k) cur[k] = b; });
+  var verdict = null;
+  if (yard.last) {
+    var moving = 0;
+    Object.keys(cur).forEach(function (k) {
+      var p = yard.last[k];
+      if (!p || metres(p[0], p[1], cur[k][0], cur[k][1]) > YARD_MOVED) moving++;
+    });
+    if (moving) yard.lastMoved = now;
+    verdict = { moving: moving, lastMoved: yard.lastMoved };
+  } else {
+    yard.lastMoved = now;   // offline since at least now, for all the phone knows
+  }
+  yard.last = cur; yard.lastAt = now;
+  return verdict;
+}
 // [start, until] in epoch seconds around now, or null outside it.
 function yardWindow(index, now) {
   var ends = index.ends || [];
@@ -1232,16 +1216,15 @@ function tellYard(msg) {
   console.log('headway: yard ' + key);
   Pebble.sendAppMessage(msg);
 }
-function yardTick() {
+// force: a flick at the yard asks for a look now.
+function yardTick(force) {
   var sys = lastSys;
   if (!sys || !sys.base || hubMode() === MODE_OFF || lastBaseM > YARD_NEAR) return yardOff();
   getIndex(sys, function (index) {
     var w = index && index.ends && yardWindow(index, new Date());
     if (!w) return yardOff();
-    if (w.start !== yard.start) { yard.start = w.start; yard.seen = 0; yard.zero = null; }
-    if (Date.now() - yard.asked < YARD_EVERY) return;
-    var z = yard.zero, nowAsk = Date.now() / 1000;
-    if (z && (nowAsk < z.end + YARD_RECHECK || z.at >= z.end + YARD_RECHECK)) return;
+    if (w.start !== yard.start) { yard.start = w.start; yard.last = null; yard.lastMoved = 0; }
+    if (!force && Date.now() - yard.asked < YARD_EVERY) return;
     yard.asked = Date.now();
     navigator.geolocation.getCurrentPosition(function (pos) {
       var lat = pos.coords.latitude, lon = pos.coords.longitude;
@@ -1255,16 +1238,11 @@ function yardTick() {
         if (!near || d < near.d) near = { id: st[0], d: d };
       });
       getLive(sys, [near.id], function (live) {
-        var out = busesOut(live, sys.base);
-        if (out === null) return;   // no news: the watch keeps its last word
-        var nowS = Date.now() / 1000;
-        live.at.forEach(function (b) {
-          if (onRoad(b) && nowS - b[2] < BUS_FRESH && metres(b[0], b[1], sys.base.lat, sys.base.lon) > sys.base.r && b[2] > yard.seen) yard.seen = b[2];
-        });
-        // When the last trip ended only matters once none are out.
-        var end = Math.round(yard.seen || w.start);
-        yard.zero = out ? null : { end: end, at: nowS };
-        tellYard({ YD_OUT: out, YD_END: out ? 0 : end, YD_UNTIL: Math.round(w.until) });
+        if (!live || !live.at) return;   // no news: the watch keeps its last word
+        var v = yardLook(live, w);
+        if (!v) return;   // the first look: nothing to compare yet
+        console.log('headway: yard ' + v.moving + ' moving, last moved ' + Math.round(Date.now() / 1000 - v.lastMoved) + ' s ago');
+        tellYard({ YD_OUT: v.moving, YD_END: v.moving ? 0 : Math.round(v.lastMoved), YD_UNTIL: Math.round(w.until) });
       });
     }, function () { /* no fix: the watch keeps its last word until the window ends */ },
     { timeout: 10000, maximumAge: 4 * 60 * 1000 });
@@ -1273,4 +1251,4 @@ function yardTick() {
 function yardOff() {
   if (yard.told !== null && yard.told !== '{"YD_OUT":-1}') tellYard({ YD_OUT: -1 });
 }
-setInterval(yardTick, 60 * 1000);
+setInterval(function () { yardTick(false); }, 60 * 1000);

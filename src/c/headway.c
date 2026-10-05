@@ -112,9 +112,6 @@ typedef struct {
 static struct {
   bool valid, pending, lit;   // lit: a flick was heard; the seconds show until the answer's time is up
   bool wave;                  // the hub's answer: lines by departure time
-#ifdef HAS_YARD
-  int8_t out;                 // at the yard: how many buses are still out, -1 elsewhere
-#endif
   // The hairline's countdown, from the flick: it drains from seg_f (in
   // ten-thousandths of the line) at seg_at to nothing at end_at, both in ms
   // since the flick at t0. An answer starts a new segment from where the line
@@ -129,32 +126,28 @@ static struct {
   AppTimer *timer;
   AppTimer *drain;            // repaints the hairline as it shortens
 } s_sv;
+static time_t s_now;   // the frame's clock, read by its layouts (face_now)
 #ifdef HAS_YARD
-#define AT_YARD() (s_sv.valid && s_sv.out >= 0)
-// Coming home: for an hour after the day's last trip, at the yard, the phone
-// says without a flick how many buses are still on trips (out), when the
-// last trip ended (end) and when to stop saying so (until), in epoch seconds.
+// Coming home: after the day's last trip, at the yard, the phone says
+// without a flick how many buses are still moving (out), when the last one
+// stopped (end) and when to stop saying so (until), in epoch seconds. Once
+// none move the minutes count up, and at YARD_GATES the block goes solid:
+// close the gates.
 #define YARD_KEY 4
+#define YARD_GATES (15 * 60)
 static struct { int8_t out; int32_t end, until; int32_t from, wuntil; bool near; } s_yd;
 static time_t s_yd_asked;   // when the watch last asked the phone to look at the yard
-// The buses out, from a flick's answer while it's up, else from the phone's
-// word in its window; -1 when neither.
-// Once none are on trips the minutes count up to YARD_AFTER, time enough for
-// the last bus to finish a route and drive back, then the face is itself.
-#define YARD_AFTER (25 * 60)
 static bool yard_counting(void) {
-  const time_t now = time(NULL);
-  return s_yd.end && now < s_yd.until && now - s_yd.end < YARD_AFTER;
+  return s_yd.end && s_now < s_yd.until;
 }
+// The buses still moving, from the phone's word in its window; -1 outside it.
 static int yard_out(void) {
-  if (AT_YARD()) return s_sv.out;
-  if (s_yd.out > 0 && time(NULL) < s_yd.until) return s_yd.out;
+  if (s_yd.out > 0 && s_now < s_yd.until) return s_yd.out;
   if (s_yd.out == 0 && yard_counting()) return 0;
   return -1;
 }
 #define YARD_ON() (yard_out() >= 0)
 #else
-#define AT_YARD() false
 #define YARD_ON() false
 #endif
 
@@ -434,7 +427,6 @@ static Window *s_window;
 static Layer *s_face;
 static int s_last_remaining = -1;
 static int16_t s_w = REF_W;   // display width, for scaling
-static time_t s_now;          // the frame's clock, read by its layouts
 
 static int sc(int v) { return (v * s_w + REF_W / 2) / REF_W; }
 
@@ -1901,25 +1893,24 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
   }
 #endif
 
-  // At the yard the block is the count of buses still out, a label over it.
+  // At the yard the block is the buses still moving, a label over it; once
+  // none are, the minutes since the last stopped, and at fifteen the block
+  // goes solid: close the gates.
 #ifdef HAS_YARD
   const int out = yard_out();
   if (out >= 0) {
     s_bk.now = s_bk.solid = false;
-    // The feed drops a bus as its last trip ends, not at the gate, so none on
-    // a trip isn't all in: the last may still be driving back. In the hour
-    // after the last trip the phone knows when it ended, and the face says
-    // how long ago, flick or not, so the wearer judges; otherwise a bare 0.
-    s_bk.unit = "OUT";
-    if (out == 0 && yard_counting()) {
-      const int ago = (int)((time(NULL) - s_yd.end) / 60);
+    if (out == 0) {
+      const int32_t since = (int32_t)(s_now - s_yd.end);
+      const int ago = (int)(since / 60);
       snprintf(s_bk.num, sizeof(s_bk.num), "%d", ago < 0 ? 0 : ago);
       s_bk.unit = "MIN AGO";
-      s_bk.label = "LAST TRIP ENDED";
+      s_bk.label = "LAST BUS STOPPED";
+      s_bk.solid = since >= YARD_GATES;
     } else {
       snprintf(s_bk.num, sizeof(s_bk.num), "%d", out);
-      if (!out) s_bk.unit = "";
-      s_bk.label = out == 0 ? "NONE ON TRIPS" : out == 1 ? "BUS STILL OUT" : "BUSES STILL OUT";
+      s_bk.unit = out == 1 ? "BUS" : "BUSES";
+      s_bk.label = "STILL MOVING";
     }
   }
 #endif
@@ -2126,7 +2117,7 @@ static void face_update(Layer *layer, GContext *ctx) {
 
   // The countdown's stop sits in the band where the hub's chips would, while
   // it runs, and the yard's answer takes the place too.
-  s_se.want = s_cd.stop[0] && (AT_STOP() || (yard && s_sv.valid));
+  s_se.want = s_cd.stop[0] && AT_STOP();
 #ifdef HAS_WAVE
   wave = s_sv.valid && s_sv.wave && !yard;
 #else
@@ -2250,15 +2241,11 @@ static void walk_look(void) {
 // Through the yard's hour, while the phone last saw the wearer near it, the
 // watch asks the phone to look every two minutes: the phone's own timer can
 // be held back in the background, a message from the watch wakes it.
-// Once none are out the minutes count on the watch alone; it asks once more
-// YARD_RECHECK after the last trip ended, for a bus that logged out wrongly
-// and back in, and that's all.
+// Through the window, so a bus that starts moving again is seen.
 #define YARD_EVERY 120
-#define YARD_RECHECK (5 * 60)
 static void yard_ask(void) {
   const time_t now = time(NULL);
   if (!s_yd.near || now < s_yd.from || now >= s_yd.wuntil || now - s_yd_asked < YARD_EVERY) return;
-  if (s_yd.out == 0 && s_yd.end && (now < s_yd.end + YARD_RECHECK || s_yd_asked >= s_yd.end + YARD_RECHECK)) return;
   DictionaryIterator *out;
   if (app_message_outbox_begin(&out) != APP_MSG_OK) return;
   dict_write_uint8(out, MESSAGE_KEY_YARD, 1);
@@ -2532,10 +2519,6 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
     if (s_sv.n > SV_ROWS) s_sv.n = SV_ROWS;
     if (s_sv.n < 0) s_sv.n = 0;
     strncpy(s_sv.stop, ts ? ts->value->cstring : "", sizeof(s_sv.stop) - 1); s_sv.stop[sizeof(s_sv.stop) - 1] = 0;
-#ifdef HAS_YARD
-    Tuple *tout = dict_find(iter, MESSAGE_KEY_SV_OUT);
-    s_sv.out = tout ? (int8_t)(tout->value->int32 > 99 ? 99 : tout->value->int32) : -1;
-#endif
 #ifdef HAS_WAVE
     Tuple *tm = dict_find(iter, MESSAGE_KEY_SV_MODE);
     s_sv.wave = tm && tm->value->int32 == 1 && s_sv.n > 0;
@@ -2560,11 +2543,7 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
 #endif
     if (quiet) { retune_tick(); layer_mark_dirty(s_face); return; }
     s_sv.pending = false;
-#ifdef HAS_YARD
-    s_sv.valid = s_sv.wave || s_sv.out >= 0;
-#else
     s_sv.valid = s_sv.wave;
-#endif
     // Nothing to show: the face stays as it was, and the seconds in the
     // colon say the flick was heard. Nothing is taken away to say nothing.
     if (s_sv.valid || s_cd.n) light_enable_interaction();
@@ -2713,9 +2692,6 @@ static void init(void) {
 #endif
   s_f_cap = fonts_load_custom_font(resource_get_handle(RES_CAP));
   s_m_cap = barlow_metrics(measure("B", s_f_cap).h);
-#ifdef HAS_YARD
-  s_sv.out = -1;   // no yard until the phone says so
-#endif
   s_f_bigdate = fonts_load_custom_font(resource_get_handle(RES_BIGDATE));
   // The countdown a size down: under a timeline peek, and for a clock time.
   s_f_count_s = fonts_load_custom_font(resource_get_handle(RES_COUNT_S));

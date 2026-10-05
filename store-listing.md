@@ -30,6 +30,15 @@ from transitous.org/sources and OpenStreetMap.
 The weather service gets your location rounded to about 100 m; otherwise
 it stays on your phone. No accounts. Round watches aren't supported.
 
+## Release notes (1.27.0)
+
+The yard answers the question it was for: when to close the gates. After
+the last trip the face counts the buses still moving, then the minutes since
+the last one stopped, and goes solid at fifteen. It judges by movement
+between looks, since the feed re-stamps a logged-off bus's last fix as if it
+were fresh. A flick at the yard asks for a look at once and shows nothing
+else.
+
 ## Release notes (1.26.1)
 
 A flick counts down only to a stop within range, 400 m unless you set it

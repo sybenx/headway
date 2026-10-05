@@ -106,27 +106,28 @@ no live answer a flick there shows only its seconds, since nothing can be
 said about who is in. A Pebble Classic has no room for it.
 
 **At the yard,** Connect's headquarters in North Logan where the buses sleep,
-a flick answers whether they are all back. The count takes the countdown's
-place, as big: `3 OUT` under `BUSES STILL OUT`, counting every bus on a trip
-anywhere but the yard, detoured ones included, or a bare `0` under `NONE ON
-TRIPS`. With no live answer it is the stop up the road, as anywhere else.
+the question is when to close the gates. After the day's last trip the face
+answers it by itself, with no flick: `3 BUSES` under `STILL MOVING` in the
+countdown's place while any bus is still on its way, then `LAST BUS STOPPED`
+over `12 MIN AGO`, counting up, and at fifteen minutes the block goes solid.
+A flick there asks for a look at once and shows nothing else.
 
-For an hour after the day's last trip the yard needs no flick: the face shows
-the buses coming home by itself, the count in the countdown's place while
-any are still on a trip, then `LAST TRIP ENDED` over `12 MIN AGO`, counting
-up, and a flick there says the same. The feed lists a bus only while it's on
-a trip, so none on one isn't all in: the last bus may still be driving back,
-ten minutes or so, and the minutes let the one at the gate judge. The hour is
-the timetable's, from the latest arrival of the services running that day
-(9:03 PM on weekdays, 6:59 on Saturdays), and the minutes run from when the
-last bus was last seen on its trip, or from the timetable's end if it was
-never seen. Only a phone last seen within a kilometre of the yard looks,
-every two minutes while buses are out; once none are, it looks once more
-five minutes after the last trip ended, for a bus that logged out by mistake
-and back in, and then not again, while the minutes count to 25 on the watch.
-Anywhere else nothing changes. A Pebble
+The live feed is no help on who has logged off: it keeps re-stamping a bus's
+last fix with the current time, so on a Sunday night every bus reads fresh,
+parked at the bays where it logged off the day before. What a logged-off bus
+cannot do is move, so each look is set against the one before, two minutes
+apart: a bus whose position has changed by more than 40 m is still coming,
+and one that hasn't is in, or as good as. The window is the timetable's,
+from the latest arrival of the services running that day (9:03 PM on
+weekdays, 6:59 on Saturdays) and ninety minutes on. Only a phone last seen
+within a kilometre of the yard looks, every two minutes through the window,
+so a bus that sets off again is seen. Anywhere else nothing changes. A Pebble
 Classic has no room for the count. A system names its yard with
 `--base lat,lon,metres`, and the stop index then carries each service's end.
+
+| buses still coming | close the gates |
+|---|---|
+| ![still moving](screenshots/yard-moving.png) | ![the gates](screenshots/yard-gates.png) |
 
 | at the transit centre | light | the minute it leaves |
 |---|---|---|
