@@ -1173,7 +1173,8 @@ typedef struct {
   int extra;            // battery percent / weather code
   bool charging;        // a battery on the charger: a bolt beside the icon
   bool big;             // weather as a large icon and temperature, no caption
-  char hl[2][6];        // the high and low module's "H 18", "L 6"
+  char hl[2][6];        // the high and low module's figures, "18" and "6"
+  int16_t hl_dx;        // where its L column starts
 } Module;
 
 static bool module_read(uint8_t kind, Module *m) {
@@ -1184,8 +1185,8 @@ static bool module_read(uint8_t kind, Module *m) {
     if (!s_wx.valid || s_wx.hi == WX_NOHL) return false;
     m->kind = kind;
     m->value[0] = 0;
-    snprintf(m->hl[0], sizeof(m->hl[0]), "H %d", s_wx.hi);
-    snprintf(m->hl[1], sizeof(m->hl[1]), "L %d", s_wx.lo);
+    snprintf(m->hl[0], sizeof(m->hl[0]), "%d", s_wx.hi);
+    snprintf(m->hl[1], sizeof(m->hl[1]), "%d", s_wx.lo);
     return true;
   }
   m->kind = kind;
@@ -1398,8 +1399,13 @@ static void layout_modules(GFont f_val, GFont f_cap, int c_start, int avail_w,
       continue;
     }
     if (s_md.m[i].kind == MODULE_HILO) {
-      const int h0 = run_w(s_md.m[i].hl[0], f_cap, false, TRACK), h1 = run_w(s_md.m[i].hl[1], f_cap, false, TRACK);
-      s_md.widths[i] = h0 > h1 ? h0 : h1;
+      // Two columns in the modules' own grammar: H over the high, L over the low.
+      int c0 = run_w(s_md.m[i].hl[0], f_val, true, 0), c1 = run_w(s_md.m[i].hl[1], f_val, true, 0);
+      const int ch = run_w("H", f_cap, false, TRACK), cl = run_w("L", f_cap, false, TRACK);
+      if (ch > c0) c0 = ch;
+      if (cl > c1) c1 = cl;
+      s_md.m[i].hl_dx = (int16_t)(c0 + s_md.gap);   // as far apart as two modules
+      s_md.widths[i] = s_md.m[i].hl_dx + c1;
       total += s_md.widths[i] + (i ? s_md.gap : 0);
       continue;
     }
@@ -1447,10 +1453,13 @@ static void paint_modules(void) {
   for (int i = 0; i < s_md.n; i++) {
     const Module *m = &s_md.m[i];
     if (m->kind == MODULE_HILO) {
-      // H on the caption line, L on the values' baseline.
+      const int cy = s_md.y + s_md.label_h - s_md.m_cap.cap - s_md.m_cap.bearing, vy = s_md.y + s_md.label_h + s_md.lgap - s_md.m_val.bearing;
       graphics_context_set_text_color(s_ctx, s_dim);
-      draw_run(m->hl[0], s_md.f_cap, x, s_md.y + s_md.label_h - s_md.m_cap.cap - s_md.m_cap.bearing, false, TRACK);
-      draw_run(m->hl[1], s_md.f_cap, x, base - s_md.m_cap.cap - s_md.m_cap.bearing, false, TRACK);
+      draw_run("H", s_md.f_cap, x, cy, false, TRACK);
+      draw_run("L", s_md.f_cap, x + m->hl_dx, cy, false, TRACK);
+      graphics_context_set_text_color(s_ctx, s_ink);
+      draw_run(m->hl[0], s_md.f_val, x, vy, true, 0);
+      draw_run(m->hl[1], s_md.f_val, x + m->hl_dx, vy, true, 0);
       x += s_md.widths[i] + s_md.gap;
       continue;
     }
@@ -1588,7 +1597,7 @@ static void layout_gb(int c_start, int avail_w, int band_top, int band_bot, int 
 
 // The countdown's stop, beside the modules: laid out with the band, defined
 // with the countdown below.
-static struct { bool want, show; int w, gap, x, y_name, y_dist; char name[24], dist[10]; } s_se;
+static struct { bool want, show; int w, gap, x, y_name, y_name2, y_dist; char name[24], name2[24], dist[10]; Metrics m; } s_se;
 static void layout_stop_el(int c_start, int avail_w, int band_top, int band_bot) __attribute__((noinline));
 
 // The band's row: the second countdown at the hub, then the modules beside
@@ -1977,36 +1986,60 @@ static void paint_rain(void) {
 // wearer off it, how far, at the outer end of the band the modules share,
 // where the hub's chips go. The name gives way a word at a time, so the
 // modules keep their room; the yard's answer takes the place too.
+// The stop's name lines are fitted through one call, not fit_name inlined at
+// each: layout, not painting, so the extra frame costs the renderer nothing.
+static void fit_label(char *s, int room) __attribute__((noinline));
+static void fit_label(char *s, int room) { fit_name(s, s_f_label, room); }
+
 static void layout_stop_el(int c_start, int avail_w, int band_top, int band_bot) {
   s_se.show = false;
   if (!s_se.want) return;
   s_se.dist[0] = 0;
   if (s_cd.dist > 0) format_dist(s_se.dist, sizeof(s_se.dist), s_cd.dist);
-  const int lines = s_se.dist[0] ? 2 : 1;
-  const int h = lines * s_m_cap.cap + (lines - 1) * sc(MOD_LABEL_GAP);
-  if (band_bot - band_top < h) return;
+  // In the badge font, a size up from the captions, so the name reads at a
+  // glance; the distance under it in the same.
+  s_se.m = barlow_metrics(measure("BPM", s_f_label).h);
   bool mods = false;
   for (int i = 0; i < MODULE_COUNT; i++) if (s_set.mod[i] != MODULE_NONE) mods = true;
+  const int room = mods ? avail_w / 2 : avail_w;
+  // A name too long for its room goes onto a second line, a word at a time,
+  // rather than lose its words; one line, cut, only where two don't fit.
   strncpy(s_se.name, s_cd.stop, sizeof(s_se.name) - 1); s_se.name[sizeof(s_se.name) - 1] = 0;
-  fit_name(s_se.name, s_f_cap, mods ? avail_w / 2 : avail_w);
-  const int nw = run_w(s_se.name, s_f_cap, false, TRACK);
-  const int dw = s_se.dist[0] ? run_w(s_se.dist, s_f_cap, false, TRACK) : 0;
+  s_se.name2[0] = 0;
+  if (run_w(s_se.name, s_f_label, false, TRACK) > room) {
+    memcpy(s_se.name2, s_se.name, sizeof(s_se.name2));
+    fit_label(s_se.name, room);
+    const char *rest = s_se.name2 + strlen(s_se.name);
+    while (*rest == ' ') rest++;
+    memmove(s_se.name2, rest, strlen(rest) + 1);
+    fit_label(s_se.name2, room);
+  }
+  int lines = (s_se.name2[0] ? 2 : 1) + (s_se.dist[0] ? 1 : 0);
+  int h = lines * s_se.m.cap + (lines - 1) * sc(MOD_LABEL_GAP);
+  if (band_bot - band_top < h && s_se.name2[0]) { s_se.name2[0] = 0; lines--; h = lines * s_se.m.cap + (lines - 1) * sc(MOD_LABEL_GAP); }
+  if (band_bot - band_top < h) return;
+  int nw = run_w(s_se.name, s_f_label, false, TRACK);
+  const int nw2 = s_se.name2[0] ? run_w(s_se.name2, s_f_label, false, TRACK) : 0;
+  if (nw2 > nw) nw = nw2;
+  const int dw = s_se.dist[0] ? run_w(s_se.dist, s_f_label, false, TRACK) : 0;
   s_se.w = nw > dw ? nw : dw;
   if (!s_se.w || s_se.w > avail_w) return;
   s_se.gap = sc(MOD_GAP);
   s_se.x = c_start + avail_w - s_se.w;
-  const int top = (band_top + band_bot) / 2 - h / 2;
-  s_se.y_name = top - s_m_cap.bearing;
-  s_se.y_dist = top + s_m_cap.cap + sc(MOD_LABEL_GAP) - s_m_cap.bearing;
+  const int top = (band_top + band_bot) / 2 - h / 2, step = s_se.m.cap + sc(MOD_LABEL_GAP);
+  s_se.y_name = top - s_se.m.bearing;
+  s_se.y_name2 = s_se.y_name + step;
+  s_se.y_dist = s_se.y_name + (s_se.name2[0] ? 2 : 1) * step;
   s_se.show = true;
 }
 static void paint_stop_el(void) __attribute__((noinline));
 static void paint_stop_el(void) {
   graphics_context_set_text_color(s_ctx, s_ink);
-  draw_run(s_se.name, s_f_cap, s_se.x + s_se.w - run_w(s_se.name, s_f_cap, false, TRACK), s_se.y_name, false, TRACK);
+  draw_run(s_se.name, s_f_label, s_se.x + s_se.w - run_w(s_se.name, s_f_label, false, TRACK), s_se.y_name, false, TRACK);
+  if (s_se.name2[0]) draw_run(s_se.name2, s_f_label, s_se.x + s_se.w - run_w(s_se.name2, s_f_label, false, TRACK), s_se.y_name2, false, TRACK);
   if (!s_se.dist[0]) return;
   graphics_context_set_text_color(s_ctx, s_dim);
-  draw_run(s_se.dist, s_f_cap, s_se.x + s_se.w - run_w(s_se.dist, s_f_cap, false, TRACK), s_se.y_dist, false, TRACK);
+  draw_run(s_se.dist, s_f_label, s_se.x + s_se.w - run_w(s_se.dist, s_f_label, false, TRACK), s_se.y_dist, false, TRACK);
 }
 
 // ---- zone 03/04: the time, flush to the outer edge so the minute survives

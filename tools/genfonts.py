@@ -26,9 +26,9 @@ FONTS = [
     ('time_60', 60, DIGITS), ('time_83', 83, DIGITS),
     ('count_44', 44, '[0-9NOW]'), ('count_61', 61, '[0-9NOW]'),
     ('time_38', 38, DIGITS), ('time_53', 53, DIGITS),         # the time under a timeline peek
-    ('count_30', 30, '[0-9NOW:]'), ('count_42', 42, '[0-9NOW:]'),  # and the flick's M:SS countdown
-    ('mod_15', 15, '[0-9.%°KA-Z: ]'), ('mod_21', 21, '[0-9.%°KA-Z: ]'),   # letters and a colon for the stop view's badges and clock times
-    ('label_11', 11, '[A-Z0-9:. ]'), ('label_15', 15, '[A-Z0-9:. ]'),   # the point in a distance
+    ('count_30', 30, '[0-9NOW:-]'), ('count_42', 42, '[0-9NOW:-]'),  # and the flick's M:SS countdown, and the large weather below zero
+    ('mod_15', 15, '[0-9.%°KA-Z: -]'), ('mod_21', 21, '[0-9.%°KA-Z: -]'),   # letters and a colon for the stop view's badges and clock times; a minus below zero
+    ('label_11', 11, '[A-Z0-9:.& ]'), ('label_15', 15, '[A-Z0-9:.& ]'),   # the point in a distance; & for stop names
     ('date_12', 12, '[A-Z0-9: ]'), ('date_17', 17, '[A-Z0-9: ]'),   # a colon for the board's clock times
     ('date_18', 18, '[A-Z0-9 ]'), ('date_25', 25, '[A-Z0-9 ]'),   # the idle face's larger date
     ('cap_12', 12, '[A-Z0-9%°&.: ]'),   # emery's captions, still rasterised; the 144px caption font is drawn by hand, see below

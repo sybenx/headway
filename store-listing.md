@@ -30,6 +30,13 @@ from transitous.org/sources and OpenStreetMap.
 The weather service gets your location rounded to about 100 m; otherwise
 it stays on your phone. No accounts. Round watches aren't supported.
 
+## Release notes (1.31.0)
+
+Easier to read: the high and low shows its figures as large as the other
+modules', under small H and L, and the countdown's stop name is a size up,
+on two lines where it would otherwise be cut. Stop names keep their &, and
+temperatures below zero their minus sign.
+
 ## Release notes (1.30.0)
 
 Today's high and low is now a module of its own, for any slot, in place of

@@ -38,8 +38,9 @@ by day; the night window is yours to set.
 Three module slots take heart rate, steps, battery, weather or nothing, as
 captions (`BPM 72`, `PARTLY 12°`), as grey icons, or as icons in colour. The
 weather also comes large, a big sky and a big temperature with a small F or
-C under the degree, and today's high and low is a module of its own, `H 18`
-over `L 6`, from the same request, for any slot. The skies are drawn at each size the face uses
+C under the degree, and today's high and low is a module of its own, `H` and `L`
+over the figures as the other modules caption theirs, from the same
+request, for any slot. The skies are drawn at each size the face uses
 them, 10 and 21 pixels on the 144 px watches and 14 and 29 on emery, from one
 cloud and one sun, rather than one small grid stretched; under rain or snow
 the cloud stays grey and only what falls takes the colour. A module with nothing to show —
