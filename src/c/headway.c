@@ -165,10 +165,10 @@ static int yard_out(void) {
 // answers, or the phone's half-hourly look finds the wearer gone from the
 // stop. A second flick, while the answer is lit, steps to the next route.
 // Kept, so a trip to the watch's menus doesn't lose it.
-#define CD_MAX 8
+#define CD_MAX 7
 #define CD_CLOCK_MIN 60   // past this many minutes the block reads the clock time
 #define STOPCD_KEY 5
-typedef struct { int32_t at; uint32_t col; char route[8]; bool live; } CdDep;
+typedef struct { int32_t at; uint32_t col; char route[8]; char head[10]; bool live; } CdDep;
 static struct {
   uint8_t n;
   bool live_sys;       // the system has live times: the phone is asked again near the end
@@ -1611,10 +1611,11 @@ static void layout_band(const Frame *fr, bool at_hub, int band_top, int band_bot
 #endif
   if (at_hub) layout_gb(fr->start, fr->end - fr->start, band_top, band_bot, now_min, t->tm_sec);
   else s_gb.show = false;
-  // The countdown's stop takes the chips' place, where there are none.
+  layout_modules(s_f_mod, s_f_cap, fr->start, fr->end - fr->start - (s_gb.show ? s_gb.w + s_gb.gap : 0), band_top, band_bot);
+  // The countdown's stop stacks at the outer end over the route's tab, in
+  // the room the modules leave; a name too long for it wraps or gives way.
   if (!s_gb.show) layout_stop_el(fr->start, fr->end - fr->start, band_top, band_bot);
   else s_se.show = false;
-  layout_modules(s_f_mod, s_f_cap, fr->start, fr->end - fr->start - (s_gb.show ? s_gb.w + s_gb.gap : s_se.show ? s_se.w + s_se.gap : 0), band_top, band_bot);
 #ifndef PBL_PLATFORM_APLITE
   if (s_gb.show && s_gb.was[0]) {
     const int with = s_md.n;
@@ -1999,25 +2000,32 @@ static void layout_stop_el(int c_start, int avail_w, int band_top, int band_bot)
   // In the badge font, a size up from the captions, so the name reads at a
   // glance; the distance under it in the same.
   s_se.m = barlow_metrics(measure("BPM", s_f_label).h);
-  bool mods = false;
-  for (int i = 0; i < MODULE_COUNT; i++) if (s_set.mod[i] != MODULE_NONE) mods = true;
-  const int room = mods ? avail_w / 2 : avail_w;
-  // A name too long for its room goes onto a second line, a word at a time,
-  // rather than lose its words; one line, cut, only where two don't fit.
+  // Each line's room is the band's width where the line sits clear below
+  // the modules' rows, and what the modules leave where it doesn't: the
+  // name, on the bottom line, mostly runs full width under them.
+  const int cap = s_se.m.cap, step = cap + sc(MOD_LABEL_GAP);
+  const int md_bot = s_md.n ? s_md.y + s_md.label_h + s_md.lgap + s_md.m_val.cap : band_top;
+  const int narrow = s_md.n ? avail_w - s_md.total - sc(MOD_GAP) : avail_w;
+#define SE_ROOM(top_y) ((s_md.n && (top_y) < md_bot) ? narrow : avail_w)
   strncpy(s_se.name, s_cd.stop, sizeof(s_se.name) - 1); s_se.name[sizeof(s_se.name) - 1] = 0;
   s_se.name2[0] = 0;
+  int room = SE_ROOM(band_bot - cap);
+  // A name too long for its room goes onto a second line, a word at a time,
+  // rather than lose its words; one line, cut, only where two don't fit.
   if (run_w(s_se.name, s_f_label, false, TRACK) > room) {
     memcpy(s_se.name2, s_se.name, sizeof(s_se.name2));
-    fit_label(s_se.name, room);
+    fit_label(s_se.name, SE_ROOM(band_bot - cap - step));
     const char *rest = s_se.name2 + strlen(s_se.name);
     while (*rest == ' ') rest++;
     memmove(s_se.name2, rest, strlen(rest) + 1);
     fit_label(s_se.name2, room);
   }
   int lines = (s_se.name2[0] ? 2 : 1) + (s_se.dist[0] ? 1 : 0);
-  int h = lines * s_se.m.cap + (lines - 1) * sc(MOD_LABEL_GAP);
-  if (band_bot - band_top < h && s_se.name2[0]) { s_se.name2[0] = 0; lines--; h = lines * s_se.m.cap + (lines - 1) * sc(MOD_LABEL_GAP); }
+  int h = lines * cap + (lines - 1) * sc(MOD_LABEL_GAP);
+  if (band_bot - band_top < h && s_se.name2[0]) { s_se.name2[0] = 0; lines--; h = lines * cap + (lines - 1) * sc(MOD_LABEL_GAP); }
   if (band_bot - band_top < h) return;
+  if (s_se.dist[0]) fit_label(s_se.dist, SE_ROOM(band_bot - h));
+#undef SE_ROOM
   int nw = run_w(s_se.name, s_f_label, false, TRACK);
   const int nw2 = s_se.name2[0] ? run_w(s_se.name2, s_f_label, false, TRACK) : 0;
   if (nw2 > nw) nw = nw2;
@@ -2026,10 +2034,12 @@ static void layout_stop_el(int c_start, int avail_w, int band_top, int band_bot)
   if (!s_se.w || s_se.w > avail_w) return;
   s_se.gap = sc(MOD_GAP);
   s_se.x = c_start + avail_w - s_se.w;
-  const int top = (band_top + band_bot) / 2 - h / 2, step = s_se.m.cap + sc(MOD_LABEL_GAP);
-  s_se.y_name = top - s_se.m.bearing;
+  // Over the route's tab, so the bus reads as one stack at the outer edge:
+  // the distance first, in ink, then the name.
+  const int top = band_bot - h;
+  s_se.y_dist = top - s_se.m.bearing;
+  s_se.y_name = s_se.y_dist + (s_se.dist[0] ? step : 0);
   s_se.y_name2 = s_se.y_name + step;
-  s_se.y_dist = s_se.y_name + (s_se.name2[0] ? 2 : 1) * step;
   s_se.show = true;
 }
 static void paint_stop_el(void) __attribute__((noinline));
@@ -2038,7 +2048,6 @@ static void paint_stop_el(void) {
   draw_run(s_se.name, s_f_label, s_se.x + s_se.w - run_w(s_se.name, s_f_label, false, TRACK), s_se.y_name, false, TRACK);
   if (s_se.name2[0]) draw_run(s_se.name2, s_f_label, s_se.x + s_se.w - run_w(s_se.name2, s_f_label, false, TRACK), s_se.y_name2, false, TRACK);
   if (!s_se.dist[0]) return;
-  graphics_context_set_text_color(s_ctx, s_dim);
   draw_run(s_se.dist, s_f_label, s_se.x + s_se.w - run_w(s_se.dist, s_f_label, false, TRACK), s_se.y_dist, false, TRACK);
 }
 
@@ -2162,10 +2171,11 @@ static struct {
   const char *unit;
   const char *label;          // over the block, at the yard; none elsewhere
 #ifdef HAS_STOPCD
-  bool badge, live;           // the label is a route's badge, at a stop; live, its time is predicted
-  char day[10];               // beside the badge: TOMORROW, or the weekday, when the bus is another day's
-  int bx, by, bw, gx, gy, bl; // where the badge and its letters go; bl its logical x
-  int live_x, live_y, day_x, day_y;
+  bool badge, live;           // the label is a route's tab on the block, at a stop; live, its time is predicted
+  char day[10];               // in the block over the unit: the weekday, when the bus is another day's
+  const char *head;           // the headsign beside the tab, with a dot: filled for a live time, a ring for the timetable
+  int bx, by, bw, bh, gx, gy, bl;   // the tab and its letters; bl its logical x
+  int head_x, head_y, dot_x, dot_y, dot_r, day_dy, stripe;
 #endif
   bool now, solid, bare;
   GSize z_num;
@@ -2200,10 +2210,10 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
     }
   }
 #ifdef HAS_STOPCD
-  s_bk.badge = false; s_bk.live = false; s_bk.day[0] = 0;
+  s_bk.badge = false; s_bk.live = false; s_bk.day[0] = 0; s_bk.head = "";
   if (s_cd_shown) {
     const CdDep *d = &s_cd.d[s_cd_cur];
-    s_bk.label = d->route; s_bk.badge = true; s_bk.live = d->live;
+    s_bk.label = d->route; s_bk.badge = true; s_bk.live = d->live; s_bk.head = d->head;
     // Past the hour the block reads the departure's clock time, a size
     // down, with its AM or PM where the watch says so; a bus another day's
     // has its day beside the badge: TOMORROW, or the weekday.
@@ -2215,8 +2225,7 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
     const time_t midnight = s_now - (t->tm_hour * 3600 + t->tm_min * 60 + t->tm_sec);
     const int ahead = (int)((d->at - midnight) / 86400);
     static const char *const DOW3[7] = { "SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT" };
-    if (ahead == 1) strcpy(s_bk.day, "TOMORROW");
-    else if (ahead > 1) strcpy(s_bk.day, DOW3[(t->tm_wday + ahead) % 7]);
+    if (ahead >= 1) strcpy(s_bk.day, DOW3[(t->tm_wday + ahead) % 7]);   // WED beside TUE's date reads as tomorrow
   }
 #endif
 
@@ -2246,9 +2255,19 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
   const GFont f_label = s_f_label, f_date = s_f_date;
   s_bk.f_num = f_num; s_bk.show_date = date;
   s_bk.z_num = measure(s_bk.num, f_num);
-  const bool bare = s_bk.now || !s_bk.unit[0];   // NOW carries no unit, nor a 24-hour clock time
+  // NOW carries no unit, nor a 24-hour clock time; another day's bus has its
+  // day in the column over the unit, or alone where there is none.
+#ifdef HAS_STOPCD
+  const bool bare = s_bk.now || (!s_bk.unit[0] && !s_bk.day[0]);
+  const int unit_w = s_bk.unit[0] ? run_w(s_bk.unit, f_label, false, TRACK) : 0;
+  const int day_w = s_bk.day[0] ? run_w(s_bk.day, f_label, false, TRACK) : 0;
+  const int min_w = bare ? 0 : unit_w > day_w ? unit_w : day_w;
+  s_bk.day_dy = s_bk.unit[0] ? 0 : 1;   // the day on the baseline itself when it stands alone
+#else
+  const bool bare = s_bk.now || !s_bk.unit[0];
   const int min_w = bare ? 0 : run_w(s_bk.unit, f_label, false, TRACK);
-  s_bk.m_min = barlow_metrics(bare ? 0 : measure(s_bk.unit, f_label).h);
+#endif
+  s_bk.m_min = barlow_metrics(bare ? 0 : measure("8", f_label).h);
   s_bk.m_num = barlow_metrics(s_bk.z_num.h);
   s_bk.m_dow = barlow_metrics(measure(s_bk.dow, f_date).h);
   s_bk.m_date = barlow_metrics(measure(s_bk.date, f_date).h);
@@ -2308,24 +2327,30 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
   s_bk.top = s_bk.block_y;
 #ifdef HAS_STOPCD
   if (s_bk.badge) {
-    // Over the block's edge whether it is solid or not, so the badge stays
-    // put as the block fills at five minutes. The live mark and the day
-    // word sit on its wrist side.
+    // The route's tab, square, on the block's top edge at the outer end, and
+    // a stripe in its colour along that edge: the block is the bus's, solid
+    // or not. Beside the tab, to the wrist, the headsign and before it a
+    // dot: filled for a live time, a ring for the timetable's.
     const Metrics mb = barlow_metrics(measure("8", s_f_label).h);
-    const int gw = run_w(s_bk.label, s_f_label, false, 0), bh = sc(CHIP);
-    s_bk.bw = gw + 2 * sc(2) < bh ? bh : gw + 2 * sc(2) + 1;
-    s_bk.by = s_bk.block_y - sc(3) - bh;
+    const int gw = run_w(s_bk.label, s_f_label, false, 0), pad = sc(3);
+    s_bk.bh = mb.cap + 2 * pad;
+    s_bk.bw = gw + 2 * pad < s_bk.bh + sc(2) ? s_bk.bh + sc(2) : gw + 2 * pad;
+    s_bk.stripe = s_w > REF_W ? 2 : 1;
+    s_bk.by = s_bk.block_y - s_bk.bh;
     s_bk.bl = fr->end - s_bk.bw;
     s_bk.bx = mapx(s_bk.bl, s_bk.bw);
     s_bk.gx = s_bk.bx + (s_bk.bw - gw + 1) / 2;
-    s_bk.gy = s_bk.by + (bh - mb.cap) / 2 - mb.bearing;
-    s_bk.top = s_bk.by - sc(4);
+    s_bk.gy = s_bk.by + pad - mb.bearing;
+    s_bk.top = s_bk.by - sc(2);
     int wrist = s_bk.bl - sc(4);
-    if (s_bk.live) { s_bk.live_x = wrist - LIVE_W; s_bk.live_y = s_bk.by + (bh - 5) / 2; wrist = s_bk.live_x - sc(4); }
-    if (s_bk.day[0]) {
-      s_bk.day_x = wrist - run_w(s_bk.day, s_f_cap, false, TRACK);
-      s_bk.day_y = s_bk.by + (bh - s_m_cap.cap) / 2 - s_m_cap.bearing;
+    if (s_bk.head[0]) {
+      s_bk.head_x = wrist - run_w(s_bk.head, s_f_label, false, TRACK);
+      s_bk.head_y = s_bk.by + pad - mb.bearing;
+      wrist = s_bk.head_x - sc(4);
     }
+    s_bk.dot_r = sc(5) / 2;
+    s_bk.dot_x = wrist - 2 * s_bk.dot_r;
+    s_bk.dot_y = s_bk.by + s_bk.bh / 2;
   }
 #endif
 #ifdef HAS_YARD
@@ -2355,21 +2380,35 @@ static void paint_block(int fr_start) {
     // One row, mirrored as a whole: the number, then MIN on its baseline.
     const int x = mapx(num_x, s_bk.num_row_w);
     draw_run_s(s_bk.num, s_bk.f_num, x, s_bk.num_y - s_bk.m_num.bearing, true, 0);
-    if (!s_bk.bare)
-      draw_run_s(s_bk.unit, s_f_label, x + s_bk.num_w + sc(LABEL_GAP),
-                 s_bk.num_y + s_bk.m_num.cap - s_bk.m_min.cap - s_bk.m_min.bearing, false, TRACK);
+    const int unit_y = s_bk.num_y + s_bk.m_num.cap - s_bk.m_min.cap - s_bk.m_min.bearing;
+    if (!s_bk.bare && s_bk.unit[0])
+      draw_run_s(s_bk.unit, s_f_label, x + s_bk.num_w + sc(LABEL_GAP), unit_y, false, TRACK);
+#ifdef HAS_STOPCD
+    // The day over the unit, in the number's own height.
+    if (!s_bk.bare && s_bk.day[0])
+      draw_run_s(s_bk.day, s_f_label, x + s_bk.num_w + sc(LABEL_GAP),
+                 unit_y - (s_bk.day_dy ? 0 : s_bk.m_min.cap + sc(3)), false, TRACK);
+#endif
   }
 #ifdef HAS_STOPCD
   if (s_bk.badge) {
     const GColor fill = PBL_IF_COLOR_ELSE(GColorFromHEX(s_cd.d[s_cd_cur].col), s_ink);
     graphics_context_set_fill_color(s_ctx, fill);
-    graphics_fill_rect(s_ctx, GRect(s_bk.bx, s_bk.by, s_bk.bw, sc(CHIP)), sc(2), GCornersAll);
-    graphics_context_set_text_color(s_ctx, on_fill(fill));
+    graphics_fill_rect(s_ctx, GRect(mapx(s_bk.block_x, s_bk.block_w), s_bk.block_y, s_bk.block_w, s_bk.stripe), 0, GCornerNone);
+    graphics_fill_rect(s_ctx, GRect(s_bk.bx, s_bk.by, s_bk.bw, s_bk.bh), 0, GCornerNone);
+    graphics_context_set_text_color(s_ctx, PBL_IF_COLOR_ELSE(GColorBlack, s_ground));
     draw_run_s(s_bk.label, s_f_label, s_bk.gx, s_bk.gy, false, 0);
-    if (s_bk.live) paint_live_mark(mapx(s_bk.live_x, LIVE_W), s_bk.live_y);
-    if (s_bk.day[0]) {
-      graphics_context_set_text_color(s_ctx, s_dim);
-      draw_run(s_bk.day, s_f_cap, s_bk.day_x, s_bk.day_y, false, TRACK);
+    if (s_bk.head[0]) {
+      graphics_context_set_text_color(s_ctx, s_ink);
+      draw_run(s_bk.head, s_f_label, s_bk.head_x, s_bk.head_y, false, TRACK);
+    }
+    const GPoint dot = GPoint(mapx(s_bk.dot_x, 2 * s_bk.dot_r) + s_bk.dot_r, s_bk.dot_y);
+    if (s_bk.live) {
+      graphics_context_set_fill_color(s_ctx, PBL_IF_COLOR_ELSE(GColorFromHEX(0x55AAFF), s_ink));
+      graphics_fill_circle(s_ctx, dot, s_bk.dot_r);
+    } else {
+      graphics_context_set_stroke_color(s_ctx, s_dim);
+      graphics_draw_circle(s_ctx, dot, s_bk.dot_r);
     }
   }
 #endif
@@ -2784,17 +2823,18 @@ static void take_list(const char *p) {
   while (*p && s_cd.n < CD_MAX) {
     const char *e = strchr(p, '\n');
     const int len = e ? e - p : (int)strlen(p);
-    char line[40], *f[4] = { 0 };
-    const int k = len < 39 ? len : 39;
+    char line[56], *f[5] = { 0 };
+    const int k = len < 55 ? len : 55;
     memcpy(line, p, k); line[k] = 0;
     int nf = 0;
-    for (char *q = line; nf < 4; ) { f[nf++] = q; char *bar = strchr(q, '|'); if (!bar) break; *bar = 0; q = bar + 1; }
-    if (nf == 4) {
+    for (char *q = line; nf < 5; ) { f[nf++] = q; char *bar = strchr(q, '|'); if (!bar) break; *bar = 0; q = bar + 1; }
+    if (nf >= 4) {
       CdDep *d = &s_cd.d[s_cd.n++];
       strncpy(d->route, f[0], sizeof(d->route) - 1); d->route[sizeof(d->route) - 1] = 0;
       d->at = atoi(f[1]);
       d->col = (uint32_t)atoi(f[2]) & 0xFFFFFF;   // decimal: the library's strtol faults on basalt
       d->live = f[3][0] == '1';
+      strncpy(d->head, nf > 4 ? f[4] : "", sizeof(d->head) - 1); d->head[sizeof(d->head) - 1] = 0;
     }
     p = e ? e + 1 : p + len;
   }

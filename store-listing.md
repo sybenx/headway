@@ -30,6 +30,13 @@ from transitous.org/sources and OpenStreetMap.
 The weather service gets your location rounded to about 100 m; otherwise
 it stays on your phone. No accounts. Round watches aren't supported.
 
+## Release notes (1.32.0)
+
+The stop countdown redrawn: the stop's name sits over the route's tab on the
+block, the headsign beside the tab with a dot that is filled for a live time
+and a ring for the timetable, a stripe in the route's colour along the
+block, and another day's weekday inside the block over the AM or PM.
+
 ## Release notes (1.31.0)
 
 Easier to read: the high and low shows its figures as large as the other

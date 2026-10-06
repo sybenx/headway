@@ -607,13 +607,13 @@ function sendAnswer(msg) {
   Pebble.sendAppMessage(withTransit(msg));
 }
 // The stop's list: the stop, how far (0 at it), and its next departures,
-// CD_MAX at most, a line each: route|epoch seconds|colour|live. The watch
+// CD_MAX at most, a line each: route|epoch seconds|colour|live|headsign. The watch
 // counts down to the first not yet gone, moves on as each goes, and steps
 // through the routes on a second flick. The nearest stop's departures come
 // first, by time, then those of the stops the fix's accuracy adds: the
 // countdown is for the stop you're at, not one across the park with a sooner
 // bus.
-var CD_MAX = 8;
+var CD_MAX = 7;
 // Where the countdown's stop is, for the half-hourly look to end it once the
 // wearer has gone; null with none running.
 var cdStop = null, CD_GONE = 400;
@@ -627,7 +627,7 @@ function departures(deps, dayMs, colour) {
     var key = d.route + '|' + d.t;
     if (out.length >= CD_MAX || seen[key]) return;
     seen[key] = true;
-    out.push([d.route.slice(0, 7), Math.round(dayMs / 1000) + d.t * 60, colour(d.route) & 0xFFFFFF, d.live ? 1 : 0].join('|'));
+    out.push([d.route.slice(0, 7), Math.round(dayMs / 1000) + d.t * 60, colour(d.route) & 0xFFFFFF, d.live ? 1 : 0, dirWord(d.head).slice(0, 9)].join('|'));
   });
   return out;
 }

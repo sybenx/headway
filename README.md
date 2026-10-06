@@ -78,9 +78,11 @@ beside them, and their last minute counts in seconds too.
 
 **A flick of the wrist** anywhere inside the system asks the phone where it
 is, and the face answers with a countdown to the next bus from the nearest
-stop, within a range you set, 400 m by default: the route's badge over the
-big minutes, the stop's name beside the modules, and how far it is when the
-fix puts you off it. Further than that from every stop a flick shows only
+stop, within a range you set, 400 m by default. The bus reads as one stack
+at the outer edge: the stop's name, with how far it is above it when the fix
+puts you off it; the route's tab on the block, its headsign beside it with a
+dot that is filled for a live time and a ring for the timetable's; and the
+big minutes under a stripe in the route's colour. Further than that from every stop a flick shows only
 its seconds, and ends a countdown left from a stop you've walked away from. The face never
 asks for high accuracy; it takes the phone's everyday fix at its word, and
 the nearest stop within that accuracy is yours, with its twin across the road
@@ -90,8 +92,8 @@ in seconds. When the bus goes it moves on to the stop's next bus, and so on
 until the day's buses are done, you flick somewhere else, or the phone's
 half-hourly look finds you well away from the stop. Nothing is checked
 meanwhile; it simply runs. A bus more than an hour off reads as its clock
-time, `1:21 PM`, a size down; a bus another day's has its day beside the
-badge, `TOMORROW` or `MON`.
+time, `1:21 PM`, a size down; a bus another day's has its weekday in the
+block over the `AM`, so the date column is never covered.
 
 A stop with more than one route counts down to the soonest bus, whichever
 route. A second flick, within a few seconds of the answer, steps to the
@@ -141,8 +143,8 @@ Classic has no room for the count. A system names its yard with
 | ![hub](screenshots/stop-hub.png) | ![hub, light](screenshots/stop-hub-light.png) | ![hub, now](screenshots/stop-hub-now.png) |
 
 **Live times.** Where the agency publishes GTFS-realtime, a flick also asks
-for predictions, and a predicted time carries a small arc in the accent:
-beside the badge over the countdown, above a badge at the hub. With live
+for predictions, and a predicted time is marked: the filled dot before the
+countdown's headsign, a small arc above a badge at the hub. With live
 times the watch asks the phone to look again at five minutes and at one, so
 a late bus moves the countdown before it reads `NOW` on an empty road. A late bus
 moves to the minute it will really leave; a bus that will skip the stop

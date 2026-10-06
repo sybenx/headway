@@ -320,7 +320,7 @@
         "messageKey": "FLICK_ON",
         "label": "Flick for the nearest stop",
         "defaultValue": true,
-        "description": "A flick of the wrist starts a countdown to the next bus from the nearest stop: its route over the big minutes, the stop beside the modules. It moves on to the next bus as each goes, and ends when you leave the stop or the day's buses are done. A second flick within a few seconds steps to the stop's next route. Off, a flick still shows the seconds."
+        "description": "A flick of the wrist starts a countdown to the next bus from the nearest stop: its route as a tab on the block with the headsign beside it, the stop over them. It moves on to the next bus as each goes, and ends when you leave the stop or the day's buses are done. A second flick within a few seconds steps to the stop's next route. Off, a flick still shows the seconds."
       },
       {
         "type": "toggle",
