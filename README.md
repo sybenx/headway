@@ -36,9 +36,11 @@ by day; the night window is yours to set.
 | ![dark](screenshots/hero.png) | ![light](screenshots/hero-light.png) | ![captions](screenshots/captions.png) |
 
 Three module slots take heart rate, steps, battery, weather or nothing, as
-captions (`BPM 72`, `PARTLY 12°`), as grey icons, or as icons in colour. A
-module with nothing to show — the weather before its first fetch — simply
-does not appear. Weather comes from [Open-Meteo](https://open-meteo.com),
+captions (`BPM 72`, `PARTLY 12°`), as grey icons, or as icons in colour. The
+weather also comes wide: today's high and low in a small column beside it,
+`H 18` over `L 6`, from the same request. A module with nothing to show —
+the weather before its first fetch — simply does not appear, and a row too
+wide for the band drops its last module first. Weather comes from [Open-Meteo](https://open-meteo.com),
 which needs no key.
 
 When rain is due within the hour, the quiet face gives it the column beside
@@ -192,8 +194,10 @@ From the Pebble app.
 
 - **Transit** — automatic (default), countdown everywhere, or off. With it:
   how near the hub counts as at it, how near a stop must be for a flick to
-  count down to it, and a switch for the flick. **Flick
-  anywhere, with Transitous** is off unless you turn it on; see above.
+  count down to it, and a switch for the flick. **Double flick**, off by
+  default, counts a flick only when two come within a second and a half, for
+  fewer false starts from a swinging arm. **Flick anywhere, with
+  Transitous** is off unless you turn it on; see above.
 - **Headway** and **departure offset** — for the countdown: 30, 20 or 15
   minutes, and minutes past the hour.
 - **Boarding buzz** — one pulse at five minutes: at the transit centre
@@ -203,7 +207,8 @@ From the Pebble app.
 - **Accent** — any colour; the rail, the colon and the boarding block.
 - **Wrist** — left or right.
 - **Time format** — the system's, 12-hour or 24-hour.
-- **Modules** — three slots, and captions, icons or icons in colour.
+- **Modules** — three slots, one of them the wide weather if you like, and
+  captions, icons or icons in colour.
 - **Units** — °C or °F, metres or feet. Automatic, the default, goes by where you are: °F and feet in the United States, °C and metres elsewhere.
 
 ## Data

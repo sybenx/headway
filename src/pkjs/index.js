@@ -21,8 +21,13 @@ function settings() {
   }
 }
 
-function send(temp, code, rain) {
-  Pebble.sendAppMessage({ WOK: 1, TEMP: Math.round(temp), WCODE: code || 0, RAIN_AT: rain || 0 });
+// day: Open-Meteo's daily block, for today's high and low, sent only when
+// both are there.
+function send(temp, code, rain, day) {
+  var msg = { WOK: 1, TEMP: Math.round(temp), WCODE: code || 0, RAIN_AT: rain || 0 };
+  var hi = day && day.temperature_2m_max && day.temperature_2m_max[0], lo = day && day.temperature_2m_min && day.temperature_2m_min[0];
+  if (typeof hi === 'number' && typeof lo === 'number') { msg.WHI = Math.round(hi); msg.WLO = Math.round(lo); }
+  Pebble.sendAppMessage(msg);
 }
 
 // When rain is due to start, in epoch seconds, from the forecast's quarter
@@ -59,6 +64,7 @@ function weatherAt(pos, force) {
     '&longitude=' + pos.coords.longitude.toFixed(3) +
     '&current=temperature_2m,weather_code' +
     '&minutely_15=precipitation&forecast_minutely_15=8&timeformat=unixtime' +
+    '&daily=temperature_2m_max,temperature_2m_min&forecast_days=1&timezone=auto' +
     '&temperature_unit=' + unit;
   var req = new XMLHttpRequest();
   req.open('GET', url, true);
@@ -67,7 +73,7 @@ function weatherAt(pos, force) {
     try {
       var d = JSON.parse(req.responseText), cur = d.current;
       lastFetch = Date.now();
-      send(cur.temperature_2m, cur.weather_code, rainAt(d.minutely_15));
+      send(cur.temperature_2m, cur.weather_code, rainAt(d.minutely_15), d.daily);
     } catch (e) {}
   };
   req.send();

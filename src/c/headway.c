@@ -28,6 +28,7 @@
 #define MODULE_STEPS   2
 #define MODULE_BATTERY 3
 #define MODULE_WEATHER 4
+#define MODULE_WEATHER_WIDE 5   // the weather with today's high and low beside it
 #define MODULE_COUNT   3
 
 #define TRANSIT_OFF   0   // no system: a plain watch, nothing asked of the phone
@@ -54,6 +55,7 @@ typedef struct {
   uint16_t radius;     // metres around the hub that count as near
   bool flick;          // a flick asks for the nearest stop
   bool anywhere;       // and asks outside the systems the face knows (Transitous)
+  bool flick2;         // a flick counts only as the second of two close together
 } Settings;
 
 #define MOD_ICONS_OFF    0
@@ -66,7 +68,7 @@ typedef struct {
 
 #define ANY_READY 1   // Transitous on, for those who choose it
 #define SETTINGS_KEY 1
-#define SETTINGS_VERSION 6
+#define SETTINGS_VERSION 7
 #define WEATHER_KEY  2
 #define TRANSIT_KEY  3
 #define THRESHOLD 5   // minutes; block goes solid at or under this
@@ -77,7 +79,9 @@ typedef struct {
   bool valid;
   time_t at;
   int32_t rain_at;   // when rain is due to start, epoch seconds; 0 none due
+  int16_t hi, lo;    // today's high and low; WX_NOHL until the phone says
 } Weather;
+#define WX_NOHL INT16_MIN
 
 // What the phone last said about the hub: whether the wearer is there in
 // its hours, and the next departures of the routes on their own timetable,
@@ -255,7 +259,7 @@ static void settings_clamp(void) {
   if (s_set.night_end > 23) s_set.night_end = 7;
   s_set.accent &= 0xFFFFFF;
   for (int i = 0; i < MODULE_COUNT; i++) {
-    if (s_set.mod[i] > MODULE_WEATHER) s_set.mod[i] = MODULE_NONE;
+    if (s_set.mod[i] > MODULE_WEATHER_WIDE) s_set.mod[i] = MODULE_NONE;
   }
   if (s_set.transit > TRANSIT_AUTO) s_set.transit = TRANSIT_AUTO;
   if (s_set.buzz > BUZZ_ALWAYS) s_set.buzz = BUZZ_HUB;
@@ -278,7 +282,6 @@ static void settings_load(void) {
       // Layouts 4 and 5 are this one byte for byte; only the buzz's meaning
       // moved, and the byte that holds anywhere was padding, read as off.
       if (stored.version >= 4 && stored.version <= SETTINGS_VERSION) { s_set = stored; adopted = true; }
-      if (stored.version < 6) s_set.anywhere = false;
     } else if (n >= (int)offsetof(Settings, transit) && n < (int)sizeof(s_set)) {
       // An older layout: the same fields up to where new ones were appended.
       // Carry it over rather than hand the wearer the defaults again.
@@ -291,6 +294,8 @@ static void settings_load(void) {
     // Before layout 5 the buzz was a switch, off unless chosen. A chosen on
     // meant wherever the countdown ran; an unchosen off reads as the hub.
     if (adopted && stored.version < 5) s_set.buzz = stored.buzz ? BUZZ_ALWAYS : BUZZ_HUB;
+    // Before layout 6 the byte that holds anywhere was padding: off.
+    if (adopted && stored.version < 6) s_set.anywhere = false;
   }
   s_set.version = SETTINGS_VERSION;
   settings_clamp();
@@ -302,10 +307,10 @@ static void settings_save(void) {
 
 static void weather_load(void) {
   memset(&s_wx, 0, sizeof(s_wx));
-  if (persist_exists(WEATHER_KEY)
-      && persist_get_size(WEATHER_KEY) == (int)sizeof(s_wx)) {
-    persist_read_data(WEATHER_KEY, &s_wx, sizeof(s_wx));
-  }
+  s_wx.hi = s_wx.lo = WX_NOHL;
+  // A reading kept before the high and low were added is the same up to them.
+  const int n = persist_exists(WEATHER_KEY) ? persist_get_size(WEATHER_KEY) : 0;
+  if (n == (int)sizeof(s_wx) || n == (int)offsetof(Weather, hi)) persist_read_data(WEATHER_KEY, &s_wx, n);
   // A reading more than three hours old is worse than no reading.
   if (s_wx.valid && time(NULL) - s_wx.at > 3 * 60 * 60) s_wx.valid = false;
 }
@@ -383,6 +388,7 @@ static int transit_next(const uint16_t *list, int now_min) {
 #define ROW_GAP       2
 #define MOD_GAP       9
 #define MOD_LABEL_GAP 4
+#define MOD_HL_GAP    5   // the wide weather's value to its high and low
 #define MOD_ICON_GAP  4
 #define BLOCK_PAD_MIN 3
 #define BLOCK_ROW_GAP_P 3   // and under a peek
@@ -947,9 +953,21 @@ typedef struct {
   uint8_t kind;
   int extra;            // battery percent / weather code
   bool charging;        // a battery on the charger: a bolt beside the icon
+  bool wide;            // weather with today's high and low beside it
+  char hl[2][6];        // "H 18", "L 6"
 } Module;
 
 static bool module_read(uint8_t kind, Module *m) {
+  m->wide = false;
+  // The wide weather is the weather, with the day's high and low once known.
+  if (kind == MODULE_WEATHER_WIDE) {
+    kind = MODULE_WEATHER;
+    if (s_wx.hi != WX_NOHL) {
+      m->wide = true;
+      snprintf(m->hl[0], sizeof(m->hl[0]), "H %d", s_wx.hi);
+      snprintf(m->hl[1], sizeof(m->hl[1]), "L %d", s_wx.lo);
+    }
+  }
   m->kind = kind;
   m->extra = 0;
   switch (kind) {
@@ -1078,7 +1096,7 @@ static void module_draw_icon(GContext *ctx, const Module *m, GRect box) {
 // storage, then painted from it.
 static struct {
   Module m[MODULE_COUNT];
-  int n, widths[MODULE_COUNT], x0, y, label_h, lgap, gap, icon, total;
+  int n, widths[MODULE_COUNT], hl_dx[MODULE_COUNT], x0, y, label_h, lgap, gap, icon, total;
   Metrics m_cap, m_val;
   GFont f_val, f_cap;
 } s_md;
@@ -1148,6 +1166,12 @@ static void layout_modules(GFont f_val, GFont f_cap, int c_start, int avail_w,
       const int cw = run_w(s_md.m[i].caption, f_cap, false, TRACK);
       if (cw > w) w = cw;
     }
+    // The wide weather's high and low stand in a column after it.
+    if (s_md.m[i].wide) {
+      const int h0 = run_w(s_md.m[i].hl[0], f_cap, false, TRACK), h1 = run_w(s_md.m[i].hl[1], f_cap, false, TRACK);
+      s_md.hl_dx[i] = w + sc(MOD_HL_GAP);
+      w = s_md.hl_dx[i] + (h0 > h1 ? h0 : h1);
+    }
     s_md.widths[i] = w;
     total += w + (i ? s_md.gap : 0);
   }
@@ -1173,7 +1197,7 @@ static int modules_hang(void) __attribute__((noinline));
 static int modules_hang(void) {
   if (s_set.wrist_right || !s_md.n) return 0;
   const Module *m = &s_md.m[s_md.n - 1];
-  if (m->kind != MODULE_WEATHER || !module_uses_icon(m)) return 0;   // a caption (PARTLY) may be the wider
+  if (m->kind != MODULE_WEATHER || m->wide || !module_uses_icon(m)) return 0;   // a caption (PARTLY) may be the wider
   return measure("\u00B0", s_md.f_val).w;
 }
 
@@ -1193,6 +1217,12 @@ static void paint_modules(void) {
     }
     graphics_context_set_text_color(s_ctx, s_ink);
     draw_run(m->value, s_md.f_val, x, s_md.y + s_md.label_h + s_md.lgap - s_md.m_val.bearing, true, 0);
+    if (m->wide) {
+      // H on the caption line, L on the value's baseline.
+      graphics_context_set_text_color(s_ctx, s_dim);
+      draw_run(m->hl[0], s_md.f_cap, x + s_md.hl_dx[i], s_md.y + s_md.label_h - s_md.m_cap.cap - s_md.m_cap.bearing, false, TRACK);
+      draw_run(m->hl[1], s_md.f_cap, x + s_md.hl_dx[i], s_md.y + s_md.label_h + s_md.lgap + s_md.m_val.cap - s_md.m_cap.cap - s_md.m_cap.bearing, false, TRACK);
+    }
     x += s_md.widths[i] + s_md.gap;
   }
 }
@@ -2372,8 +2402,26 @@ static bool flick_asks(void) {
 // A flick of the wrist asks the phone for the nearest stop. The light comes
 // on with the gesture, and again when the answer lands, so the answer is
 // read in the same glance.
+// Double flick: a flick counts only as the second of two felt between
+// DOUBLE_MIN_MS and DOUBLE_MS apart, so a swing of the arm on its own does
+// nothing, not even the light. Closer than the minimum is one flick felt twice.
+#define DOUBLE_MIN_MS 200
+#define DOUBLE_MS 1500
+static struct { bool armed; uint32_t at; } s_tap;
+static bool tap_counts(void) {
+  if (!s_set.flick2) return true;
+  time_t sec; uint16_t ms;
+  time_ms(&sec, &ms);
+  const uint32_t now = (uint32_t)sec * 1000u + ms, gap = now - s_tap.at;
+  if (!s_tap.armed || gap > DOUBLE_MS) { s_tap.armed = true; s_tap.at = now; return false; }
+  if (gap < DOUBLE_MIN_MS) return false;
+  s_tap.armed = false;
+  return true;
+}
+
 static void tap_handler(AccelAxisType axis, int32_t direction) {
   (void)axis; (void)direction;
+  if (!tap_counts()) return;
   // Every flick is heard: the light, and the seconds, at once. One made
   // while the phone is still answering an earlier flick (a stray one from
   // the arm swinging, say) lights the face again and waits on that answer.
@@ -2607,6 +2655,9 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
   if ((tp = dict_find(iter, MESSAGE_KEY_TRANSIT))) {
     s_set.transit = (uint8_t)tuple_int(tp);
   }
+  if ((tp = dict_find(iter, MESSAGE_KEY_FLICK2))) {
+    s_set.flick2 = tp->value->int32 != 0;
+  }
   if ((tp = dict_find(iter, MESSAGE_KEY_FLICK_ON))) {
     s_set.flick = tp->value->int32 != 0;
   }
@@ -2627,6 +2678,9 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
       Tuple *tr = dict_find(iter, MESSAGE_KEY_RAIN_AT);
       s_wx.rain_at = tr ? tr->value->int32 : 0;
 #endif
+      Tuple *th = dict_find(iter, MESSAGE_KEY_WHI), *tl = dict_find(iter, MESSAGE_KEY_WLO);
+      s_wx.hi = th && tl ? (int16_t)th->value->int32 : WX_NOHL;
+      s_wx.lo = th && tl ? (int16_t)tl->value->int32 : WX_NOHL;
       s_wx.valid = true;
       s_wx.at = time(NULL);
       persist_write_data(WEATHER_KEY, &s_wx, sizeof(s_wx));

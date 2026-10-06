@@ -136,6 +136,10 @@
           {
             "label": "Weather",
             "value": "4"
+          },
+          {
+            "label": "Weather, wide: with today's high and low",
+            "value": "5"
           }
         ]
       },
@@ -164,6 +168,10 @@
           {
             "label": "Weather",
             "value": "4"
+          },
+          {
+            "label": "Weather, wide: with today's high and low",
+            "value": "5"
           }
         ]
       },
@@ -192,6 +200,10 @@
           {
             "label": "Weather",
             "value": "4"
+          },
+          {
+            "label": "Weather, wide: with today's high and low",
+            "value": "5"
           }
         ]
       },
@@ -297,6 +309,13 @@
         "label": "Flick for the nearest stop",
         "defaultValue": true,
         "description": "A flick of the wrist starts a countdown to the next bus from the nearest stop: its route over the big minutes, the stop beside the modules. It moves on to the next bus as each goes, and ends when you leave the stop or the day's buses are done. A second flick within a few seconds steps to the stop's next route. Off, a flick still shows the seconds."
+      },
+      {
+        "type": "toggle",
+        "messageKey": "FLICK2",
+        "label": "Double flick",
+        "defaultValue": false,
+        "description": "A flick counts only when two come within a second and a half of each other, so a swing of the arm doesn't light the face, show the seconds or ask for a stop. Off, one flick does. With this on, stepping to a stop's next route takes a double flick too."
       },
       {
         "type": "toggle",

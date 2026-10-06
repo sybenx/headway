@@ -30,6 +30,13 @@ from transitous.org/sources and OpenStreetMap.
 The weather service gets your location rounded to about 100 m; otherwise
 it stays on your phone. No accounts. Round watches aren't supported.
 
+## Release notes (1.28.0)
+
+Two new settings. Double flick, off by default, counts a flick only when two
+come within a second and a half, so a swinging arm doesn't light the face or
+start a countdown. And the weather comes wide: today's high and low in a
+small column beside it, H 18 over L 6.
+
 ## Release notes (1.27.0)
 
 The yard answers the question it was for: when to close the gates. After
