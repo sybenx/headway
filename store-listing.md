@@ -30,6 +30,12 @@ from transitous.org/sources and OpenStreetMap.
 The weather service gets your location rounded to about 100 m; otherwise
 it stays on your phone. No accounts. Round watches aren't supported.
 
+## Release notes (1.29.0)
+
+New weather skies, drawn at each size the face uses rather than stretched,
+with the cloud staying grey under rain and snow. And a third way to show the
+weather: large, a big sky and a big temperature.
+
 ## Release notes (1.28.0)
 
 Two new settings. Double flick, off by default, counts a flick only when two
