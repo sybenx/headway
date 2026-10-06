@@ -138,12 +138,12 @@
             "value": "4"
           },
           {
-            "label": "Weather, wide: with today's high and low",
-            "value": "5"
+            "label": "Weather, large",
+            "value": "6"
           },
           {
-            "label": "Weather, large: big icon and temperature",
-            "value": "6"
+            "label": "High and low today",
+            "value": "7"
           }
         ]
       },
@@ -174,12 +174,12 @@
             "value": "4"
           },
           {
-            "label": "Weather, wide: with today's high and low",
-            "value": "5"
+            "label": "Weather, large",
+            "value": "6"
           },
           {
-            "label": "Weather, large: big icon and temperature",
-            "value": "6"
+            "label": "High and low today",
+            "value": "7"
           }
         ]
       },
@@ -210,12 +210,12 @@
             "value": "4"
           },
           {
-            "label": "Weather, wide: with today's high and low",
-            "value": "5"
+            "label": "Weather, large",
+            "value": "6"
           },
           {
-            "label": "Weather, large: big icon and temperature",
-            "value": "6"
+            "label": "High and low today",
+            "value": "7"
           }
         ]
       },

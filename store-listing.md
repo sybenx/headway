@@ -30,6 +30,14 @@ from transitous.org/sources and OpenStreetMap.
 The weather service gets your location rounded to about 100 m; otherwise
 it stays on your phone. No accounts. Round watches aren't supported.
 
+## Release notes (1.30.0)
+
+Today's high and low is now a module of its own, for any slot, in place of
+the wide weather; a slot set to the wide weather shows the weather. The large
+weather has a small F or C under its degree. And the weather is fetched for
+the large weather or the high and low alone: before, only the plain weather
+asked for it.
+
 ## Release notes (1.29.0)
 
 New weather skies, drawn at each size the face uses rather than stretched,

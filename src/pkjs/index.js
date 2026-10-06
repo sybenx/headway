@@ -49,7 +49,8 @@ function rainAt(m) {
 // Only when a slot is actually showing weather.
 function weatherWanted() {
   var s = settings();
-  return s.MOD1 === undefined || [s.MOD1, s.MOD2, s.MOD3].some(function (m) { return String(m) === '4'; });
+  // The weather in any form: plain, 1.28's wide, large, or the high and low.
+  return s.MOD1 === undefined || [s.MOD1, s.MOD2, s.MOD3].some(function (m) { return ['4', '5', '6', '7'].indexOf(String(m)) >= 0; });
 }
 
 // The weather for a fix already taken: the phone looks once for weather and

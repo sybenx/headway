@@ -28,8 +28,9 @@
 #define MODULE_STEPS   2
 #define MODULE_BATTERY 3
 #define MODULE_WEATHER 4
-#define MODULE_WEATHER_WIDE 5   // the weather with today's high and low beside it
+#define MODULE_WEATHER_WIDE 5   // 1.28's weather with its high and low; reads as the weather
 #define MODULE_WEATHER_BIG  6   // the weather as a large icon and a large temperature
+#define MODULE_HILO         7   // today's high and low, H over L
 #define MODULE_COUNT   3
 
 #define TRANSIT_OFF   0   // no system: a plain watch, nothing asked of the phone
@@ -260,7 +261,9 @@ static void settings_clamp(void) {
   if (s_set.night_end > 23) s_set.night_end = 7;
   s_set.accent &= 0xFFFFFF;
   for (int i = 0; i < MODULE_COUNT; i++) {
-    if (s_set.mod[i] > MODULE_WEATHER_BIG) s_set.mod[i] = MODULE_NONE;
+    if (s_set.mod[i] > MODULE_HILO) s_set.mod[i] = MODULE_NONE;
+    // The wide weather is now the weather, its high and low a module of their own.
+    if (s_set.mod[i] == MODULE_WEATHER_WIDE) s_set.mod[i] = MODULE_WEATHER;
   }
   if (s_set.transit > TRANSIT_AUTO) s_set.transit = TRANSIT_AUTO;
   if (s_set.buzz > BUZZ_ALWAYS) s_set.buzz = BUZZ_HUB;
@@ -389,7 +392,6 @@ static int transit_next(const uint16_t *list, int now_min) {
 #define ROW_GAP       2
 #define MOD_GAP       9
 #define MOD_LABEL_GAP 4
-#define MOD_HL_GAP    5   // the wide weather's value to its high and low
 #define MOD_BIG_GAP   4   // the large weather's icon to its figures
 #define MOD_ICON_GAP  4
 #define BLOCK_PAD_MIN 3
@@ -1170,23 +1172,21 @@ typedef struct {
   uint8_t kind;
   int extra;            // battery percent / weather code
   bool charging;        // a battery on the charger: a bolt beside the icon
-  bool wide;            // weather with today's high and low beside it
   bool big;             // weather as a large icon and temperature, no caption
-  char hl[2][6];        // "H 18", "L 6"
+  char hl[2][6];        // the high and low module's "H 18", "L 6"
 } Module;
 
 static bool module_read(uint8_t kind, Module *m) {
-  m->wide = false;
   m->big = kind == MODULE_WEATHER_BIG;
-  if (m->big) kind = MODULE_WEATHER;
-  // The wide weather is the weather, with the day's high and low once known.
-  if (kind == MODULE_WEATHER_WIDE) {
-    kind = MODULE_WEATHER;
-    if (s_wx.hi != WX_NOHL) {
-      m->wide = true;
-      snprintf(m->hl[0], sizeof(m->hl[0]), "H %d", s_wx.hi);
-      snprintf(m->hl[1], sizeof(m->hl[1]), "L %d", s_wx.lo);
-    }
+  if (m->big || kind == MODULE_WEATHER_WIDE) kind = MODULE_WEATHER;
+  // Today's high and low, once the phone has said: H over L, no caption.
+  if (kind == MODULE_HILO) {
+    if (!s_wx.valid || s_wx.hi == WX_NOHL) return false;
+    m->kind = kind;
+    m->value[0] = 0;
+    snprintf(m->hl[0], sizeof(m->hl[0]), "H %d", s_wx.hi);
+    snprintf(m->hl[1], sizeof(m->hl[1]), "L %d", s_wx.lo);
+    return true;
   }
   m->kind = kind;
   m->extra = 0;
@@ -1316,10 +1316,10 @@ static void module_draw_icon(GContext *ctx, const Module *m, GRect box) {
 // storage, then painted from it.
 static struct {
   Module m[MODULE_COUNT];
-  int n, widths[MODULE_COUNT], hl_dx[MODULE_COUNT], x0, y, label_h, lgap, gap, icon, total;
+  int n, widths[MODULE_COUNT], x0, y, label_h, lgap, gap, icon, total;
   Metrics m_cap, m_val, m_big;
   GFont f_val, f_cap;
-  int big_s, big_ring, big_nw;   // the large weather's icon square, degree ring and figures' width
+  int big_s, big_ring, big_nw, big_uw, big_cw;   // the large weather's icon square, degree ring, figures', unit's and ring column's widths
 } s_md;
 
 static void layout_modules(GFont f_val, GFont f_cap, int c_start, int avail_w,
@@ -1388,10 +1388,19 @@ static void layout_modules(GFont f_val, GFont f_cap, int c_start, int avail_w,
   for (int i = 0; i < s_md.n; i++) {
     if (s_md.m[i].big) {
       s_md.big_nw = run_w(s_md.m[i].value, s_f_count_s, true, 0);
-      const int w = s_md.big_s + sc(MOD_BIG_GAP) + s_md.big_nw + sc(2) + s_md.big_ring;
+      // Under the ring, small, the unit: F or C.
+      s_md.big_uw = run_w(s_set.imperial ? "F" : "C", f_cap, false, 0);
+      s_md.big_cw = s_md.big_ring > s_md.big_uw ? s_md.big_ring : s_md.big_uw;
+      const int w = s_md.big_s + sc(MOD_BIG_GAP) + s_md.big_nw + sc(2) + s_md.big_cw;
       s_md.widths[i] = w;
       total += w + (i ? s_md.gap : 0);
       tallest = s_md.m_big.cap;
+      continue;
+    }
+    if (s_md.m[i].kind == MODULE_HILO) {
+      const int h0 = run_w(s_md.m[i].hl[0], f_cap, false, TRACK), h1 = run_w(s_md.m[i].hl[1], f_cap, false, TRACK);
+      s_md.widths[i] = h0 > h1 ? h0 : h1;
+      total += s_md.widths[i] + (i ? s_md.gap : 0);
       continue;
     }
     int w = run_w(s_md.m[i].value, f_val, true, 0);
@@ -1401,12 +1410,6 @@ static void layout_modules(GFont f_val, GFont f_cap, int c_start, int avail_w,
     } else {
       const int cw = run_w(s_md.m[i].caption, f_cap, false, TRACK);
       if (cw > w) w = cw;
-    }
-    // The wide weather's high and low stand in a column after it.
-    if (s_md.m[i].wide) {
-      const int h0 = run_w(s_md.m[i].hl[0], f_cap, false, TRACK), h1 = run_w(s_md.m[i].hl[1], f_cap, false, TRACK);
-      s_md.hl_dx[i] = w + sc(MOD_HL_GAP);
-      w = s_md.hl_dx[i] + (h0 > h1 ? h0 : h1);
     }
     s_md.widths[i] = w;
     total += w + (i ? s_md.gap : 0);
@@ -1433,7 +1436,7 @@ static int modules_hang(void) __attribute__((noinline));
 static int modules_hang(void) {
   if (s_set.wrist_right || !s_md.n) return 0;
   const Module *m = &s_md.m[s_md.n - 1];
-  if (m->kind != MODULE_WEATHER || m->wide || m->big || !module_uses_icon(m)) return 0;   // a caption (PARTLY) may be the wider
+  if (m->kind != MODULE_WEATHER || m->big || !module_uses_icon(m)) return 0;   // a caption (PARTLY) may be the wider
   return measure("\u00B0", s_md.f_val).w;
 }
 
@@ -1443,6 +1446,14 @@ static void paint_modules(void) {
   const int base = s_md.y + s_md.label_h + s_md.lgap + s_md.m_val.cap;   // the values' baseline
   for (int i = 0; i < s_md.n; i++) {
     const Module *m = &s_md.m[i];
+    if (m->kind == MODULE_HILO) {
+      // H on the caption line, L on the values' baseline.
+      graphics_context_set_text_color(s_ctx, s_dim);
+      draw_run(m->hl[0], s_md.f_cap, x, s_md.y + s_md.label_h - s_md.m_cap.cap - s_md.m_cap.bearing, false, TRACK);
+      draw_run(m->hl[1], s_md.f_cap, x, base - s_md.m_cap.cap - s_md.m_cap.bearing, false, TRACK);
+      x += s_md.widths[i] + s_md.gap;
+      continue;
+    }
     if (m->big) {
       // Icon, figures and ring all stand on the values' baseline.
       const int S = s_md.big_s, tx = x + S + sc(MOD_BIG_GAP), nw = s_md.big_nw;
@@ -1451,13 +1462,17 @@ static void paint_modules(void) {
       module_draw_icon(s_ctx, m, GRect(mapx(x, S), base - S, S, S));
       // The ring follows the figures on screen whichever wrist: mirrored, the
       // figures move left by its width so it fits between them and the icon.
-      const int d = s_md.big_ring, sx = mapx(tx, nw) - (s_set.wrist_right ? sc(2) + d : 0), rx = sx + nw + sc(2);
+      const int d = s_md.big_ring, cw = s_md.big_cw, sx = mapx(tx, nw) - (s_set.wrist_right ? sc(2) + cw : 0);
+      const int cx = sx + nw + sc(2), rx = cx + (cw - d) / 2;
       graphics_context_set_text_color(s_ctx, s_ink);
       draw_run_s(m->value, s_f_count_s, sx, base - s_md.m_big.cap - s_md.m_big.bearing, true, 0);
       graphics_context_set_stroke_color(s_ctx, s_ink);
       graphics_context_set_stroke_width(s_ctx, d >= 6 ? 2 : 1);
       graphics_draw_circle(s_ctx, GPoint(rx + d / 2, base - s_md.m_big.cap + d / 2), d / 2);
       graphics_context_set_stroke_width(s_ctx, 1);
+      graphics_context_set_text_color(s_ctx, s_dim);
+      draw_run_s(s_set.imperial ? "F" : "C", s_md.f_cap, cx + (cw - s_md.big_uw) / 2,
+                 base - s_md.m_big.cap + d + sc(3) - s_md.m_cap.bearing, false, 0);
       x += s_md.widths[i] + s_md.gap;
       continue;
     }
@@ -1472,12 +1487,6 @@ static void paint_modules(void) {
     }
     graphics_context_set_text_color(s_ctx, s_ink);
     draw_run(m->value, s_md.f_val, x, s_md.y + s_md.label_h + s_md.lgap - s_md.m_val.bearing, true, 0);
-    if (m->wide) {
-      // H on the caption line, L on the value's baseline.
-      graphics_context_set_text_color(s_ctx, s_dim);
-      draw_run(m->hl[0], s_md.f_cap, x + s_md.hl_dx[i], s_md.y + s_md.label_h - s_md.m_cap.cap - s_md.m_cap.bearing, false, TRACK);
-      draw_run(m->hl[1], s_md.f_cap, x + s_md.hl_dx[i], s_md.y + s_md.label_h + s_md.lgap + s_md.m_val.cap - s_md.m_cap.cap - s_md.m_cap.bearing, false, TRACK);
-    }
     x += s_md.widths[i] + s_md.gap;
   }
 }

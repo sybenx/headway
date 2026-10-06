@@ -37,9 +37,9 @@ by day; the night window is yours to set.
 
 Three module slots take heart rate, steps, battery, weather or nothing, as
 captions (`BPM 72`, `PARTLY 12°`), as grey icons, or as icons in colour. The
-weather also comes wide, today's high and low in a small column beside it,
-`H 18` over `L 6`, from the same request; or large, a big sky and a big
-temperature with no caption. The skies are drawn at each size the face uses
+weather also comes large, a big sky and a big temperature with a small F or
+C under the degree, and today's high and low is a module of its own, `H 18`
+over `L 6`, from the same request, for any slot. The skies are drawn at each size the face uses
 them, 10 and 21 pixels on the 144 px watches and 14 and 29 on emery, from one
 cloud and one sun, rather than one small grid stretched; under rain or snow
 the cloud stays grey and only what falls takes the colour. A module with nothing to show —
@@ -211,8 +211,9 @@ From the Pebble app.
 - **Accent** — any colour; the rail, the colon and the boarding block.
 - **Wrist** — left or right.
 - **Time format** — the system's, 12-hour or 24-hour.
-- **Modules** — three slots, the weather plain, wide or large, and captions,
-  icons or icons in colour.
+- **Modules** — three slots, each heart rate, steps, battery, the weather,
+  the weather large, today's high and low, or nothing; and captions, icons or
+  icons in colour.
 - **Units** — °C or °F, metres or feet. Automatic, the default, goes by where you are: °F and feet in the United States, °C and metres elsewhere.
 
 ## Data
