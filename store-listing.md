@@ -30,6 +30,14 @@ from transitous.org/sources and OpenStreetMap.
 The weather service gets your location rounded to about 100 m; otherwise
 it stays on your phone. No accounts. Round watches aren't supported.
 
+## Release notes (1.32.1)
+
+A flick is felt as a tap and its snap-back; the two now count as one, so one
+flick no longer reads as a double, and a flick after an answer no longer
+steps the countdown when it meant to look again. The battery shows itself
+only on the charger or at 10% or less, on every watch; when heart rate has
+no reading its slot shows steps rather than the battery.
+
 ## Release notes (1.32.0)
 
 The stop countdown redrawn: the stop's name sits over the route's tab on the

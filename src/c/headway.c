@@ -74,6 +74,7 @@ typedef struct {
 #define WEATHER_KEY  2
 #define TRANSIT_KEY  3
 #define THRESHOLD 5   // minutes; block goes solid at or under this
+#define BATT_LOW 10   // percent; at or under this the battery shows itself
 
 typedef struct {
   int16_t temp;
@@ -1328,13 +1329,13 @@ static void layout_modules(GFont f_val, GFont f_cap, int c_start, int avail_w,
 static void layout_modules(GFont f_val, GFont f_cap, int c_start, int avail_w,
                            int band_top, int band_bot) {
   s_md.n = 0;
-  // On the charger the battery is what's worth a glance. It takes the slot
-  // of something that can't change there — heart rate, which reads nothing
-  // off the wrist, then steps, then an empty slot — unless a slot already
-  // shows it. Weather keeps its place. Unplugged, the slot is the wearer's.
+  // The battery shows itself only when it's worth a glance: on the charger,
+  // or at BATT_LOW percent or less, the same on every watch. It takes the
+  // slot of heart rate, then steps, then an empty slot, unless a slot already
+  // shows it. Weather keeps its place. Otherwise the slot is the wearer's.
   int charger = -1;
   const BatteryChargeState bs = battery_state_service_peek();
-  if (bs.is_plugged || bs.is_charging) {
+  if (bs.is_plugged || bs.is_charging || bs.charge_percent <= BATT_LOW) {
     static const uint8_t give[] = { MODULE_HR, MODULE_STEPS, MODULE_NONE };
     bool shown = false;
     for (int j = 0; j < MODULE_COUNT; j++) if (s_set.mod[j] == MODULE_BATTERY) shown = true;
@@ -1349,15 +1350,13 @@ static void layout_modules(GFont f_val, GFont f_cap, int c_start, int avail_w,
       s_md.n++;
       continue;
     }
-    // No heart-rate sensor, or no reading yet: the slot shows the battery,
-    // or steps if the battery already has a slot of its own.
+    // No heart-rate sensor, or no reading yet: the slot shows steps, unless
+    // they have a slot of their own. Never the battery at whatever charge
+    // it has: a battery that appears reads as a warning, and is one only low.
     if (kind != MODULE_HR) continue;
-    kind = MODULE_BATTERY;
-    for (int j = 0; j < MODULE_COUNT; j++) if (s_set.mod[j] == MODULE_BATTERY) kind = MODULE_STEPS;
-    if (module_read(kind, &s_md.m[s_md.n])) {
-      s_md.m[s_md.n].charging = kind == MODULE_BATTERY && (bs.is_plugged || bs.is_charging);
-      s_md.n++;
-    }
+    bool steps = false;
+    for (int j = 0; j < MODULE_COUNT; j++) if (s_set.mod[j] == MODULE_STEPS) steps = true;
+    if (!steps && module_read(MODULE_STEPS, &s_md.m[s_md.n])) s_md.n++;
   }
   if (s_md.n == 0) return;
 
@@ -2738,21 +2737,29 @@ static bool flick_asks(void) {
 // A flick of the wrist asks the phone for the nearest stop. The light comes
 // on with the gesture, and again when the answer lands, so the answer is
 // read in the same glance.
-// Double flick: a flick counts only as the second of two felt between
-// DOUBLE_MIN_MS and DOUBLE_MS apart, so a swing of the arm on its own does
-// nothing, not even the light. Closer than the minimum is one flick felt twice.
-#define DOUBLE_MIN_MS 200
+// A flick of the wrist is felt as a burst of taps: out, and the snap back a
+// few hundred milliseconds later. Taps within TAP_SAME_MS of the last one are
+// that same flick and count for nothing, so one flick never reads as two.
+// With double flick on, a flick counts only as the second of two separate
+// flicks, the second starting within DOUBLE_MS of the first: a swing of the
+// arm on its own does nothing, not even the light.
+#define TAP_SAME_MS 300
 #define DOUBLE_MS 1500
-static struct { bool armed; uint32_t at; } s_tap;
+typedef struct { uint32_t last, first; bool armed; } TapState;
+static TapState s_tap;
+static bool tap_decide(TapState *t, uint32_t now, bool twice) {
+  const bool same = t->last && now - t->last < TAP_SAME_MS;
+  t->last = now;
+  if (same) return false;
+  if (!twice) return true;
+  if (t->armed && now - t->first <= DOUBLE_MS) { t->armed = false; return true; }
+  t->armed = true; t->first = now;
+  return false;
+}
 static bool tap_counts(void) {
-  if (!s_set.flick2) return true;
   time_t sec; uint16_t ms;
   time_ms(&sec, &ms);
-  const uint32_t now = (uint32_t)sec * 1000u + ms, gap = now - s_tap.at;
-  if (!s_tap.armed || gap > DOUBLE_MS) { s_tap.armed = true; s_tap.at = now; return false; }
-  if (gap < DOUBLE_MIN_MS) return false;
-  s_tap.armed = false;
-  return true;
+  return tap_decide(&s_tap, (uint32_t)sec * 1000u + ms, s_set.flick2);
 }
 
 static void tap_handler(AccelAxisType axis, int32_t direction) {

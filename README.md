@@ -27,8 +27,9 @@ mirrors.
 
 The time, two modules and the date. The modules are heart rate and the
 weather, drawn as icons in colour: the heart red, the sun yellow by night and
-orange by day, rain blue, clouds grey. A watch without a heart-rate sensor
-shows its battery in that slot. The theme is dark through the night and light
+orange by day, rain blue, clouds grey. A watch without a heart-rate sensor, or
+with no reading yet, shows steps in that slot. The battery shows itself only
+on the charger or at 10% or less. The theme is dark through the night and light
 by day; the night window is yours to set.
 
 | dark | light | captions instead |
