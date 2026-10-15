@@ -18,10 +18,10 @@ A sleeve-aware transit watch: the time, heart rate, weather and date hang
 from the outer edge, the part a cuff uncovers first. Rain due within the
 hour shows on the face.
 
-Near Connect (Logan, Utah) or UTA (Ogden to Provo), flick your wrist and
-the face counts down to the next bus from your stop, live where there are
-live times, until it has gone and on to the next. Flick again for the
-stop's next route.
+Near Connect (Logan, Utah) or UTA (Ogden to Provo), flick your wrist for a
+glance at the next bus from your stop, live where there are live times;
+flick again while it's up for the stop's next route. Double flick to pin it:
+it stays, on to the next bus as each goes, until a flick lets it go.
 
 Optional: turn on Transitous (transitous.org) for the same countdown
 anywhere else. Off by default; it sends your location, rounded to about 100 m. Data
@@ -29,6 +29,15 @@ from transitous.org/sources and OpenStreetMap.
 
 The weather service gets your location rounded to about 100 m; otherwise
 it stays on your phone. No accounts. Round watches aren't supported.
+
+## Release notes (1.34.0)
+
+A flick is a glance now: the stop's countdown for a few seconds, a hairline
+draining down the edge, then the face again, where it used to stay for hours
+after the stop was left behind. A double flick pins it, the rail down the
+edge capped at its top, and it stays as before, on to the next bus as each
+goes; a flick lets it go. A flick while a glance is up still steps to the
+stop's next route. The Double flick setting is gone: the double flick pins.
 
 ## Release notes (1.33.0)
 

@@ -10,7 +10,10 @@
 // offsets, so it holds on emery's 200x228 too.
 
 #include <pebble.h>
-#include <ctype.h>
+// Digits and capitals by hand: ctype's isdigit and toupper brought its 257-byte table, a sixth of the Classic's
+// free heap, for the ten digits and the month and day names strftime writes in English.
+#define IS_DIGIT(c) ((unsigned)((c) - '0') < 10u)
+#define UPPER(c) ((c) >= 'a' && (c) <= 'z' ? (c) - ('a' - 'A') : (c))
 #include <stddef.h>
 
 // ---------------------------------------------------------------- settings
@@ -57,7 +60,7 @@ typedef struct {
   uint16_t radius;     // metres around the hub that count as near
   bool flick;          // a flick asks for the nearest stop
   bool anywhere;       // and asks outside the systems the face knows (Transitous)
-  bool flick2;         // a flick counts only as the second of two close together
+  bool flick2;         // retired in 1.34.0 (a double flick pins now); kept, unread, so the layout stands
 } Settings;
 
 #define MOD_ICONS_OFF    0
@@ -164,11 +167,15 @@ static int yard_out(void) {
 // ---- the countdown at any stop. A flick's answer is the stop and its next
 // departures, soonest first, the nearest stop's before any the fix's
 // accuracy adds. The face counts down to the first not yet gone, the route's
-// badge over the block and the stop's name beside the modules, and moves on
-// to the next as each goes: until the list runs out, a flick elsewhere
-// answers, or the phone's half-hourly look finds the wearer gone from the
-// stop. A second flick, while the answer is lit, steps to the next route.
-// Kept, so a trip to the watch's menus doesn't lose it.
+// badge over the block and the stop's name beside the modules.
+// A flick is a glance: the countdown for as long as its answer is lit, the
+// edge a hairline draining with it, then the plain face again. A double flick
+// pins it: the rail down the edge, capped, and it stays, moving on to the next
+// bus as each goes, until the list runs out, the phone's half-hourly look
+// finds the wearer gone from the stop, or a flick lets it go. A flick while a
+// glance is up steps to the stop's next route. Pinned, it's kept, so a trip to
+// the watch's menus doesn't lose it. (A plain flick kept the countdown for
+// hours, its stop long behind the wearer, the face never itself again.)
 #define CD_MAX 7
 #define CD_CLOCK_MIN 60   // past this many minutes the block reads the clock time
 #define STOPCD_KEY 5
@@ -176,12 +183,14 @@ typedef struct { int32_t at; uint32_t col; char route[8]; char head[10]; bool li
 static struct {
   uint8_t n;
   bool live_sys;       // the system has live times: the phone is asked again near the end
+  bool pinned;         // a double flick's: it stays; else a glance, gone with its answer
   int16_t dist;        // metres to the stop, 0 at it
   char stop[24];
   char pick[8];        // a route stepped to by a second flick, or none
   CdDep d[CD_MAX];
 } s_cd;
 static bool s_cd_shown;   // the face is counting to one this frame
+static bool s_glance;     // and not pinned: a flick's look, gone with its answer
 static int8_t s_cd_cur;   // which
 // The departure the face counts to: the first not yet gone, a minute's grace
 // after its time; or, stepped to a route, that route's first. -1 for none.
@@ -514,7 +523,7 @@ static int run_w(const char *t, GFont f, bool tabular, int track) {
   int w = 0;
   for (const char *p = t; *p;) {
     p += glyph_at(p, s_glyph);
-    w += ((tabular && isdigit((int)s_glyph[0])) ? cell : measure(s_glyph, f).w) + (*p ? track : 0);
+    w += ((tabular && IS_DIGIT((int)s_glyph[0])) ? cell : measure(s_glyph, f).w) + (*p ? track : 0);
   }
   return w;
 }
@@ -535,7 +544,7 @@ static void run_draw(void) {
     s_tx.t = s_glyph; s_tx.f = s_run.f; s_tx.mode = GTextOverflowModeWordWrap;
     s_tx.r = GRect(s_run.x, s_run.y, 2 * z.w + 4, z.h);
     tx_draw();
-    s_run.x += ((s_run.tab && isdigit((int)s_glyph[0])) ? cell : z.w) + s_run.track;
+    s_run.x += ((s_run.tab && IS_DIGIT((int)s_glyph[0])) ? cell : z.w) + s_run.track;
   }
 }
 static inline __attribute__((always_inline))
@@ -1149,6 +1158,8 @@ static void draw_rail(GContext *ctx, const Schedule *sch, int16_t h) {
   graphics_context_set_fill_color(ctx, s_ink);
   graphics_fill_rect(ctx, GRect(x0, h / 2, rail_w, sc(RAIL_BORDER)), 0, GCornerNone);
   draw_soft_tick(ctx, x0, x1, (h * 3) / 4);
+  // A stop's countdown pinned (a glance has the hairline, not the rail): the rail capped, a pin's head at its top.
+  if (AT_STOP()) graphics_fill_rect(ctx, GRect(rx < bx ? rx : bx, 0, rail_w + border, sc(6)), 0, GCornerNone);
 }
 
 // Away from the hub the rail is only a hairline, and only through a flick.
@@ -1693,8 +1704,8 @@ static void layout_idle(const struct tm *t, const Frame *fr) {
   // normal face's 22 SEP puts it on the wrist edge it hangs from.
   strftime(s_id.dow, sizeof(s_id.dow), "%a", t);
   strftime(s_id.date, sizeof(s_id.date), "%b %d", t);
-  for (char *p = s_id.dow; *p; p++) *p = toupper((int)*p);
-  for (char *p = s_id.date; *p; p++) *p = toupper((int)*p);
+  for (char *p = s_id.dow; *p; p++) *p = UPPER(*p);
+  for (char *p = s_id.date; *p; p++) *p = UPPER(*p);
   s_id.m = barlow_metrics(measure("22 SEP", s_f_bigdate).h);
   s_id.date_y = fr->bot - sc(DATE_PAD_BOT) - s_id.m.cap;
   s_id.dow_y = s_id.date_y - sc(IDLE_DOW_GAP) - s_id.m.cap;
@@ -1865,7 +1876,7 @@ static void layout_wave(const Frame *fr, int band_top) {
   char tb[8];
   int W = 0;
   for (int i = 0; i < s_sv.n; i++) {
-    if (!isdigit((int)s_wave[i].when[0])) continue;
+    if (!IS_DIGIT((int)s_wave[i].when[0])) continue;
     sv_clock(tb, sizeof(tb), s_wave[i].when);
     const int w = run_w(tb, sv_font(tb), false, 0);
     if (w > W) W = w;
@@ -1875,7 +1886,7 @@ static void layout_wave(const Frame *fr, int band_top) {
   for (int i = 0; i < s_sv.n && s_wl.n < rows; i++) {
     const WaveLine *w = &s_wave[i];
     // A line with no time has the time's column too.
-    const bool timed = isdigit((int)w->when[0]);
+    const bool timed = IS_DIGIT((int)w->when[0]);
     const int bend = timed ? s_wl.t_x - sc(SV_BADGE_GAP) : fr->end, room = bend - fr->start;
     for (int j = 0; j < w->n && s_wl.n < rows;) {
       const int k = s_wl.n;
@@ -2207,8 +2218,8 @@ static void layout_block(const struct tm *t, const Schedule *sch, const Frame *f
 static void layout_block(const struct tm *t, const Schedule *sch, const Frame *fr, GFont f_num, int row_gap, bool date) {
   strftime(s_bk.dow, sizeof(s_bk.dow), "%a", t);
   strftime(s_bk.date, sizeof(s_bk.date), "%d %b", t);
-  for (char *p = s_bk.dow; *p; p++) *p = toupper((int)*p);
-  for (char *p = s_bk.date; *p; p++) *p = toupper((int)*p);
+  for (char *p = s_bk.dow; *p; p++) *p = UPPER(*p);
+  for (char *p = s_bk.date; *p; p++) *p = UPPER(*p);
 
   s_bk.now = sch->is_now;
   s_bk.solid = sch->is_now || sch->is_boarding;
@@ -2482,6 +2493,7 @@ static void face_update(Layer *layer, GContext *ctx) {
 #ifdef HAS_STOPCD
   s_cd_cur = (int8_t)cd_current(now);
   s_cd_shown = !at_hub && !yard && s_cd_cur >= 0;
+  s_glance = s_cd_shown && !s_cd.pinned;
 #endif
   idle = !at_hub && !AT_STOP() && s_set.transit != TRANSIT_CHIPS && !yard;
   s_quiet_face = idle || yard;
@@ -2490,7 +2502,9 @@ static void face_update(Layer *layer, GContext *ctx) {
   graphics_context_set_fill_color(ctx, s_ground);
   graphics_fill_rect(ctx, full, 0, GCornerNone);
 
-  if (s_quiet_face) draw_hairline(ctx, b.size.h);
+  // A glance's edge is the flick's hairline, draining as its answer goes; a pinned countdown's the rail, capped at
+  // its top as a pin's head: the one going, the other staying, told at the edge a sleeve uncovers first.
+  if (s_quiet_face || s_glance) draw_hairline(ctx, b.size.h);
   else draw_rail(ctx, &sch, b.size.h);
 
   fr.start = sc(PAD_WRIST);                                       // logical left
@@ -2689,7 +2703,7 @@ static void drain_tick(void *data) {
   (void)data;
   s_sv.drain = NULL;
   const int32_t left = line_left();
-  if (left <= 0 || !s_quiet_face) return;
+  if (left <= 0 || !(s_quiet_face || s_glance)) return;   // the hairline: the plain face's, or a glance's
   layer_mark_dirty(s_face);
   const int32_t h = layer_get_bounds(s_face).size.h > 0 ? layer_get_bounds(s_face).size.h : 168;
   const int32_t t = since_flick();
@@ -2726,6 +2740,20 @@ static uint32_t drain_answer(void) {
   return (uint32_t)(end - t);
 }
 
+#ifdef HAS_STOPCD
+// A stop's countdown let go: a glance's, its answer gone; a pinned one's, flicked off, or its stop left behind.
+static void cd_let_go(void) {
+  s_cd.n = 0; s_cd.stop[0] = 0; s_cd.pick[0] = 0; s_cd.pinned = false;
+  persist_delete(STOPCD_KEY);
+}
+// Pinned: kept, through the watch's menus too.
+static void cd_pin(void) {
+  s_cd.pinned = true;
+  persist_write_data(STOPCD_KEY, &s_cd, sizeof(s_cd));
+}
+static bool s_pin;   // a double flick before its answer came: pinned when it does
+#endif
+
 static void stopview_done(void *data) {
   (void)data;
   s_sv.timer = NULL;
@@ -2734,6 +2762,10 @@ static void stopview_done(void *data) {
   s_sv.pending = false;
   s_sv.lit = false;
   s_sv.draining = false;
+#ifdef HAS_STOPCD
+  if (!s_cd.pinned) cd_let_go();   // a glance, gone with its answer
+  s_pin = false;
+#endif
   retune_tick();
   layer_mark_dirty(s_face);
 }
@@ -2763,46 +2795,66 @@ static bool flick_asks(void) {
 // A flick of the wrist is felt as a burst of taps: out, and the snap back a
 // few hundred milliseconds later. Taps within TAP_SAME_MS of the last one are
 // that same flick and count for nothing, so one flick never reads as two.
-// With double flick on, a flick counts only as the second of two separate
-// flicks, the second starting within DOUBLE_MS of the first: a swing of the
-// arm on its own does nothing, not even the light.
+// A second flick starting within DOUBLE_MS of the first is a double: a pin.
+// (The 'Double flick' setting, a flick counting only as the second of two,
+// went with 1.34.0: the double is the pin now, and a stray flick costs only a
+// glance.)
 #define TAP_SAME_MS 300
 #define DOUBLE_MS 1500
-typedef struct { uint32_t last, first; bool armed; } TapState;
+typedef struct { uint32_t last, first, let; } TapState;   // let: when a pin was flicked off
 static TapState s_tap;
-static bool tap_decide(TapState *t, uint32_t now, bool twice) {
+// 0 nothing (the same flick, or one hard on a pin let go: that gesture's), 1 a flick, 2 a double's second.
+static int tap_kind(TapState *t, uint32_t now) {
   const bool same = t->last && now - t->last < TAP_SAME_MS;
   t->last = now;
-  if (same) return false;
-  if (!twice) return true;
-  if (t->armed && now - t->first <= DOUBLE_MS) { t->armed = false; return true; }
-  t->armed = true; t->first = now;
-  return false;
-}
-static bool tap_counts(void) {
-  time_t sec; uint16_t ms;
-  time_ms(&sec, &ms);
-  return tap_decide(&s_tap, (uint32_t)sec * 1000u + ms, s_set.flick2);
+  if (same || (t->let && now - t->let < DOUBLE_MS)) return 0;
+  const bool second = t->first && now - t->first <= DOUBLE_MS;
+  t->first = second ? 0 : now;   // a double's second is no double's first
+  return second ? 2 : 1;
 }
 
+#ifdef HAS_STOPCD
+static char s_was[8];   // the route a glance's flick stepped from: put back when that flick was a double's first
+static bool s_stepped;  // the last flick stepped
+#endif
 static void tap_handler(AccelAxisType axis, int32_t direction) {
   (void)axis; (void)direction;
-  if (!tap_counts()) return;
+  time_t sec; uint16_t ms;
+  time_ms(&sec, &ms);
+  const uint32_t at = (uint32_t)sec * 1000u + ms;
+  const int kind = tap_kind(&s_tap, at);
+  if (!kind) return;
   // Every flick is heard: the light, and the seconds, at once. One made
   // while the phone is still answering an earlier flick (a stray one from
   // the arm swinging, say) lights the face again and waits on that answer.
   // The phone is asked only where the answer could be worth a fix
   // (flick_asks).
   light_enable_interaction();
-  if (s_sv.pending) return;
 #ifdef HAS_STOPCD
-  // A second flick while the answer is lit steps the countdown to the stop's
-  // next route; with one route only, it is a flick like any other.
-  if (s_sv.lit && s_cd_shown && cd_step(face_now())) {
-    stopview_hold(SV_SHOW_MS);
-    layer_mark_dirty(s_face);
-    return;
+  const bool undo = s_stepped;
+  s_stepped = false;
+  if (s_cd.pinned && cd_current(face_now()) >= 0) {
+    // Pinned: a flick lets it go, and the plain face is back. A flick hard on it is the same gesture (a double
+    // flick to let go), not a glance.
+    cd_let_go(); s_tap.let = at; s_tap.first = 0;
+  } else if (kind == 2 && (s_sv.pending || s_glance)) {
+    // A double flick at a stop pins its countdown: the one up, or the one its first flick asked for, when it
+    // comes. That first flick, a glance's, stepped the route: put back, so the bus pinned is the one looked at.
+    if (undo) strcpy(s_cd.pick, s_was);
+    if (s_sv.pending) s_pin = true; else cd_pin();
+  } else {
+    if (s_sv.pending) return;
+    // A flick while a glance is up steps the countdown to the stop's next route, and keeps it up; with one route
+    // only, it is a flick like any other.
+    strcpy(s_was, s_cd.pick);
+    if (!s_sv.lit || !s_cd_shown || !(s_stepped = cd_step(face_now()))) goto ask;
+    stopview_hold(drain_answer());
   }
+  retune_tick(); layer_mark_dirty(s_face);
+  return;
+ask:
+#else
+  if (s_sv.pending) return;
 #endif
   s_sv.lit = true;
   drain_start();
@@ -2923,8 +2975,7 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
 #ifdef HAS_STOPCD
   // The phone's half-hourly look found the wearer gone from the stop.
   if ((tp = dict_find(iter, MESSAGE_KEY_CD_END))) {
-    s_cd.n = 0; s_cd.stop[0] = 0; s_cd.pick[0] = 0;
-    persist_delete(STOPCD_KEY);
+    cd_let_go();   // pinned or not
     retune_tick();
     layer_mark_dirty(s_face);
   }
@@ -2949,16 +3000,21 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
 #endif
 #ifdef HAS_STOPCD
     // Every other answer is the stop's list, and the countdown is its: an
-    // empty one ends the last, unless the phone says to keep it.
-    if (!s_sv.wave && !keep) {
+    // empty one ends the last, unless the phone says to keep it. A quiet one
+    // (the watch's own re-check near the end) only while its countdown is up,
+    // pinned or a glance still lit: after a glance has gone, it would put the
+    // countdown back with nothing to take it away again.
+    if (!s_sv.wave && !keep && (!quiet || s_cd.pinned || s_sv.lit)) {
       Tuple *tl = dict_find(iter, MESSAGE_KEY_SV_LIST), *tv = dict_find(iter, MESSAGE_KEY_SV_LIVE);
       strncpy(s_cd.stop, s_sv.stop, sizeof(s_cd.stop) - 1); s_cd.stop[sizeof(s_cd.stop) - 1] = 0;
       s_cd.dist = td ? (int16_t)td->value->int32 : 0;
       s_cd.live_sys = tv && tv->value->int32 != 0;
       take_list(tl ? tl->value->cstring : "");
-      if (!quiet) s_cd.pick[0] = 0;
-      if (s_cd.n) persist_write_data(STOPCD_KEY, &s_cd, sizeof(s_cd)); else persist_delete(STOPCD_KEY);
+      // A flick's answer is a glance, unless a double flick asked for it pinned.
+      if (!quiet) { s_cd.pick[0] = 0; s_cd.pinned = s_pin && s_cd.n; }
+      if (s_cd.n && s_cd.pinned) persist_write_data(STOPCD_KEY, &s_cd, sizeof(s_cd)); else persist_delete(STOPCD_KEY);
     }
+    if (!quiet) s_pin = false;
 #endif
     if (quiet) { retune_tick(); layer_mark_dirty(s_face); return; }
     s_sv.pending = false;
@@ -3028,9 +3084,6 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
 
   if ((tp = dict_find(iter, MESSAGE_KEY_TRANSIT))) {
     s_set.transit = (uint8_t)tuple_int(tp);
-  }
-  if ((tp = dict_find(iter, MESSAGE_KEY_FLICK2))) {
-    s_set.flick2 = tp->value->int32 != 0;
   }
   if ((tp = dict_find(iter, MESSAGE_KEY_FLICK_ON))) {
     s_set.flick = tp->value->int32 != 0;

@@ -92,17 +92,26 @@ asks for high accuracy; it takes the phone's everyday fix at its word, and
 the nearest stop within that accuracy is yours, with its twin across the road
 and, at a station, every bay. The countdown is the hub's countdown, at any
 stop: solid at five minutes with a buzz, `NOW` in its minute, the last minute
-in seconds. When the bus goes it moves on to the stop's next bus, and so on
-until the day's buses are done, you flick somewhere else, or the phone's
-half-hourly look finds you well away from the stop. Nothing is checked
-meanwhile; it simply runs. A bus more than an hour off reads as its clock
-time, `1:21 PM`, a size down; a bus another day's has its weekday in the
-block over the `AM`, so the date column is never covered.
+in seconds. A bus more than an hour off reads as its clock time, `1:21 PM`,
+a size down; a bus another day's has its weekday in the block over the `AM`,
+so the date column is never covered.
+
+A flick is a glance: the countdown stays for as long as the answer is lit,
+a few seconds, a hairline draining down the outer edge as it goes, and then
+the face is itself again. A **double flick**, two within a second and a half,
+pins it: the rail comes down the edge instead, capped at its top like a pin's
+head, and the countdown stays. Pinned, when the bus goes it moves on to the
+stop's next bus, and so on until the day's buses are done, the phone's
+half-hourly look finds you well away from the stop, or a flick lets it go,
+back to the plain face. Nothing is checked meanwhile; it simply runs. A
+double flick before the answer has come pins it as it arrives. (Until 1.34 a
+single flick's countdown stayed like that, for hours after its stop was left
+behind.)
 
 A stop with more than one route counts down to the soonest bus, whichever
-route. A second flick, within a few seconds of the answer, steps to the
-stop's next route, and again to the one after, round to the first; the
-countdown then follows that route until a flick answers anew.
+route. A flick while a glance is up steps to the stop's next route, and
+again to the one after, round to the first, and keeps the glance up; a double
+flick pins the route showing.
 
 | a stop's countdown | off the stop | after the last bus |
 |---|---|---|
@@ -180,8 +189,8 @@ Outside those two, a flick can ask [Transitous](https://transitous.org), the
 free, volunteer-run routing service built on every open transit feed it can
 find, for the stops near you and what leaves them, with live times where
 the agency publishes them. It answers as the face's own systems do: a
-countdown to the next bus from the nearest stop, a second flick for its
-next route. It is **off unless you turn it on**, and stays so:
+countdown to the next bus from the nearest stop, a glance or pinned, a flick
+while it's up for its next route. It is **off unless you turn it on**, and stays so:
 with it on, a flick takes a location fix wherever you are, sends it to
 Transitous rounded to about 100 m (and, at a stop with few departures in
 the first answer, the stop's id alone), and downloads about 50 KB a flick,
@@ -206,10 +215,10 @@ From the Pebble app.
 
 - **Transit** — automatic (default), countdown everywhere, or off. With it:
   how near the hub counts as at it, how near a stop must be for a flick to
-  count down to it, and a switch for the flick. **Double flick**, off by
-  default, counts a flick only when two come within a second and a half, for
-  fewer false starts from a swinging arm. **Flick anywhere, with
-  Transitous** is off unless you turn it on; see above.
+  count down to it, and a switch for the flick. **Flick anywhere, with
+  Transitous** is off unless you turn it on; see above. (The Double flick
+  switch, a flick counting only as the second of two, went in 1.34: a double
+  flick pins now, and a stray single flick costs only a glance.)
 - **Headway** and **departure offset** — for the countdown everywhere: 30,
   20 or 15 minutes, and minutes past the hour. At the hub the timetable
   counts instead.

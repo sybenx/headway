@@ -320,14 +320,7 @@
         "messageKey": "FLICK_ON",
         "label": "Flick for the nearest stop",
         "defaultValue": true,
-        "description": "A flick of the wrist starts a countdown to the next bus from the nearest stop: its route as a tab on the block with the headsign beside it, the stop over them. It moves on to the next bus as each goes, and ends when you leave the stop or the day's buses are done. A second flick within a few seconds steps to the stop's next route. Off, a flick still shows the seconds."
-      },
-      {
-        "type": "toggle",
-        "messageKey": "FLICK2",
-        "label": "Double flick",
-        "defaultValue": false,
-        "description": "A flick counts only when two come within a second and a half of each other, so a swing of the arm doesn't light the face, show the seconds or ask for a stop. Off, one flick does. With this on, stepping to a stop's next route takes a double flick too."
+        "description": "A flick of the wrist is a glance: the countdown to the next bus from the nearest stop, its route as a tab on the block with the headsign beside it, for a few seconds, a hairline draining down the edge, then the face again. Flick again while it's up for the stop's next route. A double flick (two within a second and a half) pins it: the rail down the edge, capped at its top, and it stays, moving on to the next bus as each goes, until you leave the stop, the day's buses are done, or a flick lets it go. Off, a flick still shows the seconds."
       },
       {
         "type": "toggle",
