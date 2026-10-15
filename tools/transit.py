@@ -15,7 +15,7 @@ next.
   python3 tools/transit.py gtfs.zip --agency CVTD --hub 41.7406,-111.8309 --routes G,B \
       --name "TRANSIT CTR" ...
 """
-import argparse, csv, datetime, hashlib, io, json, math, os, re, sys, zipfile
+import argparse, collections, csv, datetime, hashlib, io, json, math, os, re, sys, zipfile
 
 ap = argparse.ArgumentParser()
 ap.add_argument('gtfs', help='path to a GTFS zip')
@@ -75,7 +75,9 @@ terminus = {}
 for st in stop_times:
     terminus[st['trip_id']] = max(terminus.get(st['trip_id'], -1), int(st['stop_sequence']))
 def boards(st):
-    return int(st['stop_sequence']) < terminus[st['trip_id']] and (st.get('pickup_type') or '0') != '1'
+    # GTFS lets a stop between timepoints go without a time; nothing to count down to there.
+    return int(st['stop_sequence']) < terminus[st['trip_id']] and (st.get('pickup_type') or '0') != '1' \
+        and bool(st.get('departure_time'))
 
 # ---- the services, as the agency defines them: a weekly pattern between two
 # dates, and dates added or taken away. Many agencies run a third of their
@@ -91,15 +93,23 @@ for c in table('calendar_dates.txt'):
 # the data is rebuilt every night. Yesterday still counts, for the trips of
 # its service that run past midnight.
 today = a.today or (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=1)).strftime('%Y%m%d')
+# A service keeps its place in the list for as long as the feed does: the stop
+# files name services by place, and the phone keeps a day-old index beside stop
+# files fetched since, so a list that closed up as services ended would have
+# the two disagree on what every place after the gap means. One that has ended
+# stays as an empty slot, and its departures leave the stop files.
 used = sorted({t['service_id'] for t in trips.values()})
-services, svc_index = [], {}
+services, svc_index, running = [], {}, set()
 for sid in used:
     c = calendar.get(sid)
     mask = sum(1 << i for i, d in enumerate(DAYS) if c and c[d] == '1')
     if c and c['end_date'] < today: mask = 0
     plus = sorted(d for d in added.get(sid, []) if d >= today)
-    if not mask and not plus: continue   # a service that no longer runs
     svc_index[sid] = len(services)
+    if not mask and not plus:   # a service that no longer runs
+        services.append([0, '', '', [], []])
+        continue
+    running.add(sid)
     services.append([mask, c['start_date'] if c and mask else '', c['end_date'] if c and mask else '',
                      plus, sorted(d for d in removed.get(sid, []) if d >= today)])
 
@@ -114,21 +124,34 @@ for c in calendar.values():
         best[kind] = c
 kind_of = {c['service_id']: kind for kind, c in best.items()}
 
-# ---- the hub, where there is one: its hours, and the departures of the
-# routes that leave it on their own timetable, for the countdown.
+# ---- the hub, where there is one: the minutes its routes leave together
+# (the pulse the countdown counts to), the departures of the routes that leave
+# it on their own timetable, and its hours, from the first of those to the last.
+# The phone works the same out for the day itself from the stop files and the
+# calendar (hubDay in index.js); this day-type cut ships in the app for when it
+# can't.
+def pulse_of(by_route):
+    """Every departure of a route that mostly leaves with another. A route that
+    always leaves on its own (Connect's 16, at :05 and :50) keeps its own time
+    and isn't the pulse; one that starts the day alone before the others join
+    it (Saturday's 15 at 9:30) still is."""
+    count = collections.Counter(m for ms in by_route.values() for m in ms)
+    out = set()
+    for ms in by_route.values():
+        if 2 * sum(1 for m in ms if count[m] > 1) >= len(ms): out |= ms
+    return sorted(out)
+
 wanted = [r for r in a.routes.split(',') if r]
-first = {}; last = {}; deps = {}
+deps = {}; others = {}
 if a.hub:
     hub_stops = {s['stop_id'] for s in stops_all if dist(float(s['stop_lat']), float(s['stop_lon'])) <= a.radius}
     if not hub_stops:
         sys.exit('no stops within %dm of the hub' % a.radius)
     for st in stop_times:
         t = trips[st['trip_id']]; kind = kind_of.get(t['service_id'])
-        if not kind or not boards(st): continue
-        m = mins(st['departure_time'])
-        first[kind] = min(first.get(kind, 9999), m); last[kind] = max(last.get(kind, 0), m)
-        if st['stop_id'] in hub_stops and routes[t['route_id']] in wanted:
-            deps.setdefault(kind, {}).setdefault(routes[t['route_id']], set()).add(m)
+        if not kind or not boards(st) or st['stop_id'] not in hub_stops: continue
+        r = routes[t['route_id']]
+        (deps if r in wanted else others).setdefault(kind, {}).setdefault(r, set()).add(mins(st['departure_time']))
 
 # ---- per-stop departures, for the stop view on a flick: one small file a
 # stop, fetched by the phone when the wearer asks, plus an index to find the
@@ -179,7 +202,7 @@ if a.stops_out or a.legacy_out:
         head = short(t.get('trip_headsign') or '', hints.get('headsigns', {}))
         if not head and r['route_short_name'] in hints.get('loops', []): head = 'LOOP'
         row = (mins(st['departure_time']), label(r['route_short_name']), head, base_trip(st['trip_id']))
-        if t['service_id'] in svc_index:
+        if t['service_id'] in running:
             # The departure's place in its trip, from the agency's own timetable:
             # a feed that names no stop in its predictions still names this.
             at_place = (svc_index[t['service_id']], int(st['stop_sequence']))
@@ -208,23 +231,28 @@ if a.stops_out or a.legacy_out:
 
     def write(out, rows_of, body, extra, grouped):
         os.makedirs(os.path.join(out, 'stops'), exist_ok=True)
-        index = []
-        # The version of this cut of the timetable, from what it says: the same feed gives the same version night
-        # after night, so the phone keeps its stop files until the agency publishes a new one.
-        version = hashlib.sha1(json.dumps(extra, sort_keys=True).encode())
+        index, files = [], []
+        # The version of this cut of the timetable, from the stop files alone: they change when the agency
+        # publishes a new feed or a service ends, and not as the calendar's past dates are trimmed night by
+        # night, so the phone keeps its stop files until they do. Each file carries it too, so the phone can
+        # tell one newer than the index it holds.
+        version = hashlib.sha1()
         for s_ in stops_all:
             sid = s_['stop_id']
             if sid not in rows_of: continue
-            text = json.dumps(dict({'id': sid, 'name': stop_name(s_)}, **body(rows_of[sid])),
-                              separators=(',', ':'))
-            open(os.path.join(out, 'stops', sid + '.json'), 'w').write(text)
-            version.update(text.encode())
+            content = dict({'id': sid, 'name': stop_name(s_)}, **body(rows_of[sid]))
+            files.append((sid, content))
+            version.update(json.dumps(content, separators=(',', ':')).encode())
             entry = [sid, round(float(s_['stop_lat']), 5), round(float(s_['stop_lon']), 5)]
             if grouped and sid in group: entry.append(group[sid])
             index.append(entry)
+        v = version.hexdigest()[:12]
+        for sid, content in files:
+            open(os.path.join(out, 'stops', sid + '.json'), 'w').write(
+                json.dumps(dict(content, v=v), separators=(',', ':')))
         head = {'agency': a.agency}
         if a.hub: head['hub'] = {'lat': lat, 'lon': lon}
-        json.dump(dict(head, v=version.hexdigest()[:12], routes=colours, stops=index, **extra),
+        json.dump(dict(head, v=v, routes=colours, stops=index, **extra),
                   open(os.path.join(out, 'stops.json'), 'w'), separators=(',', ':'))
         size = sum(os.path.getsize(os.path.join(out, 'stops', f)) for f in os.listdir(os.path.join(out, 'stops')))
         print('stops', len(index), 'files,', size, 'bytes, in', os.path.normpath(out))
@@ -259,9 +287,12 @@ if a.live_url and a.live_by != 'stop': system['liveBy'] = a.live_by
 if a.hub:
     system['hub'] = {'name': a.name, 'lat': lat, 'lon': lon}
     system['routes'] = wanted
-    system['days'] = {kind: {'hours': [first[kind], last[kind]],
-                             'dep': {r: sorted(v) for r, v in deps.get(kind, {}).items()}}
-                      for kind in sorted(first)}
+    system['days'] = {}
+    for kind in sorted(set(deps) | set(others)):
+        pulse = pulse_of(others.get(kind, {}))
+        loops = {r: sorted(v) for r, v in deps.get(kind, {}).items()}
+        every = pulse + [m for v in loops.values() for m in v]
+        system['days'][kind] = {'hours': [min(every), max(every)], 'pulse': pulse, 'dep': loops}
 if a.base:
     b_lat, b_lon, b_r = (float(v) for v in a.base.split(','))
     system['base'] = {'lat': b_lat, 'lon': b_lon, 'r': int(b_r)}
@@ -275,6 +306,6 @@ systems = [x for x in systems if x.get('agency') != a.agency] + [system]
 json.dump({'systems': systems}, open(a.out, 'w'), separators=(',', ':'))
 print('area', system['area'], 'services', len(services))
 for kind, d in system.get('days', {}).items():
-    print(kind, 'hours %02d:%02d-%02d:%02d' % (d['hours'][0] // 60, d['hours'][0] % 60, d['hours'][1] // 60, d['hours'][1] % 60),
+    print(kind, 'hours %02d:%02d-%02d:%02d' % (d['hours'][0] // 60, d['hours'][0] % 60, d['hours'][1] // 60, d['hours'][1] % 60), len(d['pulse']), 'pulse',
           {r: len(v) for r, v in d['dep'].items()})
 print('wrote', os.path.normpath(a.out), os.path.getsize(a.out), 'bytes')

@@ -67,7 +67,10 @@ the answer. Outside every known system nothing changes and it asks less
 often.
 
 **At the hub**, in its hours, the countdown appears: minutes to the next
-departure, at the outer edge. Five minutes out the block goes solid and the
+departure, at the outer edge. The departure is the timetable's, the next
+minute the hub's routes leave together, worked out by the phone for the day
+from the nightly data, holidays and all; the hours run from the first of
+those to the last. Five minutes out the block goes solid and the
 watch buzzes once; at zero it reads `NOW` for a minute. The last minute counts
 in seconds. Routes that keep their own timetable get a second countdown as
 colour chips in the module band, with their departure's clock time small
@@ -192,7 +195,8 @@ from [Transitous's sources](https://transitous.org/sources/), stops from
 The face began as a countdown for any fixed-headway service — a train every
 half hour, a shuttle every twenty minutes — and that is still here as a
 setting. Choose it and the countdown runs wherever you are, from a headway
-and a departure offset you set, with the hub's extras when you are at one.
+and a departure offset you set; at the hub it counts to the hub's own
+timetable, with its extras.
 
 ![countdown everywhere](screenshots/everywhere.png)
 
@@ -206,8 +210,9 @@ From the Pebble app.
   default, counts a flick only when two come within a second and a half, for
   fewer false starts from a swinging arm. **Flick anywhere, with
   Transitous** is off unless you turn it on; see above.
-- **Headway** and **departure offset** — for the countdown: 30, 20 or 15
-  minutes, and minutes past the hour.
+- **Headway** and **departure offset** — for the countdown everywhere: 30,
+  20 or 15 minutes, and minutes past the hour. At the hub the timetable
+  counts instead.
 - **Boarding buzz** — one pulse at five minutes: at the transit centre
   (default), wherever the countdown runs, or off.
 - **Theme** — dark at night and light by day, with the night window; or
@@ -227,17 +232,27 @@ what the phone needs: a file per stop with its departures, each naming the
 service it runs on, and an index with the agency's whole calendar — weekly
 patterns, dates added and dates taken away — so the phone works out which
 buses run on the day it is asked about, holidays and all, and a bus the
-agency writes as 24:53 runs at 12:53 the next morning. For a hub system it
-also writes the hub, its hours and the departures of the routes on their own
-timetable. The app's entry for each system goes in `src/pkjs/transit.json`;
+agency writes as 24:53 runs at 12:53 the next morning, counted, as GTFS
+counts it, from noon less twelve hours, so the days the clocks change come
+out right. A service keeps its place in the index for as long as the feed
+does, as an empty slot once it has ended, so the places the stop files name
+never shift under a phone holding a day-old index. For a hub system it also
+writes the hub, and a day-type cut of its hours, the minutes its routes leave
+together and the departures of the routes on their own timetable, which
+ships in the app for the phone to use until it has the hub's stop files.
+The app's entry for each system goes in `src/pkjs/transit.json`;
 the stop files are served by GitHub Pages from the `pages` branch, which a
 nightly workflow rebuilds from the feeds and replaces whole, so old
-timetables never pile up in the history. The index carries a version of
-the timetable it was cut from, the same night after night until the agency
-publishes a new feed; the phone keeps each stop's file until that version
-changes, and after a flick keeps the stops within a few hundred metres of it,
-so a flick there with no signal still has its timetable. Only a flick asks for
-stop files; the background looks never do. The last 150 stops used are kept.
+timetables never pile up in the history. The index and every stop file
+carry a version of the timetable, taken from the stop files themselves: the
+same night after night until the agency publishes a new feed or a service
+ends. The phone keeps each stop's file until that version changes, and after
+a flick keeps the stops within a few hundred metres of it, so a flick there
+with no signal still has its timetable; a stop file newer than the phone's
+index has it fetch the index anew. A stop's file is asked for only on a
+flick, with one exception: the hub's own bays, fetched with the index once a
+day wherever the wearer is, so they say nothing about where that is, for the
+countdown at the hub. The last 150 stops used are kept.
 
 Each departure names its trip, from the agency's own GTFS, so live
 predictions can be laid over it. For Connect they come from the relay at

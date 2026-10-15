@@ -87,10 +87,12 @@ typedef struct {
 #define WX_NOHL INT16_MIN
 
 // What the phone last said about the hub: whether the wearer is there in
-// its hours, and the next departures of the routes on their own timetable,
-// as minutes past midnight, 0xFFFF for none. The face counts down from
-// these on its own; the phone refreshes them every few minutes.
+// its hours, the minutes its routes leave together (h: the one just gone,
+// then the next), and the next departures of the routes on their own
+// timetable, as minutes past midnight, 0xFFFF for none. The face counts down
+// from these on its own; the phone refreshes them every few minutes.
 #define TR_MAX 4
+#define H_MAX 6
 #define TR_NONE 0xFFFF
 #define TR_STALE (3 * 60 * 60)   // seconds before the phone's word lapses
 typedef struct {
@@ -100,6 +102,7 @@ typedef struct {
   uint16_t g[TR_MAX], b[TR_MAX];
   uint16_t km;             // outside every system: how far to the nearest, 0 unknown
   time_t at;
+  uint16_t h[H_MAX];
 } Transit;
 
 // A flick's answer: the hub's lines, or the stop's list the countdown below
@@ -341,23 +344,25 @@ static uint8_t transit_mode(void) {
 static bool transit_fresh(time_t now) {
   return transit_mode() != TRANSIT_OFF && s_tr.at != 0 && now - s_tr.at < TR_STALE;
 }
-// Minutes until the first of a route's departures still ahead, or -1.
+// Minutes since the latest of n departures gone, within the last most, or -1.
+static int transit_ago(const uint16_t *list, int n, int now_min, int most) {
+  int best = -1;
+  for (int i = 0; i < n; i++) {
+    const int ago = now_min - (int)list[i];
+    if (list[i] != TR_NONE && ago > 0 && ago <= most && (best < 0 || ago < best)) best = ago;
+  }
+  return best;
+}
 // Minutes since the latest departure gone in the last BOARD_WAIT, or -1: a
 // loop bus that late may still be at its bay. Not on the Classic, short of
 // room for it.
 #ifndef PBL_PLATFORM_APLITE
 #define BOARD_WAIT 10
-static int transit_prev(const uint16_t *list, int now_min) {
-  int best = -1;
-  for (int i = 0; i < TR_MAX; i++) {
-    const int ago = now_min - (int)list[i];
-    if (list[i] != TR_NONE && ago > 0 && ago <= BOARD_WAIT && (best < 0 || ago < best)) best = ago;
-  }
-  return best;
-}
+#define transit_prev(list, now_min) transit_ago(list, TR_MAX, now_min, BOARD_WAIT)
 #endif
-static int transit_next(const uint16_t *list, int now_min) {
-  for (int i = 0; i < TR_MAX; i++) {
+// Minutes until the first of n departures still ahead, or -1.
+static int transit_next(const uint16_t *list, int n, int now_min) {
+  for (int i = 0; i < n; i++) {
     if (list[i] != TR_NONE && (int)list[i] >= now_min) return (int)list[i] - now_min;
   }
   return -1;
@@ -989,45 +994,57 @@ typedef struct {
   int remaining;      // minutes until the next departure
   int secs;           // seconds until it, within the final minute
   int next_h, next_m; // clock time of that departure
+  int period;         // minutes from the departure before it, for the rail
   bool is_now, is_boarding, is_final;
 } Schedule;
 
-static Schedule schedule_for(int hour, int minute, int second) {
+// A departure remaining minutes off, at at_min past midnight.
+static Schedule schedule_in(int remaining, int at_min, int second, int period) {
   Schedule s;
-  int hw = s_set.headway;
-  s.remaining = ((s_set.offset - minute) % hw + hw) % hw;
+  s.remaining = remaining;
   s.secs = 60 - second;
-  s.next_h = hour;
-  s.next_m = minute + s.remaining;
-  if (s.next_m >= 60) { s.next_m -= 60; s.next_h = (s.next_h + 1) % 24; }
-  s.is_now = (s.remaining == 0);
-  s.is_boarding = (s.remaining > 0 && s.remaining <= THRESHOLD);
+  s.next_h = (at_min / 60) % 24;
+  s.next_m = at_min % 60;
+  s.period = period;
+  s.is_now = (remaining == 0);
+  s.is_boarding = (remaining > 0 && remaining <= THRESHOLD);
   // The last minute, counted in seconds — the one place the face moves.
-  s.is_final = s_set.final_seconds && s.remaining == 1;
+  s.is_final = s_set.final_seconds && remaining == 1;
   return s;
+}
+
+// The countdown everywhere: a departure every headway, from the offset.
+static Schedule schedule_for(int hour, int minute, int second) {
+  const int hw = s_set.headway;
+  const int remaining = ((s_set.offset - minute) % hw + hw) % hw;
+  return schedule_in(remaining, hour * 60 + minute + remaining, second, hw);
 }
 
 // The same, counted to one departure at epoch `at` rather than the headway.
 #ifdef HAS_STOPCD
 static Schedule schedule_until(const struct tm *t, time_t now, time_t at) {
-  Schedule s;
   const time_t midnight = now - (t->tm_hour * 3600 + t->tm_min * 60 + t->tm_sec);
   const int at_min = (int)((at - midnight) / 60), now_min = t->tm_hour * 60 + t->tm_min;
-  s.remaining = at_min > now_min ? at_min - now_min : 0;
-  s.secs = 60 - t->tm_sec;
-  s.next_h = (at_min / 60) % 24;
-  s.next_m = at_min % 60;
-  s.is_now = (s.remaining == 0);
-  s.is_boarding = (s.remaining > 0 && s.remaining <= THRESHOLD);
-  s.is_final = s_set.final_seconds && s.remaining == 1;
-  return s;
+  return schedule_in(at_min > now_min ? at_min - now_min : 0, at_min, t->tm_sec, s_set.headway);
 }
 #endif
 
-// What the countdown counts to now: a stop's departure after a flick there,
-// away from the hub; else the headway.
-static inline __attribute__((always_inline)) Schedule schedule_now(const struct tm *t, time_t now) {
-  if (!(transit_fresh(now) && s_tr.state == 1)) {
+// What the countdown counts to now. At the hub, the timetable's next pulse
+// as the phone said it, the rail draining from the one before; a stop's
+// departure after a flick there, away from the hub; else the headway, as
+// set for the countdown everywhere, or at the hub when the phone has said
+// no pulse. One copy for its three callers: none of them is under the text
+// engine, so its frame costs nothing there.
+static Schedule schedule_now(const struct tm *t, time_t now) __attribute__((noinline));
+static Schedule schedule_now(const struct tm *t, time_t now) {
+  const int now_min = t->tm_hour * 60 + t->tm_min;
+  if (transit_fresh(now) && s_tr.state == 1) {
+    const int next = transit_next(s_tr.h, H_MAX, now_min);
+    if (next >= 0) {
+      const int ago = transit_ago(s_tr.h, H_MAX, now_min, 24 * 60);
+      return schedule_in(next, now_min + next, t->tm_sec, ago > 0 ? ago + next : s_set.headway);
+    }
+  } else {
     const int i = cd_current(now);
     if (i >= 0) return schedule_until(t, now, s_cd.d[i].at);
   }
@@ -1120,7 +1137,8 @@ static void draw_rail(GContext *ctx, const Schedule *sch, int16_t h) {
   graphics_fill_rect(ctx, GRect(bx, 0, border, h), 0, GCornerNone);
 
   // Drains as the headway runs out: full just after a departure, empty at zero.
-  int fill = (sch->remaining * h + s_set.headway / 2) / s_set.headway;
+  int fill = (sch->remaining * h + sch->period / 2) / sch->period;
+  if (fill > h) fill = h;
   if (fill > 0) {
     graphics_context_set_fill_color(ctx, accent());
     graphics_fill_rect(ctx, GRect(rx, h - fill, rail_w, fill), 0, GCornerNone);
@@ -1530,7 +1548,7 @@ static void gb_clock(char *out, size_t n, int minute) {
 static void layout_gb(int c_start, int avail_w, int band_top, int band_bot, int now_min, int now_sec) __attribute__((noinline));
 static void layout_gb(int c_start, int avail_w, int band_top, int band_bot, int now_min, int now_sec) {
   s_gb.show = false;
-  const int g = transit_next(s_tr.g, now_min), b = transit_next(s_tr.b, now_min);
+  const int g = transit_next(s_tr.g, TR_MAX, now_min), b = transit_next(s_tr.b, TR_MAX, now_min);
   if (g < 0 && b < 0) return;
   const int next = g < 0 ? b : b < 0 ? g : g < b ? g : b;
   s_gb.later = (g < 0 || g > next + 1) ? 1 : (b < 0 || b > next + 1) ? 2 : 0;
@@ -2560,9 +2578,14 @@ static void retune_tick(void) {
   struct tm *t = localtime(&now);
   const Schedule s = schedule_now(t, now);
   const int now_min = t->tm_hour * 60 + t->tm_min;
-  const bool gb_final = s_set.final_seconds && transit_fresh(now) && s_tr.state == 1
-      && (transit_next(s_tr.g, now_min) == 1 || transit_next(s_tr.b, now_min) == 1);
-  const bool want = s.is_final || s_sv.lit || gb_final;
+  const bool at_hub = transit_fresh(now) && s_tr.state == 1;
+  const bool gb_final = s_set.final_seconds && at_hub
+      && (transit_next(s_tr.g, TR_MAX, now_min) == 1 || transit_next(s_tr.b, TR_MAX, now_min) == 1);
+  // The last minute counts in seconds only where a countdown shows it: at
+  // the hub, at a stop after a flick, or with the countdown everywhere. The
+  // plain face has nothing that moves by the second.
+  const bool counting = at_hub || cd_current(now) >= 0 || s_set.transit == TRANSIT_CHIPS;
+  const bool want = (s.is_final && counting) || s_sv.lit || gb_final;
   if (want == s_ticking_seconds) return;
   tick_timer_service_unsubscribe();
   tick_timer_service_subscribe(want ? SECOND_UNIT : MINUTE_UNIT, tick_handler);
@@ -2848,13 +2871,18 @@ static void take_list(const char *p) {
 }
 #endif
 
+// n minutes past midnight, two bytes each, low first; TR_NONE for none.
+static void take_minutes(DictionaryIterator *iter, uint32_t key, uint16_t *out, int n) {
+  const Tuple *t = dict_find(iter, key);
+  for (int i = 0; i < n; i++)
+    out[i] = (t && t->length >= 2 * n) ? (uint16_t)(t->value->data[2 * i] | (t->value->data[2 * i + 1] << 8)) : TR_NONE;
+}
+
 // The hub's word, pushed by the phone: from its background check, or with a
 // flick's answer, worked out from the flick's own fix.
 static void take_transit(DictionaryIterator *iter) {
   Tuple *tp = dict_find(iter, MESSAGE_KEY_TR_STATE);
   if (!tp) return;
-  Tuple *tg = dict_find(iter, MESSAGE_KEY_TR_G);
-  Tuple *tb = dict_find(iter, MESSAGE_KEY_TR_B);
   Tuple *ta = dict_find(iter, MESSAGE_KEY_TR_AT);
   Tuple *tarea = dict_find(iter, MESSAGE_KEY_TR_AREA);
   Tuple *tkm = dict_find(iter, MESSAGE_KEY_TR_KM);
@@ -2864,10 +2892,9 @@ static void take_transit(DictionaryIterator *iter) {
   looked();
   s_tr.km = tkm ? (uint16_t)tkm->value->int32 : 0;
   s_tr.area = tarea ? (uint8_t)(tarea->value->int32 != 0) : 1;
-  for (int i = 0; i < TR_MAX; i++) {
-    s_tr.g[i] = (tg && tg->length >= 2 * TR_MAX) ? (uint16_t)(tg->value->data[2 * i] | (tg->value->data[2 * i + 1] << 8)) : TR_NONE;
-    s_tr.b[i] = (tb && tb->length >= 2 * TR_MAX) ? (uint16_t)(tb->value->data[2 * i] | (tb->value->data[2 * i + 1] << 8)) : TR_NONE;
-  }
+  take_minutes(iter, MESSAGE_KEY_TR_G, s_tr.g, TR_MAX);
+  take_minutes(iter, MESSAGE_KEY_TR_B, s_tr.b, TR_MAX);
+  take_minutes(iter, MESSAGE_KEY_TR_H, s_tr.h, H_MAX);
   s_tr.at = ta ? (time_t)ta->value->int32 : time(NULL);
   transit_save();
 }
@@ -2944,6 +2971,9 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
     layer_mark_dirty(s_face);
     return;
   }
+  // Settings come from the page; the weather, the hub's word and the yard's
+  // come far more often, and leave them as they were: written only on change.
+  const Settings before = s_set;
   if ((tp = dict_find(iter, MESSAGE_KEY_WRIST))) {
     s_set.wrist_right = (strcmp(tp->value->cstring, "right") == 0);
   }
@@ -3032,7 +3062,8 @@ static void inbox_received(DictionaryIterator *iter, void *ctx) {
   }
 
   settings_clamp();
-  settings_save();
+  const uint8_t *was = (const uint8_t *)&before, *is = (const uint8_t *)&s_set;
+  for (size_t i = 0; i < sizeof(s_set); i++) if (was[i] != is[i]) { settings_save(); break; }
   retune_tick();
   layer_mark_dirty(s_face);
 }

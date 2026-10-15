@@ -10,8 +10,18 @@ var transit = require('./transit.json');
 var MODE_OFF = '0', MODE_CHIPS = '1', MODE_NEAR = '2', MODE_AUTO = '3';
 
 // Weather comes from Open-Meteo, which needs no API key and no account.
+// When it was last fetched, and in which units, are kept: the phone starts
+// this script anew each time the watch comes back to the face from another
+// app, and the reading the watch holds is no older for that.
 var WEATHER_TTL = 30 * 60 * 1000;
-var lastFetch = 0;
+var lastFetch = Number(localStorage.getItem('hw-wx-at')) || 0;
+function fetched(at, unit) {
+  lastFetch = at;
+  try {
+    localStorage.setItem('hw-wx-at', String(at));
+    if (unit) localStorage.setItem('hw-wx-units', unit);
+  } catch (e) { /* this run's memory will do */ }
+}
 
 function settings() {
   try {
@@ -56,10 +66,9 @@ function weatherWanted() {
 // The weather for a fix already taken: the phone looks once for weather and
 // transit both (see look()).
 function weatherAt(pos, force) {
-  var s = settings();
   if (!weatherWanted()) return;
   if (!force && Date.now() - lastFetch < WEATHER_TTL) return;
-  var unit = units() === 'imperial' ? 'fahrenheit' : 'celsius';
+  var told = units(), unit = told === 'imperial' ? 'fahrenheit' : 'celsius';
   var url = 'https://api.open-meteo.com/v1/forecast' +
     '?latitude=' + pos.coords.latitude.toFixed(3) +
     '&longitude=' + pos.coords.longitude.toFixed(3) +
@@ -73,7 +82,7 @@ function weatherAt(pos, force) {
     if (req.status !== 200) return;
     try {
       var d = JSON.parse(req.responseText), cur = d.current;
-      lastFetch = Date.now();
+      fetched(Date.now(), told);
       send(cur.temperature_2m, cur.weather_code, rainAt(d.minutely_15), d.daily);
     } catch (e) {}
   };
@@ -110,13 +119,15 @@ function units() {
   return localStorage.getItem('hw-units-here') || 'metric';
 }
 var unitsTold = null;
-// True when the watch was told something new.
+// True when the weather wants fetching anew: the watch drops a reading in
+// the other unit. Told once each run, which costs a message and no fetch.
 function tellUnits() {
   var u = units();
   if (u === unitsTold) return false;
   unitsTold = u;
-  lastFetch = 0;   // the watch drops a reading in the other unit; fetch it anew
   Pebble.sendAppMessage({ UNITS: u });
+  if (localStorage.getItem('hw-wx-units') === u) return false;
+  fetched(0);
   return true;
 }
 
@@ -156,11 +167,17 @@ function hubMode() {
   return m === MODE_NEAR ? MODE_AUTO : m;   // an older name for automatic
 }
 
-// The day type in the hub's own week: weekday, saturday, sunday, or none.
+// The hub's day: when its routes leave together (pulse, the minutes the
+// countdown counts to), the departures of the routes on their own timetable
+// (dep), and its hours, from the first of those to the last. Worked out for
+// the date from the nightly data, holidays and all (hubDay); until that is on
+// the phone, the day type shipped in the app. Null on a day with no buses.
 function dayTable(sys, d) {
+  var day = hubDay(sys, d);
+  if (day !== undefined) return day;
   var wd = d.getDay();
   var kind = wd === 0 ? 'sunday' : wd === 6 ? 'saturday' : 'weekday';
-  return sys.days[kind] || null;
+  return (sys.days || {})[kind] || null;
 }
 
 // The next departures of a route from a minute of the day, as minutes.
@@ -178,9 +195,23 @@ function upcoming(list, nowMin) {
   return out;
 }
 
-function packMinutes(list) {
+// The hub's pulse for the watch: the one just gone, for the rail to drain
+// from, then the next ones, H_MAX in all. The watch counts to the first not
+// yet gone, and falls back to the headway setting when there is none.
+var H_MAX = 6;
+function around(list, nowMin) {
+  var out = [], prev = -1;
+  for (var i = 0; i < list.length && out.length < H_MAX - 1; i++) {
+    if (list[i] >= nowMin) out.push(list[i]);
+    else prev = list[i];
+  }
+  if (prev >= 0) out.unshift(prev);
+  return out;
+}
+
+function packMinutes(list, n) {
   var bytes = [];
-  for (var i = 0; i < TR_MAX; i++) {
+  for (var i = 0; i < (n || TR_MAX); i++) {
     var m = i < list.length ? list[i] : 0xFFFF;
     bytes.push(m & 0xFF, (m >> 8) & 0xFF);
   }
@@ -193,6 +224,7 @@ function transitMsg(st) {
     TR_STATE: st.state,
     TR_G: packMinutes(st.g),
     TR_B: packMinutes(st.b),
+    TR_H: packMinutes(st.h || [], H_MAX),
     TR_AT: Math.floor(Date.now() / 1000),
     TR_KM: st.km || 0,
     TR_NEAR: st.near ? 1 : 0,
@@ -252,6 +284,7 @@ function transitState(lat, lon) {
   var routes = sys.routes;
   return {
     area: 1, state: active ? 1 : 0, near: d <= NEAR_HUB,
+    h: active ? around(day.pulse || [], nowMin) : [],
     g: active ? upcoming(day.dep[routes[0]] || [], nowMin) : [],
     b: active ? upcoming(day.dep[routes[1]] || [], nowMin) : [],
     why: sys.agency + ' ' + Math.round(d) + 'm from the hub, ' + (active ? 'at it' : 'away'),
@@ -276,12 +309,28 @@ function hubRunning(sys) {
 // True when the fix changed the units, so the weather wants fetching anew.
 function sawFix(lat, lon) {
   lastLook = Date.now();
-  try { localStorage.setItem('hw-units-here', inUS(lat, lon) ? 'imperial' : 'metric'); } catch (e) { /* the last word stands */ }
+  try {
+    localStorage.setItem('hw-units-here', inUS(lat, lon) ? 'imperial' : 'metric');
+    localStorage.setItem('hw-fix', JSON.stringify([lat, lon, lastLook]));
+  } catch (e) { /* the last word stands */ }
   var changed = tellUnits();
+  placeFix(lat, lon);
+  return changed;
+}
+// Which system a fix is in, and how far from its hub and its yard.
+function placeFix(lat, lon) {
   lastSys = systemAt(lat, lon);
   lastHubM = lastSys && lastSys.hub ? metres(lat, lon, lastSys.hub.lat, lastSys.hub.lon) : Infinity;
   lastBaseM = lastSys && lastSys.base ? metres(lat, lon, lastSys.base.lat, lastSys.base.lon) : Infinity;
-  return changed;
+}
+// The last fix, kept across the restarts the phone gives this script each
+// time the watch comes back to the face: a look minutes old still stands,
+// and the watch's own asks near the hub or the yard still know where it was.
+function restoreFix() {
+  try {
+    var f = JSON.parse(localStorage.getItem('hw-fix'));
+    if (f && f.length === 3 && f[2] <= Date.now()) { placeFix(f[0], f[1]); lastLook = f[2]; }
+  } catch (e) { /* none kept */ }
 }
 
 // A walking look near the hub takes a fresh fix once the last one is within
@@ -294,6 +343,7 @@ function look(force, fresh) {
   // Inside a hub's system out of its hours, transit has nothing to ask.
   var transitWants = mode !== MODE_OFF && (force || !(lastSys && lastSys.hub && !hubRunning(lastSys)));
   if (!force && since < LOOK_EVERY) return;
+  hubPrep();   // the hub's timetable, fetched without a fix and wherever the wearer is
   var wx = weatherWanted();
   if (!wx && !transitWants) return;
   navigator.geolocation.getCurrentPosition(function (pos) {
@@ -306,7 +356,7 @@ function look(force, fresh) {
       cdStop = null;
       Pebble.sendAppMessage({ CD_END: 1 });
     }
-    if (wx) weatherAt(pos, force);
+    if (wx) weatherAt(pos, false);
     if (!transitWants) return;
     var st = transitState(lat, lon);
     if (!st) return;
@@ -363,26 +413,33 @@ function stopKept(entry, index) {
   if (!entry) return false;
   return index.v ? entry.v === index.v : Date.now() - entry.at < STOP_TTL;
 }
+var FETCH_WAIT = 8000;
 function fetchJSON(url, cb) {
+  var done = false;
+  function finish(v) { if (!done) { done = true; cb(v); } }
   var req = new XMLHttpRequest();
   req.open('GET', url, true);
   req.onload = function () {
-    if (req.status !== 200) return cb(null);
-    try { cb(JSON.parse(req.responseText)); } catch (e) { cb(null); }
+    if (req.status !== 200) return finish(null);
+    var d = null;
+    try { d = JSON.parse(req.responseText); } catch (e) { /* null it is */ }
+    finish(d);
   };
-  req.onerror = function () { cb(null); };
-  req.timeout = 8000;
-  req.ontimeout = function () { cb(null); };
+  req.onerror = function () { finish(null); };
+  req.timeout = FETCH_WAIT;
+  req.ontimeout = function () { finish(null); };
+  setTimeout(function () { finish(null); }, FETCH_WAIT + 250);   // not every phone honours XHR timeouts
   req.send();
 }
 // The index: the kept one while it's a day old at most, else the network's,
 // else the kept one however old. cb(index, old): old when that last is more
 // than INDEX_OLD past its fetch, so the answer can say its timetable may
-// have changed since.
+// have changed since. fresh: the network's whatever the kept one's age, for a
+// stop file newer than the kept index.
 var INDEX_OLD = 3 * 24 * 60 * 60 * 1000;
-function getIndex(sys, cb) {
+function getIndex(sys, cb, fresh) {
   var key = 'hw2-stops-' + sys.agency.toLowerCase(), entry = kept(key);
-  if (entry && Date.now() - entry.at < INDEX_TTL) return cb(entry.data, false);
+  if (!fresh && entry && Date.now() - entry.at < INDEX_TTL) return cb(entry.data, false);
   fetchJSON(sys.data + 'stops.json', function (d) {
     if (d && d.stops) { remember(key, d); return cb(d, false); }
     cb(entry ? entry.data : null, !!entry && Date.now() - entry.at > INDEX_OLD);
@@ -390,12 +447,13 @@ function getIndex(sys, cb) {
 }
 // A stop's file: the kept one when it answers for this index, else the
 // network's, else, with an index that doesn't say its cut, the kept one
-// however old.
+// however old. A file says which cut it is from (v) and is kept as that, so
+// one newer than the index never passes for the index's own.
 function getStop(sys, index, id, cb) {
   var key = 'hw2-stop-' + sys.agency.toLowerCase() + '-' + id, entry = kept(key);
   if (stopKept(entry, index)) { useKept(key); return cb(entry.data); }
   fetchJSON(sys.data + 'stops/' + id + '.json', function (d) {
-    if (d) { remember(key, d, index.v); useKept(key); return cb(d); }
+    if (d) { remember(key, d, d.v || index.v); useKept(key); return cb(d); }
     cb(entry && !index.v ? entry.data : null);
   });
 }
@@ -424,6 +482,86 @@ function keepNear(sys, lat, lon) {
       getStop(sys, index, st.id, function () { next(); });
     })();
   });
+}
+
+// ---- the hub's timetable from the nightly data, rather than the copy
+// shipped in the app, so a new timetable or a holiday reaches the countdown
+// without a release. The index and the hub's bays' stop files are fetched once
+// a day wherever the wearer is (hubPrep), so asking for them says nothing about
+// where that is; they're kept as a flick's are.
+var hubMemo = {};
+function hubIds(sys, index) {
+  return index.stops.filter(function (st) { return metres(st[1], st[2], sys.hub.lat, sys.hub.lon) <= HUB; })
+    .map(function (st) { return st[0]; });
+}
+function minutesOf(set) {
+  return Object.keys(set || {}).map(Number).sort(function (a, b) { return a - b; });
+}
+// Every departure of a route that mostly leaves with another. A route that
+// always leaves on its own (Connect's 16, at :05 and :50) keeps its own time
+// and isn't the pulse; one that starts the day alone before the rest join it
+// (Saturday's 15 at 9:30) still is. As pulse_of in tools/transit.py.
+function pulseOf(byRoute) {
+  var count = {}, out = {};
+  Object.keys(byRoute).forEach(function (r) {
+    Object.keys(byRoute[r]).forEach(function (m) { count[m] = (count[m] || 0) + 1; });
+  });
+  Object.keys(byRoute).forEach(function (r) {
+    var ms = Object.keys(byRoute[r]);
+    if (2 * ms.filter(function (m) { return count[m] > 1; }).length >= ms.length) ms.forEach(function (m) { out[m] = true; });
+  });
+  return minutesOf(out);
+}
+// The hub's day from what's kept: undefined while any of it is missing or
+// from another cut of the timetable, null on a day with no buses at the hub.
+function hubDay(sys, date) {
+  if (!sys.hub || !sys.data) return undefined;
+  var tag = sys.agency.toLowerCase(), entry = kept('hw2-stops-' + tag), index = entry && entry.data;
+  if (!index || !index.stops || !index.services) return undefined;
+  var memo = tag + '|' + index.v + '|' + ymd(date);
+  if (hubMemo[memo] !== undefined) return hubMemo[memo];
+  var ids = hubIds(sys, index), rows = [];
+  for (var i = 0; i < ids.length; i++) {
+    var file = kept('hw2-stop-' + tag + '-' + ids[i]);
+    if (!index.v || !stopKept(file, index)) return undefined;
+    rows = rows.concat(file.data.deps || []);
+  }
+  var onDay = activeServices(index.services, date);
+  var onEve = activeServices(index.services, new Date(date.getFullYear(), date.getMonth(), date.getDate() - 1));
+  var loops = sys.routes || [], own = {}, others = {};
+  rows.forEach(function (row) {
+    var m = depMinute(row, onDay, onEve);
+    if (m < 0) return;
+    var to = loops.indexOf(row[1]) >= 0 ? own : others;
+    (to[row[1]] = to[row[1]] || {})[m] = true;
+  });
+  var day = { pulse: pulseOf(others), dep: {} }, every = day.pulse;
+  loops.forEach(function (r) { day.dep[r] = minutesOf(own[r]); every = every.concat(day.dep[r]); });
+  day.hours = every.length ? [Math.min.apply(null, every), Math.max.apply(null, every)] : null;
+  return (hubMemo[memo] = day.hours ? day : null);
+}
+// Fetch what hubDay reads: the index once it's a day old, the bays' files
+// when its cut changes; a file newer than the index fetches the index anew.
+var hubFetching = false;
+function hubPrep() {
+  if (hubFetching || hubMode() === MODE_OFF) return;
+  var list = (transit.systems || []).filter(function (sys) { return sys.hub && sys.data; });
+  hubFetching = true;
+  (function nextSys(again) {
+    var sys = again || list.shift();
+    if (!sys) { hubFetching = false; return; }
+    getIndex(sys, function (index) {
+      if (!index || !index.stops) return nextSys();
+      var tag = sys.agency.toLowerCase(), newer = false;
+      var todo = hubIds(sys, index).filter(function (id) { return !stopKept(kept('hw2-stop-' + tag + '-' + id), index); });
+      if (todo.length) console.log('headway: keeping the hub\'s ' + todo.length + ' stops');
+      (function next() {
+        var id = todo.shift();
+        if (id) return getStop(sys, index, id, function (d) { if (d && d.v && index.v && d.v !== index.v) newer = true; next(); });
+        nextSys(newer && !again ? sys : null);
+      })();
+    }, !!again);
+  })();
 }
 
 // A direction word that fits the board's second column: the compass word
@@ -621,15 +759,29 @@ var cdStop = null, CD_GONE = 400;
 // stop than this shows only its seconds. The wearer's to set.
 var CD_RANGE_DEFAULT = 400;
 function cdRange() { return Number(settings().CD_RANGE) || CD_RANGE_DEFAULT; }
-function departures(deps, dayMs, colour) {
+function departures(deps, colour) {
   var out = [], seen = {};
   deps.filter(function (d) { return d.near; }).concat(deps.filter(function (d) { return !d.near; })).forEach(function (d) {
-    var key = d.route + '|' + d.t;
+    var key = d.route + '|' + d.at;
     if (out.length >= CD_MAX || seen[key]) return;
     seen[key] = true;
-    out.push([d.route.slice(0, 7), Math.round(dayMs / 1000) + d.t * 60, colour(d.route) & 0xFFFFFF, d.live ? 1 : 0, dirWord(d.head).slice(0, 9)].join('|'));
+    out.push([d.route.slice(0, 7), d.at, colour(d.route) & 0xFFFFFF, d.live ? 1 : 0, dirWord(d.head).slice(0, 9)].join('|'));
   });
   return out;
+}
+// A timetable's minute as the moment it names. GTFS counts a day's times from
+// noon less twelve hours, not from midnight: the same thing on most days, but
+// on the two a year the clocks change, midnight plus ten hours is 9:00 or
+// 11:00 while the timetable's 10:00 is 10:00.
+function gtfsAt(date, minute) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 12).getTime() / 1000 - 12 * 3600 + minute * 60;
+}
+// A moment as the minute of the day that date starts, as the clock reads it:
+// 600 for 10:00, 1440 and on for the small hours after.
+function clockMinute(at, date) {
+  var d = new Date(at * 1000);
+  var days = Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()) - new Date(date.getFullYear(), date.getMonth(), date.getDate())) / 86400000);
+  return days * 1440 + d.getHours() * 60 + d.getMinutes();
 }
 // quiet: the watch asked again near the end, not a flick; nothing lights.
 function sendList(name, dist, list, liveSys, at, quiet) {
@@ -639,11 +791,15 @@ function sendList(name, dist, list, liveSys, at, quiet) {
   cdStop = list.length && at ? at : null;
   sendAnswer(msg);
 }
-// Nothing to answer: the countdown ends, unless the phone simply got no fix.
-function sendNothing(keep) {
-  console.log('headway: ' + (keep ? 'no fix; the last answer stands' : 'nothing to answer'));
+// Nothing to answer: the countdown ends, unless the phone simply got no fix
+// or no timetable (keep). quiet: for the watch's own re-check, which lights
+// nothing.
+function sendNothing(keep, quiet) {
+  console.log('headway: ' + (keep ? 'nothing new; the last answer stands' : 'nothing to answer') + (quiet ? ' (again)' : ''));
   if (!keep) cdStop = null;
-  sendAnswer(keep ? { SV_N: 0, SV_KEEP: 1 } : { SV_N: 0 });
+  var msg = keep ? { SV_N: 0, SV_KEEP: 1 } : { SV_N: 0 };
+  if (quiet) msg.SV_QUIET = 1;
+  sendAnswer(msg);
 }
 
 // At the hub the answer is by time, not by route: a line a departure minute,
@@ -789,18 +945,18 @@ function tripsSoon(stops, services, now, nowMin) {
 }
 
 // A flick's answer from its departures, whoever's timetable they come
-// from: deps by time, each {t, route, head, live, near, sid}; dayMs the
-// midnight of the day they're on; best the nearest stop; liveSys whether
-// the system has live times; quiet for a re-check the watch asked for.
+// from: deps by time, each {at (epoch seconds), t, route, head, live, near,
+// sid}; best the nearest stop; liveSys whether the system has live times;
+// quiet for a re-check the watch asked for.
 function answerStop(o) {
   // Within the fix's own accuracy of the stop, the wearer may well be at it.
   var dist = o.best.d <= Math.max(HERE_M, o.reach) ? 0 : o.best.d;
   if (o.best.d > cdRange()) {
     console.log('headway: nearest stop ' + Math.round(o.best.d) + ' m off, past the range of ' + cdRange());
-    return sendNothing(false);
+    return sendNothing(false, o.quiet);
   }
-  var list = departures(o.deps, o.dayMs, o.colour);
-  if (!list.length) return sendNothing(false);
+  var list = departures(o.deps, o.colour);
+  if (!list.length) return sendNothing(false, o.quiet);
   sendList(o.title, dist, list, o.liveSys, { lat: o.best.lat, lon: o.best.lon }, o.quiet);
 }
 
@@ -862,8 +1018,7 @@ function anyRoute(st) {
 function flickAnywhere(pos) {
   var lat = pos.coords.latitude, lon = pos.coords.longitude;
   var reach = Math.min(Math.max(pos.coords.accuracy || 0, 0), MAX_REACH);
-  var now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes();
-  var midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  var now = new Date();
   console.log('headway: asking Transitous');
   askAnywhere('center=' + lat.toFixed(3) + ',' + lon.toFixed(3) + '&radius=' + ANY_RADIUS + '&n=' + ANY_N, function (got) {
     if (!got || !got.length) return sendNothing(false);
@@ -904,21 +1059,21 @@ function flickAnywhere(pos) {
       ranked.forEach(function (st) {
         if (near[st.id] || st.d <= best.d + reach) group[st.id] = true;
       });
-      // Today's departures; when there are none, the first day ahead with
-      // any, with its word, as for the face's own systems.
-      var deps = [], dayWord = '';
+      // Today's departures from the minute just gone; when there are none,
+      // those of the first day ahead with any, as for the face's own systems.
+      // Transitous gives each as a moment, which the watch counts to as it is.
+      var deps = [], fromAt = Math.floor(now.getTime() / 60000) * 60 - 60;
       all.sort(function (a, b) { return a.ms - b.ms; });
-      var first = all.filter(function (d) { return group[d.sid] && Math.floor((d.ms - midnight) / 60000) >= nowMin - 1; })[0];
-      var ahead = first ? Math.max(0, Math.floor((first.ms - midnight) / 86400000)) : 0;
+      var first = all.filter(function (d) { return group[d.sid] && d.ms >= fromAt * 1000; })[0];
+      var day = first ? ymd(new Date(first.ms)) : '';
       all.forEach(function (d) {
-        var t = Math.floor((d.ms - midnight) / 60000) - ahead * 1440;
-        if (!group[d.sid] || t < (ahead ? 0 : nowMin - 1) || t >= 1440) return;
-        deps.push({ t: t, route: d.route, head: d.head, live: d.live, near: !!near[d.sid], sid: d.sid });
+        var at = Math.floor(d.ms / 60000) * 60;
+        if (!group[d.sid] || at < fromAt || ymd(new Date(d.ms)) !== day) return;
+        deps.push({ at: at, route: d.route, head: d.head, live: d.live, near: !!near[d.sid], sid: d.sid });
       });
       if (!deps.length) return sendNothing(false);
-      if (ahead) dayWord = ahead === 1 ? 'TOMORROW' : ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'][new Date(first.ms).getDay()];
-      deps.sort(function (a, b) { return a.t - b.t || (a.route < b.route ? -1 : a.route > b.route ? 1 : 0); });
-      answerStop({ deps: deps, dayMs: midnight + ahead * 86400000, title: byId[best.id].name, best: best, reach: reach,
+      deps.sort(function (a, b) { return a.at - b.at || (a.route < b.route ? -1 : a.route > b.route ? 1 : 0); });
+      answerStop({ deps: deps, title: byId[best.id].name, best: best, reach: reach,
         liveSys: false, colour: function (r) { return colours[r] || 0x888888; } });
     }
     take(got);
@@ -960,15 +1115,17 @@ function onCdCheck() {
   lastAnswer = null;
   answerAt(lastFix, true);
 }
-function answerAt(pos, quiet) {
+// again: answering anew with a fresh index, once, for stop files newer than
+// the one kept.
+function answerAt(pos, quiet, again) {
     var lat = pos.coords.latitude, lon = pos.coords.longitude;
     var sys = systemAt(lat, lon);
     // Outside every system the face knows, Transitous answers, if the
     // wearer has turned it on; never by default.
-    var elsewhere = function () { return !quiet && anywhere() ? flickAnywhere(pos) : sendNothing(quiet); };
+    var elsewhere = function () { return !quiet && anywhere() ? flickAnywhere(pos) : sendNothing(quiet, quiet); };
     if (!sys || !sys.data) return elsewhere();
     getIndex(sys, function (index, old) {
-      if (!index) return sendNothing(true);
+      if (!index) return sendNothing(true, quiet);
       Object.keys(index.routes || {}).forEach(function (r, i) { routeRank[r] = i; });
       var ranked = index.stops.map(function (st) {
         return { id: st[0], d: metres(lat, lon, st[1], st[2]), lat: st[1], lon: st[2], station: st[3] };
@@ -988,13 +1145,13 @@ function answerAt(pos, quiet) {
       // now, and answers nothing itself.
       if (sys.base && metres(lat, lon, sys.base.lat, sys.base.lon) <= sys.base.r) {
         if (!quiet) yardTick(true);
-        return sendNothing(false);
+        return sendNothing(false, quiet);
       }
       // A stop further off than the range isn't the wearer's: nothing to
       // count to, and a countdown left from one that was ends.
       if (!atHub && best.d > cdRange()) {
         console.log('headway: nearest stop ' + Math.round(best.d) + ' m off, past the range of ' + cdRange());
-        return sendNothing(false);
+        return sendNothing(false, quiet);
       }
       // The answer is the nearest stop's buses, at it or on the way to it.
       var group = atHub
@@ -1007,23 +1164,38 @@ function answerAt(pos, quiet) {
         if (atHub || metres(best.lat, best.lon, st.lat, st.lon) <= TWIN || (best.station && st.station === best.station)) near[st.id] = true;
       });
       var now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes();
-      var midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      var nowAt = Math.floor(now.getTime() / 60000) * 60;   // this minute, in epoch seconds
       var byFeed = sys.liveBy === 'feed', feed = null, live = null;
-      var left = group.length, name = atHub ? sys.hub.name : '', stops = [];
+      var left = group.length, name = atHub ? sys.hub.name : '', stops = [], dropped = false;
       // The live answer is asked for alongside the schedule. The schedule
       // never waits on it: the timetable goes to the watch as soon as the
       // stop files are in, and a live answer that comes inside LIVE_WAIT
       // redraws it, if it changes anything.
-      var gotLive = function () { if (!left && (feed || live)) answer(); };
+      var gotLive = function () { if (!left && !dropped && (feed || live)) answer(); };
       if (byFeed) askLive(sys.live, true, function (buf) { feed = buf; gotLive(); });
       else getLive(sys, group.map(function (st) { return st.id; }), function (l) { live = l; gotLive(); });
       group.forEach(function (st) {
         getStop(sys, index, st.id, function (stop) {
           // The board goes by the nearest stop's name, whichever file comes first.
           if (stop) { if (!atHub && (!name || st.id === best.id)) name = stop.name; stop.id = stop.id || st.id; stops.push(stop); }
-          if (!--left) answer();
+          if (!--left) settled();
         });
       });
+      // A stop file from a newer cut of the timetable than the kept index
+      // (the nightly data has moved on since the index was fetched) names
+      // services the index may not: fetch the index anew and answer from the
+      // start, once. If the network's is no newer, the files are used as
+      // they are.
+      function settled() {
+        if (again || !index.v || !stops.some(function (s) { return s.v && s.v !== index.v; })) return answer();
+        dropped = true;
+        console.log('headway: stop files newer than the index; fetching it anew');
+        getIndex(sys, function (fresh) {
+          if (fresh && fresh.v && fresh.v !== index.v) return answerAt(pos, quiet, true);
+          dropped = false;
+          answer();
+        }, true);
+      }
       // Once the answer and its live word are in, the stops around are kept
       // for the next flick.
       if (!quiet) setTimeout(function () { keepNear(sys, lat, lon); }, LIVE_WAIT + 1000);
@@ -1041,12 +1213,12 @@ function answerAt(pos, quiet) {
           // in, and the watch reads it as NOW.
           var onDay = activeServices(index.services, date);
           var onEve = activeServices(index.services, new Date(date.getFullYear(), date.getMonth(), date.getDate() - 1));
-          var from = ahead ? 0 : nowMin - 1;
+          var from = ahead ? 0 : nowAt - 60;
           stops.forEach(function (stop) {
             (stop.deps || []).forEach(function (row) {
               var m = depMinute(row, onDay, onEve);
               if (m < 0) return;
-              var dep = [m, row[1], row[2], row[3]];
+              var dep = [gtfsAt(date, m), row[1], row[2], row[3]];
               // Today's departures take the live prediction for this trip
               // at this stop where there is one. A stop the bus will skip
               // drops out; at the hub a bus is held to its time, never
@@ -1073,22 +1245,22 @@ function answerAt(pos, quiet) {
               if (!at && seen === 1) at = once;
               if (at) {
                 if (at[3] === 1) return;
-                var p = Math.floor((at[2] * 1000 - midnight) / 60000);
+                var p = Math.floor(at[2] / 60) * 60;
                 // A bus still listed at its hub bay after the feed's time for
                 // it is still there, boarding: it leaves now, not already. For
                 // ten minutes past its time on a loop, thirty on a route: a
                 // listing older than that is the feed's leftover, not a bus.
                 var past = now.getTime() - at[2] * 1000;
-                var boarding = past > 30000 && past < ((sys.routes || []).indexOf(dep[1]) >= 0 ? 600000 : 1800000) ? nowMin : -1;
+                var boarding = past > 30000 && past < ((sys.routes || []).indexOf(dep[1]) >= 0 ? 600000 : 1800000) ? nowAt : -1;
                 t = atHub ? Math.max(t, p, boarding) : p; isLive = true;
               }
-              if (t >= from) deps.push({ t: t, route: dep[1], head: dep[2], live: isLive, near: !!near[stop.id], sid: stop.id });
+              if (t >= from) deps.push({ at: t, t: clockMinute(t, date), route: dep[1], head: dep[2], live: isLive, near: !!near[stop.id], sid: stop.id });
             });
           });
           if (deps.length && ahead) dayWord = ahead === 1 ? 'TOMORROW' : ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'][date.getDay()];
         }
         // Ties in route order, never in whichever file happened to load first.
-        deps.sort(function (a, b) { return a.t - b.t || byRoute(a.route, b.route); });
+        deps.sort(function (a, b) { return a.at - b.at || byRoute(a.route, b.route); });
         // A timetable kept from days ago, with no network to check it, says so
         // first: the stop's name keeps its first words however it's cut.
         var title = old && name ? 'OLD ' + name : name;
@@ -1096,12 +1268,14 @@ function answerAt(pos, quiet) {
         // the one thing it can't say, which buses are in, and with no live
         // word says nothing. Either way a stop's countdown ends there.
         if (atHub) {
+          // The watch's re-check is for a stop's countdown; at the hub it has none.
+          if (quiet) return sendNothing(true, true);
           var inNow = routesIn(group, live, stops);
           if (!inNow) return sendNothing(false);
           // onDay: the services of the day these departures are from.
           return sendWaves(title, hubChips(deps, dayWord, index, stops, inNow, sys.routes, onDay));
         }
-        answerStop({ deps: deps, dayMs: date.getTime(), title: title, best: best, reach: reach,
+        answerStop({ deps: deps, title: title, best: best, reach: reach,
           liveSys: !!sys.live, quiet: quiet, colour: function (r) { return routeColour(index, r); } });
       }
     });
@@ -1124,9 +1298,16 @@ Pebble.addEventListener('appmessage', function (e) {
   else if (e.payload && e.payload.YARD) { console.log('headway: yard asked by the watch'); yardTick(false); }
 });
 
-Pebble.addEventListener('ready', function () { look(true); });
+// The phone starts this script each time the watch comes back to the face.
+// A look taken minutes ago still stands: the watch keeps what it was told.
+var READY_FRESH = 5 * 60 * 1000;
+Pebble.addEventListener('ready', function () {
+  hubPrep();
+  look(Date.now() - lastLook > READY_FRESH);
+});
 Pebble.addEventListener('webviewclosed', function () {
   // Settings may have switched weather or transit on, or changed units.
+  fetched(0);
   setTimeout(function () { look(true); }, 500);
 });
 setInterval(function () { look(false); }, 5 * 60 * 1000);
@@ -1172,13 +1353,12 @@ function yardLook(live, w) {
 // [start, until] in epoch seconds around now, or null outside it.
 function yardWindow(index, now) {
   var ends = index.ends || [];
-  var midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000;
   var cands = [];
   [0, -1].forEach(function (back) {
     var day = new Date(now.getFullYear(), now.getMonth(), now.getDate() + back);
     var on = activeServices(index.services, day), end = -1;
     Object.keys(on).forEach(function (i) { if (on[i] && ends[i] > end) end = ends[i]; });
-    if (end >= 0) cands.push(midnight + (back * 1440 + end) * 60);
+    if (end >= 0) cands.push(gtfsAt(day, end));
   });
   var t = now.getTime() / 1000;
   for (var i = 0; i < cands.length; i++) {
@@ -1191,13 +1371,13 @@ function yardWindow(index, now) {
 // minutes, while the phone was last seen near the yard. A message from the
 // watch wakes the phone's script where its own timer may be held back.
 function yardAhead(index, now) {
-  var ends = index.ends || [], midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000;
+  var ends = index.ends || [];
   var t = now.getTime() / 1000, best = null;
   [-1, 0].forEach(function (back) {
     var day = new Date(now.getFullYear(), now.getMonth(), now.getDate() + back);
     var on = activeServices(index.services, day), end = -1;
     Object.keys(on).forEach(function (i) { if (on[i] && ends[i] > end) end = ends[i]; });
-    var start = midnight + (back * 1440 + end) * 60;
+    var start = gtfsAt(day, end);
     if (end >= 0 && t < start + YARD_HOUR * 60 && !best) best = { start: start, until: start + YARD_HOUR * 60 };
   });
   return best;
@@ -1259,3 +1439,6 @@ function yardOff() {
   if (yard.told !== null && yard.told !== '{"YD_OUT":-1}') tellYard({ YD_OUT: -1 });
 }
 setInterval(function () { yardTick(false); }, 60 * 1000);
+
+// Last, once everything it sets is declared: where the last look found the wearer.
+restoreFix();

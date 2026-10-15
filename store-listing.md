@@ -30,6 +30,19 @@ from transitous.org/sources and OpenStreetMap.
 The weather service gets your location rounded to about 100 m; otherwise
 it stays on your phone. No accounts. Round watches aren't supported.
 
+## Release notes (1.33.0)
+
+At the transit centre the countdown keeps to the timetable: the next minute
+the routes leave together, worked out each day from the agency's calendar,
+holidays and all, rather than from the headway setting. It can no longer run
+early under a departure offset left over in settings, and it rests after the
+last departure instead of counting to one that never comes. On the two
+mornings a year the clocks change, a stop's countdown keeps the timetable's
+own times. A flick just after the nightly timetable changes no longer finds a
+stop with no buses. The plain face no longer wakes every second for a minute
+on the half hour, and coming back to the face no longer takes a new location
+if one was taken minutes ago.
+
 ## Release notes (1.32.1)
 
 A flick is felt as a tap and its snap-back; the two now count as one, so one

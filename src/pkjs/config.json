@@ -349,7 +349,7 @@
         "type": "select",
         "messageKey": "HEADWAY",
         "label": "Headway",
-        "description": "Minutes between departures.",
+        "description": "Minutes between departures, for the countdown everywhere. At a transit centre the face knows, the countdown follows its timetable instead.",
         "defaultValue": "30",
         "options": [
           {
@@ -370,7 +370,7 @@
         "type": "slider",
         "messageKey": "OFFSET",
         "label": "Departure offset",
-        "description": "Minutes past the hour of the first departure. The rest follow every headway.",
+        "description": "Minutes past the hour of the first departure, for the countdown everywhere. The rest follow every headway.",
         "defaultValue": 0,
         "min": 0,
         "max": 29,
