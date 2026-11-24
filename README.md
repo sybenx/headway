@@ -1,16 +1,16 @@
 # Headway
 
-A Pebble watchface that reads past a sleeve, and knows when you are near a
-bus. Most of the day it is a plain watch: the time, your heart rate and the
-weather, the date. Walk into a transit centre it knows and it becomes a
-countdown to the next departure. Flick your wrist at a stop and it counts
-down to the next bus from there.
+A Pebble watchface with transit countdowns. By default it shows the time,
+heart rate, weather and date. Inside a transit centre it has data for, it
+shows a countdown to the next departure. A wrist flick at a stop shows the
+countdown to the next bus from that stop. The layout is anchored to the
+outer edge of the screen so that it stays readable under a sleeve cuff.
 
 | the watch | at the transit centre | a flick at a stop |
 |---|---|---|
 | ![the watch](screenshots/hero.png) | ![at the hub](screenshots/hub.png) | ![a stop's countdown](screenshots/stop.png) |
 
-## Read past a sleeve
+## Layout under a sleeve
 
 A cuff slides in from the wrist side and uncovers the outer edge first, so
 everything on the face hangs from that edge in order of how much you need
@@ -23,7 +23,7 @@ a countdown the edge is bare, until a flick: then a hairline down it drains
 for as long as the flick's answer stays. On the right wrist the whole layout
 mirrors.
 
-## Out of the box
+## Default face
 
 The time, two modules and the date. The modules are heart rate and the
 weather, drawn as icons in colour: the heart red, the sun yellow by night and
